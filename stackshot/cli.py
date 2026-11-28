@@ -5,6 +5,7 @@
                              install the systemd units, and print the two URIs the Google client and claude.ai need
   stackshot doctor           check the instance and start the server once its OAuth client is filled in; on another
                              machine (no oauth.env, no stackshot.service), check only its client
+  stackshot autonomy PERSON KIND   print the person's level for a kind of action (auto, when-told, ask-first, hand-on); exit 0, 10, 11, 12
   stackshot client install   store a machine token, start the puller and add the four Claude Code hooks
   stackshot client mint NAME mint a token for another machine (on the server box); prints the token file's path
 
@@ -1015,6 +1016,25 @@ def cmd_client_mint(a: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------- autonomy
+AUTONOMY_EXIT = {"auto": 0, "when-told": 10, "ask-first": 11, "hand-on": 12}
+
+
+def cmd_autonomy(a: argparse.Namespace) -> int:
+    """Print the level of one kind of action for one person (core/autonomy.py `level`, the one reader) and exit with its code:
+    0 auto, 10 when-told, 11 ask-first, 12 hand-on. A config that does not load, an unknown person or kind and a missing file all read hand-on.
+    Read only: nothing here writes the profile."""
+    try:
+        from stackshot.core import autonomy
+        word = autonomy.level(a.person, a.kind)
+    except (Exception, SystemExit):
+        word = "hand-on"
+    if word not in AUTONOMY_EXIT:
+        word = "hand-on"
+    say(word)
+    return AUTONOMY_EXIT[word]
+
+
 # ---------------------------------------------------------------------------- the programs of the package
 # `stackshot <program> ...` runs the module as `python3 -m` would, with the arguments after the program's name. No program has a path at the checkout's root.
 PROGRAMS = {
@@ -1121,6 +1141,15 @@ def setup_main(argv: list[str]) -> int:
                                    "token, the server's whoami for it, lingering and the puller when its unit is installed, and the hooks.")
     d.add_argument("--no-systemd", action="store_true", help="skip the unit checks and the start")
     d.set_defaults(fn=cmd_doctor)
+
+    au = sub.add_parser("autonomy", help="print a person's level for one kind of action (read only); the exit code carries it",
+                        description="Print the level of KIND for PERSON from the autonomy profile (paths.autonomy): auto, when-told, ask-first or "
+                                    "hand-on. Exit 0 for auto, 10 for when-told, 11 for ask-first, 12 for hand-on, which is also what an "
+                                    "unknown person or kind, a missing file and a config that does not load read; 2 for a usage error. "
+                                    "Read only: it never writes the profile.")
+    au.add_argument("person", help="the member's name or alias")
+    au.add_argument("kind", help="the kind of action, e.g. release")
+    au.set_defaults(fn=cmd_autonomy)
 
     c = sub.add_parser("client", help="this machine's client: install, or mint a token for another machine",
                        description="install: store a token, start the puller, add the hooks · mint NAME: a token for another machine")
