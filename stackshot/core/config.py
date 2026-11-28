@@ -709,9 +709,24 @@ def release_deploy_ssh() -> str:
     """[release] deploy_ssh: the ssh host (an alias of ~/.ssh/config, or [user@]host) release.sh runs deploy.sh on, over `ssh -o BatchMode=yes <host>`, in the checkout `~/stackshot` there, for the box that runs release.sh
     while the server runs on another box. After a deploy there release.sh moves its own checkout to the same commit (a fast-forward, or a reset for a rollback) and restarts only the puller; a checkout that cannot follow (local changes) pauses the release queue and reports the release red. "" (the default) = the deploy runs
     here, as on a one-box install. A value that names this box (its own name, short name or a loopback name or address; a host word that resolves to it) reads as "" too: the box that runs release.sh is the one
-    the deploy runs on already. release.sh checks the value is a host name and refuses the deploy otherwise."""
-    why, h = _server_host_decision()
-    return h if why or not h else ""
+    the deploy runs on already, unless the value has a user@ part that is not the user running release.sh (then the deploy goes over ssh as that user). `~/.ssh/config` is not read for this: this box's name wins over an ssh alias spelled the same. A value that cannot be checked (the
+    agentbox check fails to import or run) is kept: the deploy goes over ssh rather than locally. release.sh checks the value is a host name and refuses the deploy otherwise."""
+    try:
+        why, h = _server_host_decision()
+    except Exception:
+        h = get("release", "deploy_ssh")
+        return h.strip() if isinstance(h, str) and h.strip() else ""
+    if why:
+        return h
+    if h and "@" in h:
+        import getpass
+        try:
+            me = getpass.getuser()
+        except Exception:
+            return h
+        if h.rsplit("@", 1)[0] != me:
+            return h
+    return ""
 
 
 def _server_host_decision(cfg: dict[str, Any] | None = None) -> tuple[str, str]:
@@ -1632,6 +1647,15 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
             ok = False
         if not ok:
             out.append(f"[front] result_turn_hours = {repr(fh)[:60]} is not a number above 0, so 24 hours is used: set a number of hours above 0")
+    ft = get("front", "to_background_senders", cfg=cfg)
+    if ft is not None and not isinstance(ft, list):
+        out.append(f"[front] to_background_senders = {repr(ft)[:60]} is not a list of front agent names, so no agent is listed and nothing changes: write to_background_senders = [\"my-front-agent\"]")
+    elif isinstance(ft, list) and any(not isinstance(x, str) or not x.strip() for x in ft):
+        bad_ = [x for x in ft if not isinstance(x, str) or not x.strip()]
+        out.append(f"[front] to_background_senders has {len(bad_)} entr{'y' if len(bad_) == 1 else 'ies'} that {'is' if len(bad_) == 1 else 'are'} no front agent name ({', '.join(repr(x)[:40] for x in bad_[:5])}), ignored: the names that are valid stay listed")
+    fi = get("front", "idle_peers_to_background", cfg=cfg)
+    if fi is not None and not isinstance(fi, bool):
+        out.append(f"[front] idle_peers_to_background = {repr(fi)[:60]} is not true or false, so it stays off and nothing changes: write idle_peers_to_background = true to turn it on")
     fc = get("front", "result_turn_cap_per_hour", cfg=cfg)
     if fc is not None and (not isinstance(fc, int) or isinstance(fc, bool) or fc < 0):
         out.append(f"[front] result_turn_cap_per_hour = {repr(fc)[:60]} is not a whole number from 0, so 6 is used: set a whole number (0 turns the case off)")
