@@ -22,7 +22,6 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
-from stackshot.model import step_commands as _steps
 from stackshot.model.ids import _ITEM_REF, _norm_id, _plain_text, _without_mq_groups
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_of, _needs_sessions, _needs_store
 from stackshot.service import handoff as _handoff
@@ -39,7 +38,8 @@ from stackshot.waits import held as _held
 # the moments it already sees, so the item page shows what is in motion without a survey. (1) A handover: a message through the
 # message tool, or a SendMessage a box's PostToolUse hook reports (pages.py touch → POST /client/handover), that goes to a background
 # agent and names an open item names that agent in the item's needs. (2) Work on the item: an update or a close by a background agent
-# not named in its needs names it first, so the record shows the agent, then its change. Only background agents (a hub page's
+# not named in its needs names it first, so the record shows the agent, then its change (an update on an item that is on the
+# owner's move and stays there names nobody: service/update.py takes the naming back). Only background agents (a hub page's
 # `background:` entries, anchors.session_roles "back") are named: a front agent, a keeper or a session no page names never. The
 # needs rules hold: decision and external stay first (_canon_needs), so a needs=decision item keeps its lane; the named session's
 # lane and turn-end check follow as for a name written by hand. Nothing is ever removed: a session already named stays, and the
@@ -194,7 +194,8 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
     hears nothing extra). `item` is the write in flight, `meta` its metadata: the naming is carried into `meta` at once, so the gates on who may
     write (a step status) read the agent as a named session. Nothing is stored here: the returned function stores the naming (the server's own
     save, and the mover's notice) and the caller runs it just before the write's own save, so a write a later gate refuses leaves the item exactly
-    as it was, the needs list included. Nothing on a closed item (`was`), on a write that names the agent itself, or without a sender; nothing on a write
+    as it was, the needs list included. The update takes the naming back and never calls the function when the item was on the owner's move and the write
+    leaves it there (service/update.py, judged on the item as the write leaves it). Nothing on a closed item (`was`), on a write that names the agent itself, or without a sender; nothing on a write
     that is not plain work (`plain` false: it sets needs itself, `none` included, parks the item with hold or wake, sets or
     clears a recycle, or is filing only, service/update.py's _FILING_ONLY: a page rename's update(project=<new key>) did no work on the item), since such a
     write says where the move is, or none was made, and naming the agent would undo it or invent it. → the function that stores the naming and returns the reply line, or ""."""
@@ -212,31 +213,9 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
     if _never_named(agent, nm):
         return nothing
     why = f"{'close' if closing else 'update'} by {_sr._session_label(sender)}"
-    if not closing and _steps.owner_facing({"status": "open", "metadata": meta}):
-        # his move (a decision needed, him as mover, or his step or call): the agent is not named in needs, since it would be a second mover
-        # beside his decision. Where the answer or Done goes does not change: a session already in needs keeps that place; with none and no
-        # `then`, the agent takes `then` (stored here, saved with the write), which is what the naming gave it before. With a stored mover that is
-        # an agent (not him) no `then` is stored either: the answer reads a stored `then` first (answer_handover), so storing one would change who
-        # has the item after it; without one the answer's own rules decide, as for an item the agent never wrote to.
-        mover = _model.norm_who(meta.get("mover"))
-        if _needs_sessions(meta) or _model.norm_who(meta.get("then")) or (mover and not _model.is_owner(mover)):
-            return nothing
-        meta["then"] = _sr._store_ref(agent)
-        return lambda: f"\n(then {_sr._session_label(agent) or agent}: the agent doing the work takes it after {_model.owner_display(meta)}'s answer or step)"
     if not closing:
         _needs_store(meta, _canon_needs([*_needs_of(meta), _sr._store_ref(agent)], nm))
     return lambda: _auto_name(gid, _svcstore._load(gid), agent, sender, why, "" if closing else "after its update", nm)
-
-
-def _writer_named_back(sender: str, was: str, plain: bool, closing: bool) -> bool:
-    """Would the server name this write's sender in the item's needs on this write (the naming of _name_on_write, which on his move no longer adds
-    it there): a background agent that is not in [pilot] never_named, on an open item, on plain work, not a close. A step status (work) by such an
-    agent passes the writer gate as it did when the naming put it in needs; front agents, unknown senders and never_named ones do not pass. → True or False."""
-    if closing or was != "open" or not plain:
-        return False
-    sender = str(sender or "").strip()
-    agent = _back_agent(sender) if sender else ""
-    return bool(agent) and not _never_named(agent)
 
 
 def _router_delivered(target: str, text: str, outcome: str) -> str:

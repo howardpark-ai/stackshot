@@ -814,7 +814,7 @@ check("7 second mover: a background agent's write that the server names into nee
 # write by anyone else (a background agent of the project is never a second mover)
 item(43, needs=["decision"], ask=ASK)
 _update_svc._update("a43", sender=BACK, next="team-back: carry on")
-check("7 second mover: …a background agent's plain write on an item waiting on him leaves needs as it was, and the agent is the then", mt(43)["needs"] == ["decision"] and mt(43).get("then") == BACK, mt(43))
+check("7 second mover: …a background agent's plain write on an item waiting on him leaves needs as it was and stores no then", mt(43)["needs"] == ["decision"] and "then" not in mt(43), mt(43))
 item(43, needs=["decision", BACK], ask=ASK)                                                    # an item that already names both
 upd(43, wake=day(2))
 check("7 second mover: …and a front agent's later wake on such an item passes (the background agent in needs is no second mover)", wk_(mt(43)) == day(2), mt(43))

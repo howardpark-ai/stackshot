@@ -128,7 +128,6 @@ class Hooks:
     model_of: Callable[..., Any]
     nag: Callable[..., Any]
     name_on_write: Callable[..., Any]
-    writer_named_back: Callable[..., Any]
     next_put: Callable[..., Any]
     owed_mark: Callable[..., Any]
     owner_quote_on: Callable[..., Any]
@@ -865,8 +864,7 @@ def update_unlocked(
                              fields=["work"], stored=work_spec["text"], sent=str(work))
             work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
             work_writer = _session_label(h.session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
-            fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing,
-                    h.writer_named_back(sender.strip(), str(item.get("status") or ""), plain, status == "completed"))      # the needs list as this call leaves it; a background agent the server names passes (on his move it is not added to needs)
+            fc.call(_gates.gate_work_writer, gid, work_writer, _telling.holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
             if work_spec.get("agent"):
                 work_spec["agent"] = _session_label(h.session_id(work_spec["agent"]))
             work_who = work_spec.get("agent") or work_writer
@@ -1364,6 +1362,7 @@ def update_unlocked(
     if (needs_set or agent.strip()) and "mover" not in model_set and "mover" not in model_drop and _old_holder_goes(meta):    # a hand-off by needs moves the item: a stored mover that is not among the sessions now named is the old holder, so it goes
         meta.pop("mover", None)
     needs_replaced: list[str] = []      # the session this write put into `needs` in place of the mover it came from: it hears the hand-off notice, not a second "now needs you"
+    swapped_naming: list[str] = []      # of those, the one that took the place of the server's own naming of the writer, and so goes when that naming does (below)
     if "mover" in model_set and not alias_picker and not (needs_set or agent.strip() or clear_needs):      # a hand-over by `mover=` alone: the session `needs` names for the mover it came from is replaced by the new one, so a hand-back leaves no stale entry (a write that sets `needs` itself is taken as given)
         prev_mv, new_mv = _model.norm_who(meta.get("mover")), _model.norm_who(model_set.get("mover"))
         nm_now = _anc.names()
@@ -1371,6 +1370,8 @@ def update_unlocked(
             is_prev = lambda x: x.lower() not in _NEEDS_KINDS and _anc.canonical(x, nm_now) == _anc.canonical(prev_mv, nm_now)      # noqa: E731
             held = _needs_of(meta)
             if any(is_prev(x) for x in held):
+                if all(x in naming_added for x in held if is_prev(x)) and not any(_anc.canonical(x, nm_now) == _anc.canonical(new_mv, nm_now) for x in held):
+                    swapped_naming.append(new_mv)
                 _needs_store(meta, _canon_needs([new_mv if is_prev(x) else x for x in held], nm_now))
                 needs_replaced.append(new_mv)
     picker_waited = was_until or _model.waits_stored(item_was.get("metadata") or {})      # the item waited before this write: only then does the old pick-up stand for keep_picker (an alive item's mover is its live mover, a stale old key never beats it)
@@ -1503,6 +1504,16 @@ def update_unlocked(
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
+        if naming_added and _sc.owner_facing(item_was):
+            # An item that was on the owner's move and stays there takes no naming of the writer: `needs`, `then` and the reply are as for a session the server never names. The naming stood in
+            # `meta` until here for the gates on who may write. Whether the item stays his is read after the mover step, tried on a copy; a write that takes it off his move keeps the naming.
+            trial = json.loads(json.dumps(meta))
+            h.owner_state_mover({**item, "metadata": trial}, trial, mover_named, item_was)
+            if _sc.owner_facing({**item, "metadata": trial}):
+                _needs_store(meta, [x for x in _needs_of(meta) if x not in [*naming_added, *swapped_naming]])
+                needs_replaced[:] = [x for x in needs_replaced if x not in swapped_naming]
+                before["needs"] = [x for x in before["needs"] if x not in naming_added]
+                naming_added, name_commit = [], lambda: ""
         item_now = {**item, "metadata": meta}
         if done_ix and steps_on and _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N4: while the item, as this write leaves it, waits on him, only his answer ticks his step (a call that also ends what asks him is no refusal: it withdraws the ask and the step goes with it)
             _why = _hs.refuse_done(steps_old, done_ix, _hs.recorded(item_was.get("metadata") or {}), h.owner_want(meta), item_was.get("metadata") or {})

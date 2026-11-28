@@ -580,7 +580,6 @@ def install_late() -> None:
         model_of=_late_in(_item_read, "_model_of"),
         nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
         name_on_write=_late_in(_agent_names, "_name_on_write"),
-        writer_named_back=_late_in(_agent_names, "_writer_named_back"),
         next_put=_late_in(_asks, "_next_put"),
         owed_mark=_late_in(_pdebts, "_owed_mark"),
         owner_quote_on=_late_in(_owner_words, "_owner_quote_on"),

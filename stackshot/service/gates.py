@@ -497,16 +497,15 @@ def gate_tell_him(names: Any, said_l: list[dict[str, Any]]) -> list[str]:
     return gate_observers(names)
 
 
-def gate_work_writer(gid: str, writer: str, owner: str, meta: dict[str, Any], finishing: bool = False, named_back: bool = False) -> None:
+def gate_work_writer(gid: str, writer: str, owner: str, meta: dict[str, Any], finishing: bool = False) -> None:
     """a step's status (work) is written by the item's mover (`owner` here) or a session named in its needs; anyone else is refused with the way in.
     A name or an id on either side; the needs list is read as the call leaves it. `finishing`: the writer finishes its own step
-    (_finishes_own_line), which needs no naming in needs, so it passes without it. `named_back`: the server names this writer on this write (a background
-    agent, _agent_names._writer_named_back), which passes as a named session does; on his move the naming no longer adds it to needs, so the flag says so."""
+    (_finishes_own_line), which needs no naming in needs, so it passes without it."""
     h = _hooks()
     nm = _anc.names()
     me = _anc.canonical(writer, nm)
     same = lambda x: bool(x) and (x == writer or _anc.canonical(x, nm) == me)
-    if finishing or named_back or same(owner) or any(same(s) for s in _needs_sessions(meta)):
+    if finishing or same(owner) or any(same(s) for s in _needs_sessions(meta)):
         return
     named = ", ".join(h.shown_ref(x) for x in _needs_sessions(meta)) or "none named"
     raise ToolError(f"Refused: the status of a step on {_gh.shown(gid)} is written by its mover ({_session_label(owner) or 'none'}) or a session named in its needs ({named}); "
