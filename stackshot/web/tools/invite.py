@@ -49,7 +49,8 @@ def _registered(address: str, s: _invites.Settings, admin: str) -> str:
         first = f"{address} is already registered on board {s.board} ({'has signed in' if joined else 'has not signed in yet'}); nothing changed."
     subject, body = _mail(address, s.link, _oauth._who())
     warn = ((f"Note: an earlier Google account of {address} was kept when it was taken off its last board, and is refused on this registration. "
-             f"To let that earlier account in again, remove this registration (invite(address=\"{address}\", remove=true)) and then invite again, or delete the entry from the members file.",)
+             f"To let that earlier account in again, remove this registration (invite(address=\"{address}\", remove=true)) and invite again, but only while the new person has not signed in. "
+             f"Once they have, the earlier account stays refused: the admin must delete the entry from the members file, then invite again.",)
             if changed and _invites.has_former(address, s) else ())
     return "\n".join((
         first,

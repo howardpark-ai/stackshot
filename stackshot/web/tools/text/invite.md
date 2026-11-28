@@ -8,7 +8,7 @@ registered, with an address Google reports as verified, and the first sign-in bi
 later one has to be. Calling it again for a registered address returns the same link and mail. remove=true takes the
 registration back: unless another entry still lets the address in, from the next request on the person gets no list,
 read or call of this board through a connector, sign-ins already issued included, and the Google account that had joined
-is refused if the address is registered again (the reply to that registration says so; removing the new registration and inviting again lets that account in). A machine token or an enrolled key
+is refused if the address is registered again (the reply to that registration says so). Removing the new registration and inviting again lets that account in only while the new person has not signed in; after that, the admin deletes the entry from the members file and invites again. A machine token or an enrolled key
 is revoked separately.
 
 ## param address

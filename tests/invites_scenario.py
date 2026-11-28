@@ -531,7 +531,17 @@ def part_direct():
         claims.clear(); claims.update(email="alice@example.com", sub="900", email_verified="true")
         out = _tool.stackshot_invite("new@example.com")
         check("direct: a registration that keeps an earlier account says so and names the way to let it in again", out.startswith("Registered new@example.com on board main.\nNote: an earlier Google account of new@example.com was kept")
-              and "is refused on this registration" in out and 'remove this registration (invite(address="new@example.com", remove=true)) and then invite again' in out, out)
+              and "is refused on this registration" in out and 'remove this registration (invite(address="new@example.com", remove=true)) and invite again' in out, out)
+        # the way back holds only until the new person signs in: the note and the tool text carry that condition, and the entry after sign-in proves it
+        check("direct: the note says the way back holds only before the new person signs in, and what to do after", "only while the new person has not signed in" in out
+              and "delete the entry from the members file" in out and "or delete the entry from the members file" not in out, out)
+        tool_doc = (pathlib.Path(_tool.__file__).parent / "text" / "invite.md").read_text()
+        check("direct: the tool text carries the same condition", "only while the new person has not signed in" in " ".join(tool_doc.split()) and "deletes the entry from the members file" in tool_doc, tool_doc)
+        invites.admit("new@example.com", "222", True)
+        invites.remove("new@example.com", S)
+        invites.register("new@example.com", "alice", S)
+        check("direct: after the new person signed in, remove and invite again keeps the earlier account refused",
+              members()["new@example.com"]["invited"]["former_subs"] == ["111", "222"] and invites.admit("new@example.com", "111", True) == "other_account", members())
         check("direct: a registration with no earlier account carries no such note", "earlier Google account" not in _tool.stackshot_invite("fresh@example.com"))
     finally:
         _cfg.CFG["behind_frontdoor"], deps.get_access_token = saved, saved_get
