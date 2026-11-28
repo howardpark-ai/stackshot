@@ -35,10 +35,10 @@ def _admin(s: _invites.Settings) -> str:
     return person.name
 
 
-def _mail(address: str, link: str, admin_address: str) -> tuple[str, str]:
+def _mail(address: str, link: str, admin_address: str, board: str, mcp_url: str) -> tuple[str, str]:
     """The invite mail (subject, body), in the language the admin reads the board in."""
     with _i18n.use(_uiprefs.lang_of(admin_address)):
-        return _i18n.t("invite.mail.subject"), _i18n.t("invite.mail.body", link=link, address=address)
+        return _i18n.t("invite.mail.subject", board=board), _i18n.t("invite.mail.body", link=link, address=address, board=board, mcp_url=mcp_url)
 
 
 def _registered(address: str, s: _invites.Settings, admin: str) -> str:
@@ -47,7 +47,7 @@ def _registered(address: str, s: _invites.Settings, admin: str) -> str:
         first = f"Registered {address} on board {s.board}."
     else:
         first = f"{address} is already registered on board {s.board} ({'has signed in' if joined else 'has not signed in yet'}); nothing changed."
-    subject, body = _mail(address, s.link, _oauth._who())
+    subject, body = _mail(address, s.link, _oauth._who(), s.board, s.mcp_url)
     warn = ((f"Note: an earlier Google account of {address} was kept when it was taken off its last board, and is refused on this registration. "
              f"To let that earlier account in again, remove this registration (invite(address=\"{address}\", remove=true)) and invite again, but only while the new person has not signed in. "
              f"Once they have, the earlier account stays refused: the admin must delete the entry from the members file, then invite again.",)

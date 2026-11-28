@@ -1,6 +1,6 @@
 ## description invite
 Let a person into this board by their Google address, or take that back. Admins only: the server checks who is
-signed in. Registering returns a setup link and a ready invite mail (subject and body). The board sends no mail:
+signed in. Registering returns a setup link and a ready invite mail (subject and body), whose first two lines are for the invitee's own AI agent and whose rest is a short guide for the person; it names only this board. The board sends no mail:
 create the mail as a draft with your own mail connector, to that address, and do not send it, because it goes only
 when the admin sends it; with no mail connector, show the admin the text to copy. The link holds no secret. The
 registration makes the address a member, who reads and writes as any member does; a newcomer gets in only once

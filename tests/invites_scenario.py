@@ -419,13 +419,40 @@ def part_chain():
             out, e = invite("alice", "New@Example.com")
             check("tool: the admin registers an address", not e and out.startswith("Registered new@example.com on board main.") and members()["new@example.com"]["invited"]["by"] == "alice", (out, e))
             out = out or ""
-            check("tool: the reply holds the setup link and the invite mail with the link and the address", f"setup link: {LINK}" in out and "subject: " in out and f"Open {LINK} and add" in out
-                  and "I sign in with Google as new@example.com." in out, out)
+            check("tool: the reply holds the setup link and the invite mail with the link and the address", f"setup link: {LINK}" in out and "subject: " in out and "Sign in as new@example.com and press Allow." in out, out)
             check("tool: ... asks for a draft the admin sends, and says the board sent nothing", "as a draft to new@example.com" in out and "do not send it" in out and "The board sent nothing." in out
                   and "copy" in out and 'invite(address="new@example.com", remove=true)' in out, out)
             check("tool: the reply holds no secret", PORTAL not in out and "secret" not in out.lower(), out)
+            first_out = out
             out, e = invite("alice", "new@example.com")
             check("tool: again says it is registered and gives the same link", not e and "is already registered on board main (has not signed in yet)" in out and LINK in out, (out, e))
+            check("tool: ... and the same mail, subject and body", out.split("subject: ", 1)[1] == first_out.split("subject: ", 1)[1], (out, first_out))
+            mail = {}
+            (T / "locale").mkdir(exist_ok=True)                  # a test language: the English text wrapped as [x:...], so the mechanism is proved with no translation
+            (T / "locale/ko.json").write_text(json.dumps({k: "[x:" + _tool._i18n.EN[k] + "]" for k in ("invite.mail.subject", "invite.mail.body")}), encoding="utf-8")
+            saved_ui = _cfg.CFG.get("ui")
+            _cfg.CFG["ui"] = {**(saved_ui or {}), "locale_dir": str(T / "locale")}
+            for lang in ("en", "ko"):
+                real_lang = _tool._uiprefs.lang_of
+                _tool._uiprefs.lang_of = lambda _a, _l=lang: _l
+                try:
+                    mail[lang] = _tool._mail("new@example.com", LINK, "alice@example.com", S.board, S.mcp_url)
+                finally:
+                    _tool._uiprefs.lang_of = real_lang
+            if saved_ui is None: _cfg.CFG.pop("ui", None)
+            else: _cfg.CFG["ui"] = saved_ui
+            for lang, (subj, body) in mail.items():
+                lines = body.split("\n")
+                agent = "\n".join(lines[:2])
+                rest = "\n".join(lines[2:])
+                tag = "mail " + lang
+                check(f"{tag}: the first two lines are the agent lines, the link once in them and once below", "Open this link and set up the stackshot connection for me: " + LINK in lines[0]
+                      and "the one MCP address shown on that page" in lines[1] and "Google once, by hand" in lines[1] and agent.count(LINK) == 1 and rest.count(LINK) == 1, body)
+                check(f"{tag}: a rule line follows, then the guide with the board's name and address and the one human step", lines[2].startswith("-----") and S.board in rest and S.mcp_url in rest
+                      and "new@example.com" in rest and "who sent you this mail" in rest, body)
+                check(f"{tag}: no secret, no member name, no other board's name", PORTAL not in body and "secret" not in body.lower() and "alice" not in body.lower()
+                      and "bob" not in body.lower() and "Al" not in re.findall(r"[A-Za-z]+", body) and S.board in subj, (subj, body))
+            check("mail: the second language is the one the admin reads, never the English text", mail["ko"] != mail["en"] and mail["ko"][1].startswith("[x:Open this link"), mail["ko"])
             out, e = invite("alice", "bob@example.com")
             check("tool: a hand entry is refused in words", out is None and "Refused: bob@example.com is already written in the members file" in e, (out, e))
 
