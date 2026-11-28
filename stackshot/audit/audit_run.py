@@ -15,7 +15,7 @@ The checks (category names as the audit agent's brief has them; one finding = {"
                           activity is not a finding of any pass: the hourly audit line (audit/hourly.py) writes it a History line and the idle hand-over (audit/hand_idle.py) hands it on. The passes
                           send their findings to the same recipient through the same `deliver_findings`, with the same text and send stamps (`merged_sent` joins the records), so a finding reaches its
                           mover once whichever pass finds it; they stand still while a run is in progress. Not counted in this run's `by_category`, the unmoved digest, the threshold or the 20% tightening share.
-  one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation · older-than-page · obsolete-wait (a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does each name a finished outcome rather than a symptom, cause, task or trigger, and do the two name the same one? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
+  one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation (NO CALL while model_cuts.AUDIT_MODEL_OFF names it) · older-than-page · obsolete-wait (NO CALL while model_cuts.AUDIT_MODEL_OFF names it; a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does the subject name the work that closes it, as a task, and the Goal the finished outcome that work reaches, neither of them a symptom, a cause or a trigger? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
                           these (`suspects`); the call returns {"finding": "yes"|"no", "check", "reason", "fix"}. At most `[audit] max_calls` calls, one at a time; an item judged "no" or "yes" is not
                           judged again until it is written; a call that fails is not counted as a "no" (the item is tried again next run), and three failures in a row end the calls.
   the orphan hand-over    the first stage of a run, before the board is read (`orphan_stage`; the server does the work, `POST /client/orphan-handover`, because the item lock and the fleet's heartbeat are its): an open item whose
@@ -117,6 +117,7 @@ NO_SESSION = ("", "-", "none", "no owner")    # what a day's findings by session
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
 # what the message tool says when a message goes to a front agent without the mark (service/messaging.py `_gate_front`)
 FRONT_REFUSAL = "is a front agent of"
+from stackshot.model import model_cuts as _cuts       # the kinds that make no model call (AUDIT_MODEL_OFF): one line to put one back
 CHECKS_MODEL = ("next-done", "wrong-needs", "ask-missing", "unneeded-escalation", "older-than-page", "obsolete-wait", "why-not-now", "goal-unclear")
 _BOARD_RX = re.compile(r"\bboard#(\d+)\b")
 
@@ -537,7 +538,9 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
                     lines = [_clip(ln, 220) for ln in text.splitlines() if sid in ln][:3]
                     ev["older-than-page"] = f"the project page ({_stamp(float(pts))}) is newer than the item's last write ({_stamp(last)}) and mentions {sid}: " + " | ".join(lines)
         sig, ctx, has_closed = "", [], False
-        if is_waiting(it, after_open):
+        if is_waiting(it, after_open) and "obsolete-wait" in _cuts.AUDIT_MODEL_OFF:
+            pass                                     # no model call for this kind: its evidence is not read
+        elif is_waiting(it, after_open):
             line, ctx, sig, has_closed = obsolete_wait_evidence(gid, items, by_num, env, pages, last)
             if line:
                 ev["obsolete-wait"] = line
@@ -552,12 +555,17 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
         gline, gsig = goal_evidence(it, goal_seen, sid)
         if gline:
             ev["goal-unclear"] = gline
+        cut_ev = {k: ev.pop(k) for k in _cuts.AUDIT_MODEL_OFF if k in ev}      # a kind with no model call is no suspect (model_cuts.py); the item's other checks stay, and the rank is the one it had with them
         if not ev:
             continue
         checks = [c for c in CHECKS_MODEL if c in ev]
         prev = judged.get(sid)
-        if (isinstance(prev, dict) and _f(prev.get("write")) >= last and sorted(prev.get("checks") or []) == sorted(checks) and prev.get("verdict") in ("no", "yes")
-                and str(prev.get("sig") or "") == sig and str(prev.get("gsig") or "") == (gsig if "goal-unclear" in ev else "")):
+        prev_checks = [c for c in (prev.get("checks") or []) if c not in _cuts.AUDIT_MODEL_OFF] if isinstance(prev, dict) else []      # a verdict stored before the cut lists the cut kinds too: they are left out on both sides, so it still stands
+        sig_kept = str(prev.get("sig") or "") == sig if isinstance(prev, dict) else False
+        if isinstance(prev, dict) and "obsolete-wait" in _cuts.AUDIT_MODEL_OFF and "obsolete-wait" in (prev.get("checks") or []):
+            sig_kept = True                          # that kind's evidence is no longer read, so the signature it kept with the verdict has nothing to be compared with
+        if (isinstance(prev, dict) and _f(prev.get("write")) >= last and sorted(prev_checks) == sorted(checks) and prev.get("verdict") in ("no", "yes")
+                and sig_kept and str(prev.get("gsig") or "") == (gsig if "goal-unclear" in ev else "")):
             skipped += 1
             continue
         if "goal-unclear" in ev:
@@ -587,7 +595,8 @@ def suspects(items: dict[str, dict[str, Any]], now: float, env: Env, judged: dic
                 checks = [c for c in CHECKS_MODEL if c in ev]
             else:
                 self_wait += 1
-        prio = 0 if "next-done" in ev else (1 if "unneeded-escalation" in ev or "wrong-needs" in ev else (3 if set(ev) <= {"obsolete-wait", "why-not-now", "goal-unclear"} else 2))
+        full = {**ev, **cut_ev}                      # the rank is read from every check the heuristics found, the cut kinds too: the order of the calls that remain does not change
+        prio = 0 if "next-done" in full else (1 if "unneeded-escalation" in full or "wrong-needs" in full else (3 if set(full) <= {"obsolete-wait", "why-not-now", "goal-unclear"} else 2))
         out.append({"id": sid, "gid": gid, "project": str(meta.get("project") or ""), "checks": checks, "evidence": ev, "write": last, "priority": prio, "sig": sig, "context": ctx,
                     **({"gsig": gsig} if "goal-unclear" in ev else {})})
     out.sort(key=lambda x: (x["priority"], _num(x["gid"])))
@@ -708,6 +717,8 @@ def carried(prev_judged: dict[str, Any], items: dict[str, dict[str, Any]], picke
         it = items[gid]
         if _br._last_write(it) > _f(e.get("write")):
             continue                                    # written since: the old verdict says nothing; it is judged again when a heuristic picks it
+        if e.get("check") in _cuts.AUDIT_MODEL_OFF:
+            continue                                    # a kind with no model call: its old verdict is dropped, so its finding is not sent again
         if live is not None and e.get("check") in ("obsolete-wait", "why-not-now") and sid not in live:
             continue                                    # the wait's evidence is gone: the old "yes" is stale
         keep[sid] = e

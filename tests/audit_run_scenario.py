@@ -90,6 +90,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
+from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.AUDIT_MODEL_OFF; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own checks are the last section of this file
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
@@ -1378,7 +1379,7 @@ sus, _skip = AR.suspects(mixed, now, env())
 check("why-not-now: ranks after the other checks (a wrong-needs suspect comes first)", sus[0]["id"] == f"board#{BID_05}" and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
 rec_clear()
 
-# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name a finished outcome?"
+# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do the title and the Goal say what is to be done and what done looks like?"
 GU = "goal-unclear"
 def gitem(i, subject="[home] Make the nightly run finish by 06:00", goal="The nightly run finishes by 06:00", status="open", **kw):
     k, d = clean(i) if status == "open" else item(i, status=status, wrote=now - 2 * H)
@@ -1398,8 +1399,8 @@ check("goal-unclear: a yes is a finding from the model on the item's mover, with
       and fnd[0]["detail"] == "the subject names the failure, not the result wanted" and rec["judged"][f"board#{BID_04}"]["fix"] == AR.FIX[GU], rec["findings"])
 check("goal-unclear: one call, whose message names the check with the subject and the Goal sentence, and the rubric carries the check",
       len(calls()) == 1 and rec["calls"]["made"] == 1 and f"- {GU}: the subject and the Goal bullet are new or reworded" in calls()[0]["stdin"] and "Goal: The nightly run finishes by 06:00" in calls()[0]["stdin"]
-      and "\ngoal-unclear\n  An item states its goal twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
-check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the finished outcome and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
+      and "\ngoal-unclear\n  An item says what is wanted twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
+check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the task that closes the item and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
 check("goal-unclear: the verdict and the (subject, Goal) stamp are on the record", rec["judged"][f"board#{BID_04}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_04}"]["gsig"] == sus[0]["gsig"] and rec["goal_judged"] == {f"board#{BID_04}": sus[0]["gsig"]},
       (rec["judged"], rec.get("goal_judged")))
 
@@ -1638,8 +1639,9 @@ split = [day(n, found(2, f"q{n}-agent")) for n in (97, 96, 95, 94)]
 got = trips(a2(), day(98, a2()), *split, day(93, found(1)), day(93, found(1)))
 check("…both runs of the seventh day are read", got == [SESSION("a-agent")], got)
 para = RUBRIC_TEXT.split("\ngoal-unclear\n", 1)[1].split("\n\n", 1)[0]
-check("the rubric's goal-unclear paragraph asks for the same finished outcome as the tool text and flags an activity, a question, a topic or a symptom",
-      all(w in para for w in ("Both must name the same finished OUTCOME", "never an activity, a question, a topic or a symptom", 'a question ("Should X change?") or a topic ("X settings")')), para)
+check("the rubric's goal-unclear paragraph asks the title the tool text asks for: a task as the subject, a finished outcome as the Goal, a symptom, a statement, a should sentence or a question flagged",
+      all(w in para for w in ("names the work that closes the item, as a task", "names the finished OUTCOME that work reaches", "never an activity, a question, a topic or a symptom", 'a symptom or a statement of state ("X fails when Y", "X is broken", "X is live")',
+                              'a "should" or "must" sentence, a question, a cause, a trigger or a bare topic ("X settings") instead of a task', "is the form wanted")) and "Both must name the same finished OUTCOME" not in para, para)
 # the audit agent's records name the session `owner` and have no `mover`
 def agents(n, who, **kw):
     return [{**{k: v for k, v in f.items() if k not in ("mover", "detail")}, "owner": who, **kw} for f in found(n)]
@@ -2010,6 +2012,68 @@ pk_item = build(item(P_DATE, wrote=now - 30 * H, state="doing", **PARK_P))
 pit, pmeta, pafter, pmover = _ACP._item_view(pk_item, f"a{P_DATE}")
 check("parked ask: a date-parked doing item is not stale while its date is ahead", _ACP.check_stale(pit, pmeta, "home-agent", pafter, now, now - 30 * H) == "", None)
 check("parked ask: …and its first open step is no stuck-elsewhere finding while its date is ahead", _ACP.check_stuck_elsewhere(pit, pmeta, "home-agent", {"home-agent", "Oliver"}, now - 30 * H, pafter, now) is None, None)
+
+# ---- the cut: model_cuts.AUDIT_MODEL_OFF (unneeded-escalation, obsolete-wait) makes no model call for those two kinds and leaves every deterministic check
+CUT = ("unneeded-escalation", "obsolete-wait")
+check("cut: the switch as shipped names exactly the two kinds", tuple(_MC_DEFAULT) == CUT, _MC_DEFAULT)
+cut_items = build(*replay.items(), item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}))
+def cut_findings(): return sorted((f["id"], f["category"]) for f in AR.field_findings(cut_items, {}, now, env())[0])
+_MC.AUDIT_MODEL_OFF = ()
+old_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
+old_det = cut_findings()
+_MC.AUDIT_MODEL_OFF = CUT
+try:
+    new_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
+    check("cut: before the cut both kinds are asked about (the fixture is a real suspect for each)", any(OBS in c for c in old_sus.values()) and any("unneeded-escalation" in c for c in old_sus.values()), old_sus)
+    check("cut: with the cut no suspect carries either kind, and the item's other checks stay", not any(k in c for c in new_sus.values() for k in CUT) and f"board#{BID_80}" in new_sus and "next-done" in new_sus[f"board#{BID_80}"]
+          and any("ask-missing" in c for c in new_sus.values()), new_sus)
+    rec_clear(); fake(default=YES("next-done"))
+    rec = go(build(*replay.items()))
+    check("cut: a run makes one call (next-done) and its message offers no obsolete-wait check", len(calls()) == 1 and "obsolete-wait" not in calls()[0]["stdin"].split("Candidate checks")[-1], calls())
+    only_wait = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", "the done line waits on that sync"), closed(75, "dropped", "closed as overtaken", 21, "[home] Add a nightly sync"))
+    only_wait[f"a{BID_80}"]["metadata"]["next"] = "home-agent: then wait for the wake"
+    reset_calls(); rec = go(only_wait)
+    check("cut: an item suspected for obsolete-wait alone makes no call at all", not [s for s in AR.suspects(only_wait, now, env())[0] if OBS in s["checks"]] and rec["calls"]["made"] == len(calls()) and not [c for c in calls() if OBS in c["stdin"].split("Candidate checks")[-1]], (calls(), rec["calls"]))
+    check("cut: the deterministic checks are unchanged by it", cut_findings() == old_det, (old_det, cut_findings()))
+    # verdicts stored before the cut list the cut kinds in `checks` (and the obsolete-wait signature): neither is asked again after the deploy
+    _MC.AUDIT_MODEL_OFF = ()
+    old_full = AR.suspects(cut_items, now, env())[0]
+    _MC.AUDIT_MODEL_OFF = CUT
+    stored = {s["id"]: {"verdict": "no", "write": s["write"], "checks": s["checks"], "at": now, **({"sig": s["sig"]} if s.get("sig") else {})} for s in old_full}
+    check("cut: the stored verdicts are the two shapes the deploy meets (an ask item with unneeded-escalation, a held item with next-done and obsolete-wait)",
+          sorted(stored[f"board#{P_DEC}"]["checks"]) == ["ask-missing", "unneeded-escalation", "wrong-needs"] and stored[f"board#{BID_80}"]["checks"] == ["next-done", OBS], stored)
+    again, skipped = AR.suspects(cut_items, now, env(), stored)
+    check("cut: …neither is picked again (a stored 'no' that listed a cut kind still stands), they count as skipped", [s["id"] for s in again] == [] and skipped == len(new_sus), (again, skipped, new_sus))
+    stored[f"board#{P_DEC}"]["checks"] = ["wrong-needs"]
+    check("cut: …a stored verdict whose other checks differ is still asked again", [s["id"] for s in AR.suspects(cut_items, now, env(), stored)[0]] == [f"board#{P_DEC}"], None)
+    # the rank is the one the item had with its cut kind: a decision with an ask and an open owner step stays at priority 1
+    prio_item = build(item(6, wrote=now - 30 * H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_P, next="Oliver: pick one of the options"))
+    _MC.AUDIT_MODEL_OFF = ()
+    p_old = AR.suspects(prio_item, now, env())[0]
+    _MC.AUDIT_MODEL_OFF = CUT
+    p_new = AR.suspects(prio_item, now, env())[0]
+    check("cut: an item that was a suspect for unneeded-escalation keeps its priority (1) though the call now rests on ask-missing alone", len(p_old) == len(p_new) == 1 and "unneeded-escalation" in p_old[0]["checks"] and p_new[0]["checks"] == ["ask-missing"]
+          and p_old[0]["priority"] == p_new[0]["priority"] == 1, (p_old, p_new))
+    # the evidence of a cut kind is not even read
+    reads = []
+    _real_owe = AR.obsolete_wait_evidence
+    AR.obsolete_wait_evidence = lambda *a, **k: reads.append(1) or _real_owe(*a, **k)
+    try:
+        AR.suspects(build(*replay.items()), now, env())
+        n_cut = len(reads)
+        _MC.AUDIT_MODEL_OFF = ()
+        AR.suspects(build(*replay.items()), now, env())
+        n_old = len(reads) - n_cut
+    finally:
+        AR.obsolete_wait_evidence = _real_owe
+        _MC.AUDIT_MODEL_OFF = CUT
+    check("cut: the obsolete-wait evidence is not read for a waiting item while its model call is cut, and is read with the call back", n_cut == 0 and n_old > 0, (n_cut, n_old))
+    prev = {f"board#{BID_80}": {"verdict": "yes", "check": OBS, "write": now, "checks": [OBS], "reason": "r", "fix": "f"}}
+    keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"}, None)
+    check("cut: an old yes under a cut kind is dropped when the record is carried, so its finding is not sent again", keep == {} and again == [], (keep, again))
+finally:
+    _MC.AUDIT_MODEL_OFF = ()
+check("cut: with the tuple empty the two kinds are asked about again (one line to put them back)", any(OBS in c for c in {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}.values()), None)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

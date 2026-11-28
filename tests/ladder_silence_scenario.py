@@ -92,6 +92,7 @@ from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
+from stackshot.model import model_cuts as _MC; _MC.STALL_COLD_SKIP = False      # this suite pins the ladder with its cold step; the cut's own suite is stall
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
 PUSHLOG = T / "push.log"
@@ -237,6 +238,18 @@ check("4 last: cold call off and no builder: ONE message asks the project's -mai
       "a14" in done and len(main_recovery_pushes("a14")) == 1 and bool(ho(14).get("recovery_at")) and mt(14).get("mover") == "home-peer3" and "decision" not in (mt(14).get("needs") or []) and not mt(14).get("ask"), (done, ho(14), mt(14)))
 check("4 last: …and nothing more later", stk(now0 + 5 * H) == [] and len(main_recovery_pushes("a14")) == 1, main_recovery_pushes("a14"))
 close(14); set_cfg()
+
+# ================================================================ 4b. the cut (model_cuts.STALL_COLD_SKIP) with the one ladder on: the stall pass's cold rung is skipped, the builder takes it, once
+_MC.STALL_COLD_SKIP = True
+clear_records(); put(95, mover="home-peer", act=60); cli_row("home-peer", "idle", IDLE_SINCE)
+enter([95]); stk(now0 + 31 * MIN)
+n_cold = len(COLD_MSGS)
+done = stk(now0 + 41 * MIN + 1)
+check("4b cut: with the ladder on, the cold rung makes no call and the item goes to the project's builder", "a95" in done and len(COLD_MSGS) == n_cold and mt(95).get("mover") == "team-back" and ho(95).get("to") == "team-back" and not (ho(95) or {}).get("cold"), (done, mt(95), ho(95)))
+n_push = len(pushes_to("team-back", "a95"))
+stk(now0 + 42 * MIN); stk(now0 + 60 * MIN)
+check("4b cut: the next ticks do not hand it off twice: still the builder's, one notice to it, no cold record, still no call", mt(95).get("mover") == "team-back" and len(pushes_to("team-back", "a95")) == n_push and not (ho(95) or {}).get("cold") and "cold_at" not in str(ho(95)) and len(COLD_MSGS) == n_cold, (mt(95), ho(95), pushes_to("team-back", "a95")))
+close(95); _MC.STALL_COLD_SKIP = False
 
 # ================================================================ 5. activity ends it; a bare confirm and the ladder's notes do not
 clear_records(); put(15, act=60); cli_row("home-peer", "idle", IDLE_SINCE)

@@ -7,7 +7,7 @@ each group found in the last 24 hours, from the data the audits already write; i
     catalog()               the catalog with each audit's mode read from the configuration ("on", or "shadow", "off", ...)
     group_of(source, kind)  the group a findings-log row belongs to, None for a kind that no group lists
     day_rows(now)           the findings log's rows of the last 24 hours, read once
-    card(now, rows)         the side panel card's rows: [{"name", "audits", "found"}] and the note under them (found is None for a group that keeps no log: the card draws a dash, never a zero)
+    card(now, rows)         the side panel card's rows: [{"name", "audits", "found"}] and a note on the dashes (found is None for a group that keeps no log: the card draws a dash, never a zero)
     overview(now, runner, rows)   everything the page draws: paces, groups, the latest findings, the recent runs
   card, counts and overview take the day_rows a request has read already (`rows`), so one request reads the log once and its numbers agree.
 
@@ -44,10 +44,10 @@ GROUPS: tuple[dict[str, Any], ...] = (
     {"key": "filing", "name": "Filing", "desc": "an item's state is wrong", "log": True, "audits": (
         ("filing pass", EVERY_TEN, None), ("wait-loop walk", EVERY_MIN, None), ("stuck-elsewhere", EVERY_TEN, None), ("mover-no-session", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
         ("reads-as-wait", EVERY_TEN, None), ("wait-end", EVERY_TEN, "wait_end"), ("step-handover", EVERY_TEN, None), ("ask-options", EVERY_TEN, None), ("why-not-now (code)", EVERY_TEN, None),
-        ("wrong-needs (model)", EACH_RUN, None), ("obsolete-wait (model)", EACH_RUN, None), ("why-not-now (model)", EACH_RUN, None))},
+        ("wrong-needs (model)", EACH_RUN, None), ("obsolete-wait (no model call)", EACH_RUN, None), ("why-not-now (model)", EACH_RUN, None))},
     {"key": "wording", "name": "Wording", "desc": "next steps and asks", "log": True, "audits": (
         ("ask-missing", EACH_RUN, None), *((f"next rules N{n}", EACH_RUN, None) for n in range(1, 8)),
-        ("next-done (model)", EACH_RUN, None), ("ask no longer fits (model)", EACH_RUN, None), ("unneeded-escalation (model)", EACH_RUN, None), ("goal-unclear (model)", EACH_RUN, None))},
+        ("next-done (model)", EACH_RUN, None), ("ask no longer fits (model)", EACH_RUN, None), ("unneeded-escalation (no model call)", EACH_RUN, None), ("goal-unclear (model)", EACH_RUN, None))},
     {"key": "dates", "name": "Dates", "desc": "due dates and wake dates", "log": True, "audits": (
         ("dates pass", EVERY_TEN, None), ("For-you due-date look", EVERY_TEN, None), ("wake catch-up", EVERY_TEN, None))},
     {"key": "proof", "name": "Proof and patterns", "desc": "waits for proof, and repeat patterns", "log": True, "audits": (
@@ -59,7 +59,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
         ("clients tick", EVERY_MIN, None), ("inbox flag", EVERY_MIN, None), ("hand-back tick", EVERY_MIN, None), ("roles sync", EVERY_MIN, None),
         ("orphan hand-over", EACH_RUN, "orphans"))},
     {"key": "text", "name": "Text and rules", "desc": "rulebook and tool text", "log": False, "audits": (
-        ("rulebook scan", "after each run", None), ("retired-terms lint", "every PR", None), ("tool-text snapshot test", "every PR", None),
+        ("rulebook scan", "weekly", None), ("retired-terms lint", "every PR", None), ("tool-text snapshot test", "every PR", None),
         ("tool-text touched check", "every PR", None), ("clean-text", "every PR", None))},
 )
 
@@ -70,7 +70,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
 _FILING = {"stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "wait-end", "wait-loop", "event-missing", "step-handover", "ask-options", "why-not-now", "wrong-needs", "obsolete-wait"}
 _WORDING = {"ask-missing", "next rules", "next-done", "goal-unclear", "unneeded-escalation"}
 _BY_KIND = {**{k: "filing" for k in _FILING}, **{k: "wording" for k in _WORDING}, "proof-wait": "proof", "older-than-page": "pages"}
-NOTE_UNLOGGED = "\u2013 keeps no findings log"      # the card's line under the list, and the page's reading of a dash
+NOTE_UNLOGGED = "\u2013 keeps no findings log"      # the status answer's note for a dash; the card draws a "?" for it, not these words
 NOTE_LOG_OFF = "\u2013 the findings log is off"
 SOURCES = {"run": "daily run", "silence": "silence", "filing": "filing", "dates": "dates", "wait-loops": "wait loops"}     # the findings log's `source` as the page says it
 
@@ -165,8 +165,8 @@ def counts(now: float, rows: list[dict[str, Any]] | None = None) -> dict[str, in
 
 
 def card(now: float, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """The Audit card's shortlist: {"groups": [{"name", "audits", "found"}], "note"}. found is None where the group keeps no findings log, and the card draws a dash for it; note is the line under the
-    list that says what the dash means ("" when no group has one). `rows`: the day_rows already read, else read here."""
+    """The Audit card's shortlist: {"groups": [{"name", "audits", "found"}], "note"}. found is None where the group keeps no findings log, and the card draws a dash for it; note says why there are
+    dashes ("" when there is none): NOTE_UNLOGGED, which the card turns into a "?", or NOTE_LOG_OFF, a line under the list. `rows`: the day_rows already read, else read here."""
     c = counts(now, rows)
     out = [{"name": g["name"], "audits": len(g["audits"]), "found": c[g["key"]]} for g in GROUPS]
     note = "" if all(r["found"] is not None for r in out) else (NOTE_UNLOGGED if log_kept() else NOTE_LOG_OFF)

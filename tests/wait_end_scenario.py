@@ -819,5 +819,21 @@ alive = [i for i in (9892, 9893, 9894) if MODEL.derive(rd(i)).state == MODEL.ALI
 got = cats(AC.filing_findings(store_items(), {}, now, env(**FIXING))[0], "wait-end")
 check("10 only the session's alive item is read for its waiting line", alive == [9892, 9893, 9894] and got == ["9894"], (alive, got, [MODEL.derive(rd(i)).state for i in (9892, 9893, 9894)]))
 
+# 11 a link the anchors tool does not take (a discussion) is never proposed as a wait_anchor: the one accept test is the anchors tool's own (anchors.anchor_id)
+from stackshot.anchors import anchors as _shape_anchors
+DISC, ISSUE = "https://github.com/example/repo/discussions/12", "https://github.com/example/repo/issues/7"
+SHAPE = WE.Facts(machines={}, online=frozenset(), own_repo="example/repo", released=frozenset(), item_prs=lambda gid: (),
+                 item_anchors=lambda gid: (), anchor_url=lambda u: bool(_shape_anchors.anchor_id(_shape_anchors.split_fragment(u)[0])))
+fix_stored = WE._unwoken_fix({"state": "waiting", "wait_anchor": DISC, "needs": ["external"]}, SHAPE, "g8201")
+check("11 a stored discussion link is not proposed as wait_anchor; the fix is a dated wait", DISC not in fix_stored and 'wait_kind="anchor"' not in fix_stored and 'until="YYYY-MM-DD"' in fix_stored, fix_stored)
+fix_scoped = WE._unwoken_fix({"state": "waiting", "needs": ["external"]}, SHAPE._replace(item_anchors=lambda gid: (DISC,)), "g8202")
+check("11 …an external wait with only a discussion scoped to the item proposes no anchor", DISC not in fix_scoped and 'wait_kind="anchor"' not in fix_scoped, fix_scoped)
+gap_disc = WE.stored_gap({"wait_kind": "anchor"}, SHAPE._replace(item_anchors=lambda gid: (DISC,)), "g8203", now)
+check("11 …a stored anchor wait with only a discussion scoped to the item picks no anchor", gap_disc is not None and gap_disc.plan.get("op") != "anchor_pick" and DISC not in str(gap_disc.plan), gap_disc)
+gap_issue = WE.stored_gap({"wait_kind": "anchor"}, SHAPE._replace(item_anchors=lambda gid: (ISSUE,)), "g8204", now)
+check("11 …an issue link scoped to the item is still picked for the stored anchor wait", gap_issue is not None and gap_issue.plan.get("url") == ISSUE, gap_issue)
+fix_issue = WE._unwoken_fix({"state": "waiting", "wait_anchor": ISSUE, "needs": ["external"]}, SHAPE, "g8205")
+check("11 …a stored issue link is still proposed as the wait_anchor", f'wait_anchor="{ISSUE}"' in fix_issue, fix_issue)
+
 print(f"{'FAILED' if fails else 'ok'}: wait end scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))
 sys.exit(1 if fails else 0)

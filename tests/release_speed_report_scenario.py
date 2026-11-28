@@ -24,6 +24,11 @@ creation, check, queue, merge, deploy and main-run times), with HOME pointed int
   11 errors: a bad limit, a missing explicit config, a missing logs folder, --days out of range and a bad --now are exit 2 and name the cause; a
      mistyped key warns; an unwritable state folder is exit 1
   12 read-only: the logs folder is byte for byte as it was; the file is executable
+  13 a group release's member logs (only lines release.sh writes there) and the pushed-head checks line; in a window with no release a paid debt leaves
+     the record and an unpaid one (--no-open, --dry-run, a refused or impossible call) stays
+  14 GitHub unreadable: the stages are only what the run measured; with the pull request list unread the last measured open -> live median is kept apart
+     (open_to_live_kept, its time kept over weeks), used by the comparison line alone and never flagged; with only the runs unread nothing is kept; a
+     damaged previous record never stops a run
 
     tests/run-suite release_speed_report      -> exit 0 / 1"""
 import datetime as dt, hashlib, json, os, pathlib, subprocess, sys
@@ -63,7 +68,7 @@ GH_LOG = T / "gh.log"
 import json, os, sys, urllib.parse
 a = sys.argv[1:]
 open({str(GH_LOG)!r}, "a").write(" ".join(a) + "\\n")
-if os.environ.get("GH_FAIL"):
+if os.environ.get("GH_FAIL") or (os.environ.get("GH_FAIL_RUNS") and a[0] == "api"):
     print("boom", file=sys.stderr); sys.exit(1)
 if os.environ.get("GH_JUNK"):
     print("<html>not json</html>"); sys.exit(0)
@@ -525,6 +530,163 @@ run(w2); run(w2, "--json"); run(w2, "--dry-run")
 check("read-only: the logs folder is byte for byte as it was", tree_hash(w2.logs) == before)
 check("the file is executable", os.access(TOOL, os.X_OK))
 check("the module's quantile is linear between ranks, a single value is itself", RS.quantile([10, 20], 0.5) == 15 and RS.quantile([7], 0.9) == 7 and RS.quantile([1, 2, 3, 4, 5], 0.9) == 4.6)
+
+# ------------------------------------------------------------------ 13 a group's start, the pushed head, a paid or unpaid debt in an empty window
+# A member's log of a group release holds only what release.sh's run_group appends to it: the progress lines of gsay and the result lines of plog (and a member's own FAILED line). What it says with
+# `say` alone (the main run's result among it) is in the group log only, and a group's hand-over writes no `checks pass` and no `enqueued:` line.
+w13 = World("group")
+for pr in (701, 702):
+    w13.log(pr, [(BASE, f"release of PRs #701 #702 starts in /srv/widgets ({SLUG}): the merge queue (mode on) tests them as one group and merges it once"),
+                 (BASE + mins(1), "merge queue: PRs 701 702 handed over in one call (added); waiting for each"),
+                 (BASE + mins(18), "merge queue: PR 701 merged: a title at abc1234"), (BASE + mins(18), "merge queue: PR 702 merged: a title at abc1234"),
+                 (BASE + mins(20), "merged by the merge queue: #701 #702 at abc1234 (main's tip abc1234); deploying them once"),
+                 (BASE + mins(22), "done: abc1234, restarted app.service ")])
+    w13.listed(pr, BASE - mins(30), f"{pr:040x}", BASE + mins(19))
+    w13.run(f"{pr:040x}", "tests", BASE - mins(29), "success", BASE - mins(20))
+w13.log(703, [(BASE + mins(60), f"release of PR #703 starts in /srv/widgets ({SLUG})"), (BASE + mins(62), "the PR's tests pass on the pushed head 7030303"),
+              (BASE + mins(66), "enqueued: the merge queue accepted the head 7030303"), (BASE + mins(80), "merged by the merge queue as abc1234, 14 min after the enqueue"),
+              (BASE + mins(82), "done: abc1234, restarted app.service ")])
+w13.save()
+r, j = jrun(w13)
+got13 = {k: (v["n"], v["median"]) for k, v in j.get("stages", {}).items()}
+check("a group's start line (`release of PRs #N #M starts`) starts a release in each member's log: 3 live (two of the group, one single)", r.returncode == 0 and j["prs"]["live"] == 3, (r.returncode, j.get("prs"), r.stderr))
+check("a group's member logs with GitHub give open -> green (n 2, 10), merged -> live (n 3 with the single release, 2) and open -> live (n 2, 52), and no main run",
+      got13.get("open_to_green") == (2, 10.0) and got13.get("merged_to_live") == (3, 2.0) and got13.get("open_to_live") == (2, 52.0) and got13.get("live_to_main") == (0, None), got13)
+check("the pushed-head line is the checks-pass line: the queued stages are the single release's alone, checks pass -> queued 4 (log only, no GitHub runs) and queued -> merged 14",
+      got13.get("green_to_queued") == (1, 4.0) and got13.get("queued_to_merged") == (1, 14.0), got13)
+
+w13b = World("paid")                                              # an owed item that is paid, in a window with no release
+w13b.log(711, [(LO - mins(60), f"release of PR #711 starts in /srv/widgets ({SLUG})"), (LO - mins(50), "done: abc1234, restarted app.service ")])
+w13b.save()
+kept_before = {"format": 1, "repo": "widgets", "generated": "2026-11-19T00:00:00+00:00", "stages": {}, "flakes": {}, "marker": "kept",
+               "open_pending": [{"key": "max_open_to_live_median_minutes", "limit": 10, "value": 30.0, "line": "FLAG: open_to_live_median: 30 min > 10"}]}
+w13b.state.mkdir(); (w13b.state / "widgets.json").write_text(json.dumps(kept_before))
+CONF.write_text("max_open_to_live_median_minutes = 10\nitem_project = \"widgets-page\"\nitem_mover = \"widgets-builder\"\n")
+client_reset()
+r = run(w13b, "--client", str(CLIENT), no_open=False)
+after = rec(w13b)
+check("an owed item paid in an empty window: the item is sent once, the debt is cleared in the state, the rest of the previous record stays, exit 4",
+      r.returncode == 4 and len(client_calls()) == 1 and "open_pending" not in after and after == {k: v for k, v in kept_before.items() if k != "open_pending"}, (r.returncode, client_calls(), after))
+CONF.write_text("")
+client_reset()
+
+ITEM_CONF = "item_project = \"widgets-page\"\nitem_mover = \"widgets-builder\"\n"
+for i, (label, conf, mode, extra, status, calls_want) in enumerate((("--no-open", ITEM_CONF, "ok", ("--no-open",), 4, 0), ("--dry-run", ITEM_CONF, "ok", ("--dry-run",), 4, 0),
+                                                                      ("a refused item call", ITEM_CONF, "refuse", (), 3, 1), ("no item_project and item_mover", "", "ok", (), 3, 0))):
+    w = World(f"unpaid{i}")                                       # an owed item that is not paid, in a window with no release
+    w.log(721, [(LO - mins(60), f"release of PR #721 starts in /srv/widgets ({SLUG})"), (LO - mins(50), "done: abc1234, restarted app.service ")])
+    w.save()
+    w.state.mkdir(); (w.state / "widgets.json").write_text(json.dumps(kept_before))
+    before = (w.state / "widgets.json").read_text()
+    CONF.write_text("max_open_to_live_median_minutes = 10\n" + conf)
+    client_reset(mode)
+    r = run(w, "--client", str(CLIENT), *extra, no_open=False)
+    check(f"an unpaid debt survives an empty window ({label}): exit {status}, the record byte for byte as it was",
+          r.returncode == status and len(client_calls()) == calls_want and (w.state / "widgets.json").read_text() == before, (r.returncode, r.stderr, client_calls(), rec(w)))
+CONF.write_text("")
+client_reset()
+
+# ------------------------------------------------------------------ 14 GitHub unreadable: this run's stages stay its own, the last measured open -> live median is kept apart
+T0 = "2026-11-19T00:00:00+00:00"
+NO_STAGE = {"n": 0, "median": None, "p90": None, "worst": None, "worst_pr": None}
+
+
+def put_prev(w, **fields):
+    w.state.mkdir(exist_ok=True)
+    (w.state / "widgets.json").write_text(json.dumps(dict({"format": 1, "repo": "widgets", "generated": T0, "stages": {}, "flakes": {}}, **fields)))
+
+
+def measured(med):
+    return {"open_to_live": {"n": 1, "median": med, "p90": med, "worst": med, "worst_pr": 1}}
+
+
+w14 = stats_world("kept")                                         # GitHub unreadable after a good run (open -> live 30)
+r = run(w14)
+r2, j2 = jrun(w14, env={"PATH": str(NO_GH)}, now=z(NOW + dt.timedelta(hours=1)))
+check("GitHub unreadable after a good run: the stage is this run's (n 0), the previous median 30 is kept apart with the time it was measured, a note says so, the log's stages are counted, exit 4",
+      r.returncode == 0 and r2.returncode == 4 and j2["stages"]["open_to_live"] == NO_STAGE and j2.get("open_to_live_kept") == {"median": 30.0, "generated": "2026-11-26T12:00:00+00:00"}
+      and any("the last measured median, 30 min, measured 2026-11-26T12:00:00+00:00, is kept" in n for n in j2["notes"]) and j2["stages"]["merged_to_live"]["n"] == 5,
+      (r2.returncode, j2.get("stages", {}).get("open_to_live"), j2.get("open_to_live_kept"), j2.get("notes")))
+
+wk = World("weeks")                                               # several weeks unread, two releases in each (open -> live 18): an old median above the limit flags nothing
+for week in range(4):
+    for i in range(2):
+        n = 730 + 10 * week + i
+        wk.release(n, BASE + dt.timedelta(days=7 * week, minutes=60 * i), f"{n:040x}", 10, 2, 5, 1, 1)
+wk.save()
+put_prev(wk, stages=measured(120.0))
+CONF.write_text("max_open_to_live_median_minutes = 60\n" + ITEM_CONF)
+client_reset()
+for week in range(3):
+    r = run(wk, "--client", str(CLIENT), no_open=False, env={"GH_FAIL": "1"}, now=z(NOW + dt.timedelta(days=7 * week)))
+    got = rec(wk)
+    check(f"unread week {week + 1}: no flag, no item call, no debt; the stage is unmeasured and the kept median stays 120 with its first time",
+          r.returncode == 4 and got["prs"]["live"] == 2 and got["triggers"] == [] and "FLAG" not in r.stdout and client_calls() == [] and "open_pending" not in got
+          and got["stages"]["open_to_live"] == NO_STAGE and got.get("open_to_live_kept") == {"median": 120.0, "generated": T0}, (r.returncode, r.stdout, got, client_calls()))
+    said = "open -> live median 120 -> n/a min" if week == 0 else f"open -> live median 120 (from an earlier run, measured {T0}) -> n/a min"
+    check(f"unread week {week + 1}: the comparison line gives {'the measured median of the previous run' if week == 0 else 'the kept median as from an earlier run, with when'}", said in r.stdout, r.stdout)
+r = run(wk, "--client", str(CLIENT), no_open=False, now=z(NOW + dt.timedelta(days=21)))
+got = rec(wk)
+check("the first readable week compares with the kept median, said to be from an earlier run and when; it measures 18, keeps nothing and flags nothing",
+      r.returncode == 0 and f"open -> live median 120 (from an earlier run, measured {T0}) -> 18 min" in r.stdout and got["stages"]["open_to_live"]["median"] == 18.0
+      and "open_to_live_kept" not in got and got["triggers"] == [] and client_calls() == [], (r.returncode, r.stdout, got))
+put_prev(wk, stages=measured(40.0), open_to_live_kept={"median": 99.0, "generated": "2026-11-01T00:00:00+00:00"})
+r = run(wk, "--dry-run")
+check("a previous record with a measured median is compared by it, not by a kept one", "open -> live median 40 -> 18 min" in r.stdout and "earlier run" not in r.stdout, r.stdout)
+
+w14z = World("kept-nolive")                                       # a window with a started release and none live
+w14z.log(741, [(BASE, f"release of PR #741 starts in /srv/widgets ({SLUG})"), (BASE + mins(1), "FAILED at checks: a check failed: suites=fail")])
+w14z.save()
+put_prev(w14z, stages=measured(120.0))
+client_reset()
+r = run(w14z, "--client", str(CLIENT), no_open=False, env={"GH_FAIL": "1"})
+got = rec(w14z)
+check("unreadable with 0 live releases: no flag and no call for the old median, which is kept apart", r.returncode == 4 and got["prs"]["live"] == 0 and got["triggers"] == [] and client_calls() == []
+      and got["stages"]["open_to_live"] == NO_STAGE and got.get("open_to_live_kept") == {"median": 120.0, "generated": T0}, (r.returncode, got, client_calls()))
+
+for now_med, old_med, flagged in ((120, 10.0, True), (30, 120.0, False)):      # the PR list read and the runs not: this run's own open -> live decides, nothing is kept
+    wp = World(f"partial{now_med}")
+    wp.release(751, BASE, f"{751:040x}", now_med - 8, 2, 5, 1, 1)
+    wp.save()
+    put_prev(wp, stages=measured(old_med), open_to_live_kept={"median": old_med, "generated": T0})
+    client_reset()
+    r = run(wp, "--client", str(CLIENT), no_open=False, env={"GH_FAIL_RUNS": "1"})
+    got = rec(wp)
+    check(f"PRs read, runs failed: this run's open -> live {now_med} stands over the old {old_med:g}, nothing is kept, {'it is flagged and the item sent' if flagged else 'no flag and no call'}, exit 4",
+          r.returncode == 4 and "boom" in r.stderr and got["stages"]["open_to_live"]["median"] == float(now_med) and "open_to_live_kept" not in got and bool(got["triggers"]) == flagged
+          and len(client_calls()) == int(flagged) and (not flagged or got["triggers"][0]["line"] == f"FLAG: open_to_live_median: {now_med} min > 60")
+          and any("the pull request list was read and the check runs were not" in n for n in got["notes"]) and not any("is kept" in n for n in got["notes"]), (r.returncode, r.stderr, got, client_calls()))
+CONF.write_text("")
+client_reset()
+
+HUGE = 10 ** 400                                                  # a damaged previous record never stops a run, GitHub readable or not
+wd = stats_world("damaged")                                       # open -> live 30
+for label, fields, kept, before in (
+        ("an empty open_to_live", {"stages": {"open_to_live": {}}}, None, "n/a"),
+        ("a median that is a string", {"stages": {"open_to_live": {"median": "x"}}}, None, "n/a"),
+        ("a stage with a median alone", {"stages": {"open_to_live": {"median": 5}}}, {"median": 5, "generated": T0}, "5"),
+        ("a stage that is no object", {"stages": {"open_to_live": [5]}}, None, "n/a"),
+        ("numbers too large", {"stages": {"open_to_live": {"median": HUGE}}, "flakes": {"total": HUGE}}, None, "n/a"),
+        ("a negative median", {"stages": {"open_to_live": {"median": -1}}}, None, "n/a"),
+        ("a kept field that is no object", {"open_to_live_kept": "x"}, None, "n/a"),
+        ("a kept field that is empty", {"open_to_live_kept": {}}, None, "n/a"),
+        ("a kept median that is a string", {"open_to_live_kept": {"median": "x", "generated": T0}}, None, "n/a"),
+        ("a kept median too large", {"open_to_live_kept": {"median": HUGE, "generated": T0}}, None, "n/a"),
+        ("a kept median with no time", {"open_to_live_kept": {"median": 5}}, None, "n/a"),
+        ("a kept time that is no time", {"open_to_live_kept": {"median": 5, "generated": "x"}}, None, "n/a"),
+        ("a kept time that is a number", {"open_to_live_kept": {"median": 5, "generated": 7}}, None, "n/a"),
+        ("a kept time with no offset", {"open_to_live_kept": {"median": 5, "generated": "2026-11-19T00:00:00"}}, None, "n/a")):
+    put_prev(wd, **fields)
+    r = run(wd, env={"GH_FAIL": "1"})
+    got = rec(wd)
+    check(f"a damaged previous record ({label}), GitHub unreadable: the report is made, the stage is unmeasured, only a usable median is kept",
+          r.returncode == 4 and "Traceback" not in r.stderr and "since the previous run" in r.stdout and got["stages"]["open_to_live"] == NO_STAGE and got.get("open_to_live_kept") == kept,
+          (r.returncode, r.stderr[-600:], got.get("open_to_live_kept")))
+    put_prev(wd, **fields)
+    r = run(wd, "--dry-run")
+    check(f"a damaged previous record ({label}), GitHub readable: the report is made and compares {before} with 30",
+          r.returncode == 0 and "Traceback" not in r.stderr and f"open -> live median {before} -> 30 min" in r.stdout, (r.returncode, r.stderr[-600:], r.stdout[-400:]))
+
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

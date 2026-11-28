@@ -1,9 +1,12 @@
-"""tools/rulebook_scan.py — the scan, run after each of the audit's two daily runs, of the instruction files sessions read for stale mentions of stackshot's tools and
+"""tools/rulebook_scan.py — the scan, run once a week (the audit unit calls it with --weekly after each of its runs; the first run of a Monday-to-Sunday week scans, the rest of the week's runs skip), of the instruction files sessions read for stale mentions of stackshot's tools and
 sala's commands. Why: a rulebook line can keep saying `owner` after the
 tools moved to `mover`, and nothing would catch it. Tokenless: no model call, no network but the one message per file it sends.
 
-    rulebook_scan.py run [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]
-    audit.py scan [--dry-run]                          the same, from the audit's own entry point (the timer's unit runs this one)
+    rulebook_scan.py run [--weekly] [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]
+    audit.py scan [--dry-run]                          the same, from the audit's own entry point
+    --weekly                                           scan only if no scan has finished in this Monday-to-Sunday week (instance timezone); the unit's line.
+                                                       <paths.state>/rulebook-scan/last-week.json keeps the week of the last finished scan (a scan with a note
+                                                       not delivered, or blind to sala because its help, or only op's verb table, was unreadable, does not count, so the next run tries again); a run with no --weekly always scans
 
 What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is a config value; with no `files` table nothing is scanned):
     files           [[rulebook_scan.files]] glob + keeper, one table per set of files (a rulebook, the role briefs, the skills of a plugin's
@@ -15,8 +18,10 @@ What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is
                     from its `@mcp.tool` definitions and from the modules of the tools/ folder beside it, where each tool is registered with
                     `mcp.tool(...)(function)`, never by importing it: an import wants fastmcp and a store, and the server
                     refuses to start outside the production checkout without a config. `--schema JSON` ({"tool": ["param", …]}) replaces it.
-    sala            the command (default `sala`): `sala --help` is read once. `sala op --help` is read too (it prints its verbs and
-                    flags). Any other verb's `--help` is NOT run: the dispatcher hands a verb its arguments, and most verbs take
+    sala            the command (default `sala`): `sala --help` is read once. `sala op --help --full` is read too (its verb table: each
+                    verb's flags). When it gives no verb table, the plain `sala op --help` is tried (an older sala with no --full, whose
+                    plain help is the table). With no table from either, the scan says so, `sala op`'s verbs and flags are not checked, and
+                    the checks that need only `sala --help` still run. Any other verb's `--help` is NOT run: the dispatcher hands a verb its arguments, and most verbs take
                     `--help` as a name (`sala retire --help` would try to retire a session). `[rulebook_scan] help_verbs` lists the
                     verbs known to print help (default ["op"]). Never a verb that acts.
     terms           the retired-terms list of part 1 (default tests/retired_terms.toml in the checkout); absent
@@ -33,7 +38,7 @@ Delivery: one note per file, to its keeper, through client.py's `message` (this 
 told cannot be answered), the way the audit's findings reach an owner (message to the session). A finding already sent and still there
 is not sent again: <paths.state>/rulebook-scan/sent.json keeps, per file, the keys of what was sent; a note carries only what is new
 and says how many older ones are still open; a finding that was fixed drops out, so it is sent again if it comes back. A note that
-fails to deliver is not recorded and goes again the next night.
+fails to deliver is not recorded and goes again at the next scan.
 Stdlib only."""
 from __future__ import annotations
 import os as _os, sys as _sys
@@ -167,19 +172,22 @@ def server_tools(server_py: Path) -> dict[str, list[str]]:
 FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 END_OF_FLAGS = re.compile(r"(?<!\S)--(?!\S)")
 SALA_LINE = re.compile(r"^\s{0,4}(?:salamander|sala)\s+([a-z][a-z-]*)\b")
+OP_HELP_ASK = re.compile(r"(?:\s*(?:--help|-h)(?![\w-])(?:\s*\[?--full(?![\w-])\]?)?)?")      # straight after `op`: asking for its help (`--help` or `-h`, then optionally `--full`, bracketed or not), which no verb table lists; nothing else may follow it
 
 
 @dataclass
 class SalaHelp:
     verbs: dict[str, set[str]] = field(default_factory=dict)       # verb → every flag the help lists under it
     op_general: set[str] = field(default_factory=set)              # flags of `op` itself (--from, --words, --plan, --list …)
-    op_verbs: dict[str, set[str]] = field(default_factory=dict)    # `op`'s verbs → their flags, from `sala op --help` (empty when not read)
+    op_verbs: dict[str, set[str]] = field(default_factory=dict)    # `op`'s verbs → their flags, from `sala op --help --full` (empty when not read)
     op_flags_any: set[str] = field(default_factory=set)            # every flag the main help's op section lists (the fallback)
+    op_unread: bool = False                                        # the op help was asked for and gave no verb table: `sala op`'s verbs and flags are not judged
 
 
 def parse_help(main: str, op_help: str = "") -> SalaHelp:
     """`sala --help` is a list of lines that open with `salamander <verb>` and continue on deeper-indented lines; the flags of a
-    line and its continuations belong to that verb. `sala op --help` has the op's own flags, then a `verbs:` block."""
+    line and its continuations belong to that verb. `sala op --help --full` has the op's own flags, then a `verbs:` block with
+    one verb per line and its flags indented under it (the short `sala op --help` puts the verbs on one `verbs:` line: no block, no verbs)."""
     h = SalaHelp()
     cur = ""
     for line in main.splitlines():
@@ -206,6 +214,12 @@ def parse_help(main: str, op_help: str = "") -> SalaHelp:
                 h.op_general |= set(FLAG.findall(line))
                 continue
             m = re.match(r"^  ([a-z][a-z-]*)\b", line)
+            # a verb's name column is the verb alone or with its arguments (flags, brackets, UPPER placeholders); a heading
+            # such as `reason path` has two lowercase words there and is a heading of the table, not a verb
+            head = line[2:].split("  ")[0].strip()
+            if m and re.fullmatch(r"[a-z][a-z-]* [a-z][a-z-]*", head):
+                sub = ""                       # its continuation lines belong to no verb
+                continue
             if m:
                 sub = m.group(1)
                 h.op_verbs.setdefault(sub, set())
@@ -215,6 +229,11 @@ def parse_help(main: str, op_help: str = "") -> SalaHelp:
         for f in h.op_verbs.values():
             h.verbs["op"] |= f
     return h
+
+
+def op_verb_count(op_help: str) -> int:
+    """How many verbs the op help's verb table lists (0 for "" or for a help with no table)."""
+    return len(parse_help("", op_help).op_verbs) if op_help.strip() else 0
 
 
 def find_sala(sala: str) -> str:
@@ -229,13 +248,14 @@ def find_sala(sala: str) -> str:
     return ""
 
 
-def run_help(sala: str, verb: str = "") -> str:
-    """`sala --help` or `sala <verb> --help` (for a verb in [rulebook_scan] help_verbs only): the help text, "" when it cannot be read."""
+def run_help(sala: str, verb: str = "", full: bool = False) -> str:
+    """`sala --help`, `sala <verb> --help` (for a verb in [rulebook_scan] help_verbs only), or with `full` `sala <verb> --help --full`:
+    the help text, "" when it cannot be read."""
     exe = find_sala(sala)
     if not exe:      # no sala here: nothing to run and nothing to say (scan_all names it once)
         return ""
     try:
-        r = subprocess.run([exe, *([verb] if verb else []), "--help"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+        r = subprocess.run([exe, *([verb] if verb else []), "--help", *(["--full"] if full else [])], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
         return (r.stdout or "") + (r.stderr or "")
     except Exception as e:  # noqa: BLE001
         print(f"rulebook_scan: {sala} {verb} --help not read: {e}", file=sys.stderr)
@@ -412,17 +432,24 @@ def check_sala(path: str, ln: int, s: str, h: SalaHelp) -> list[Finding]:
                 out.append(Finding(path, ln, "verb", text, f"sala has no verb {verb!r}", "verbs: " + ", ".join(sorted(h.verbs)), verb=verb))
             continue
         if verb == "op":
+            if h.op_unread:
+                continue
             sub = (rest.split() or [""])[0]
+            sub = "" if sub.startswith("-") else sub       # a flag is not a verb name (`sala op --full` names none)
             if h.op_verbs and re.fullmatch(r"[a-z][a-z-]*", sub) and sub not in h.op_verbs:
                 out.append(Finding(path, ln, "verb", f"sala op {sub}", f"sala op has no verb {sub!r}", "op verbs: " + ", ".join(sorted(h.op_verbs))))
                 continue
             named = sub in h.op_verbs
-            for f in flags:
-                ok = (f in h.op_general or f in h.op_verbs.get(sub, set()) or (not named and f in h.op_flags_any)
-                      or (not named and any(f in v for v in h.op_verbs.values())))
+            asked = OP_HELP_ASK.match(rest)
+            help_asked = bool(asked.group())                  # `--help` / `-h` [--full]: excused, and no flag may follow it
+            shown = rest[:asked.end()].strip() if help_asked else sub
+            for f in dict.fromkeys(FLAG.findall(rest[asked.end():])):
+                ok = not help_asked and (f in h.op_general or f in h.op_verbs.get(sub, set()) or (not named and f in h.op_flags_any)
+                                         or (not named and any(f in v for v in h.op_verbs.values())))
                 if not ok:
-                    out.append(Finding(path, ln, "flag", f"sala op {sub} {f}".replace("  ", " "), f"sala op {sub} lists no flag {f}".replace("  ", " "),
-                                       f"flags: {', '.join(sorted(h.op_general | h.op_verbs.get(sub, set()))) or '(none)'}", verb="op", flag=f))
+                    listed = "(none after " + shown + ")" if help_asked else ', '.join(sorted(h.op_general | h.op_verbs.get(sub, set()))) or '(none)'
+                    out.append(Finding(path, ln, "flag", f"sala op {shown} {f}".replace("  ", " "), f"sala op {shown} lists no flag {f}".replace("  ", " "),
+                                       f"flags: {listed}", verb="op", flag=f))
             continue
         for f in flags:
             if f not in h.verbs[verb]:
@@ -470,29 +497,44 @@ def collect(files: list[dict[str, str]]) -> list[tuple[Path, str]]:
 
 
 def scan_all(cfg: dict[str, Any], *, schema: Path | None = None, help_main: Path | None = None, help_op: Path | None = None,
-             terms: Path | None = None) -> tuple[dict[str, list[Finding]], dict[str, str], list[str], bool]:
+             terms: Path | None = None) -> tuple[dict[str, list[Finding]], dict[str, str], list[str], tuple[str, ...]]:
     """→ ({file: findings}, {file: keeper}, the lines of what could not be read, which the caller prints and never turns into a finding,
-    whether sala's help was read: False when `sala --help`, or `sala op --help` where it is asked for, came back empty)."""
+    the starts of the finding keys this scan could not judge: () when sala's help was read; every sala verb and flag key when `sala --help`
+    came back empty; only `sala op`'s when the op help (`sala op --help --full` where it is asked for, or a file given) came back empty or
+    with no verb table)."""
     notes: list[str] = []
     if not cfg["files"]:
-        return {}, {}, [NO_FILES_NOTE], True
+        return {}, {}, [NO_FILES_NOTE], ()
     if schema:
         tools = {k: list(v) for k, v in json.loads(Path(schema).read_text(encoding="utf-8")).items()}
     else:
         tools = server_tools(cfg["server"])
     no_sala = not help_main and not find_sala(cfg["sala"])      # no sala command on this machine (not on PATH, not in ~/.local/bin): its checks are skipped, said once
     main_help = Path(help_main).read_text(encoding="utf-8") if help_main else ("" if no_sala else run_help(cfg["sala"]))
-    op_help = Path(help_op).read_text(encoding="utf-8") if help_op else (run_help(cfg["sala"], "op") if "op" in cfg["help_verbs"] and not no_sala else "")
-    op_asked = not help_op and "op" in cfg["help_verbs"] and not no_sala
-    help_ok = bool(main_help.strip()) and (not op_asked or bool(op_help.strip()))
+    op_read = bool(help_op) or ("op" in cfg["help_verbs"] and not no_sala)      # the op help is asked for (a file given counts)
+    if help_op:
+        op_help = Path(help_op).read_text(encoding="utf-8")
+    elif op_read:
+        op_help = run_help(cfg["sala"], "op", full=True)
+        if not op_verb_count(op_help):      # a sala with no --full (an older one): its plain help is the verb table it always printed
+            plain = run_help(cfg["sala"], "op")
+            if op_verb_count(plain):
+                op_help = plain
+    else:
+        op_help = ""
+    op_bad = op_read and op_verb_count(op_help) == 0      # nothing read, or a help with no verb table: no op verb is checked, so say so
+    unjudged = ("verb|", "flag|") if not main_help.strip() else ("verb|sala op ", "flag|sala op ") if op_bad else ()
     if no_sala:
         notes.append(f"no `{cfg['sala']}` command on this machine (PATH, ~/.local/bin): the sala verb and flag checks were skipped")
     elif not main_help.strip():
         notes.append("sala --help gave nothing: the sala verbs and flags were not checked")
-    elif not help_ok:
-        notes.append("sala op --help gave nothing: the sala verbs and flags were not checked")
-        main_help = ""
-    sala = parse_help(main_help, op_help)
+    elif op_bad:
+        source = f"the --op-help file {help_op}" if help_op else "sala op --help --full"
+        said = "gave nothing" if not op_help.strip() else "lists no verb table (no `verbs:` block with verbs in it)"
+        notes.append(f"{source} {said}: sala op's verbs and flags were not checked")
+        print(f"rulebook_scan: {notes[-1]}", file=sys.stderr)
+    sala = parse_help(main_help, "" if op_bad else op_help)
+    sala.op_unread = op_bad
     tp = Path(terms) if terms else cfg["terms"]
     tl = load_terms(tp)
     if not tp.is_file():
@@ -511,7 +553,7 @@ def scan_all(cfg: dict[str, Any], *, schema: Path | None = None, help_main: Path
             fs = [f for f in fs if f.kind not in ("verb", "flag")]
         if fs:
             found[str(p)] = fs
-    return found, keepers, notes, help_ok
+    return found, keepers, notes, unjudged
 
 
 def code_takes(f: Finding, lib: Path) -> bool:
@@ -578,10 +620,10 @@ def deliver_client(to: str, text: str, sender: str) -> tuple[bool, str]:
 def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Deliver = deliver_client, state: Path | None = None, today: str = "",
         **sources: Path | None) -> dict[str, Any]:
     """Scan, group per file, send the new findings of each file to its keeper once (a sala flag or verb that sala's code takes goes, as one more
-    note of that file, to sala's keeper as a help-text gap). The first delivery that fails ends the sending: the rest hold for the next night.
-    → {"files": n, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
+    note of that file, to sala's keeper as a help-text gap). The first delivery that fails ends the sending: the rest hold for the next scan.
+    → {"files": n, "blind": sala's help, or only op's verb table, was unreadable, "findings": n, "sent": [file…], "held": [file…] (not delivered), "quiet": [file…] (nothing new), "notes": [...]}."""
     cfg = cfg or settings()
-    found, keepers, notes, help_ok = scan_all(cfg, **sources)
+    found, keepers, notes, unjudged = scan_all(cfg, **sources)
     sf = state or state_file()
     try:
         sent: dict[str, Any] = json.loads(sf.read_text(encoding="utf-8")) if sf.is_file() else {}
@@ -591,7 +633,7 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
     today = today or _local_date(dt.datetime.now(_cfg.tz()))
     lib, sala_keeper = cfg.get("sala_lib") or Path(os.path.expanduser(SALA_LIB)), cfg.get("sala_keeper") or SALA_KEEPER
     res: dict[str, Any] = {"files": len(keepers), "findings": sum(len(v) for v in found.values()), "sent": [], "held": [], "quiet": [], "notes": notes,
-                           "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
+                           "blind": bool(unjudged), "found": found, "gap": {path: [f.key for f in fs if code_takes(f, lib)] for path, fs in found.items()}, "gap_to": sala_keeper}
     nstate: dict[str, Any] = {}          # a file with nothing left forgets what it sent
     stopped = False
     for path, fs in found.items():
@@ -623,11 +665,11 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
             else:
                 stopped = True
                 res["held"].append(path)
-                notes.append(f"{path}: not delivered to {to}: {said}; the rest of tonight's notes are held for the next night")
-                nstate[sk] = {"keys": sorted(before), "sent": sent.get(sk, {}).get("sent", "")}      # the new ones go again tomorrow
-    if not help_ok:          # sala's help was unreadable tonight: its verb and flag findings are neither judged nor forgotten, so a good night does not resend them
+                notes.append(f"{path}: not delivered to {to}: {said}; the rest of this scan's notes are held for the next scan")
+                nstate[sk] = {"keys": sorted(before), "sent": sent.get(sk, {}).get("sent", "")}      # the new ones go again at the next scan
+    if unjudged:             # sala's help (or only op's) was unreadable this scan: the findings it could not judge are neither judged nor forgotten, so a good scan does not resend them
         for sk, v in sent.items():
-            ks = [k for k in v.get("keys", []) if k.startswith(("verb|", "flag|"))]
+            ks = [k for k in v.get("keys", []) if k.startswith(unjudged)]
             if ks:
                 e = nstate.setdefault(sk, {"keys": [], "sent": v.get("sent", "")})
                 e["keys"] = sorted(set(e["keys"]) | set(ks))
@@ -637,6 +679,40 @@ def run(cfg: dict[str, Any] | None = None, *, dry: bool = False, deliver: Delive
         tmp.write_text(json.dumps(nstate, indent=1, sort_keys=True, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, sf)
     return res
+
+
+def week_file() -> Path:
+    return _cfg.state("rulebook-scan") / "last-week.json"
+
+
+def this_week(now=None) -> str:
+    """The Monday-to-Sunday week of now, in the instance timezone, as 'YYYY-Www' (ISO)."""
+    import datetime as dt  # noqa: PLC0415
+    y, w, _ = (now or dt.datetime.now(_cfg.tz())).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def run_weekly(cfg: dict[str, Any] | None = None, *, week: str = "", wfile: Path | None = None, **kw: Any) -> dict[str, Any] | None:
+    """run(), but only when no scan has finished in this week; → None when this week's scan is already done. A lock on the week file's folder makes two
+    runs started together scan once (the second waits, then sees the week recorded). A scan with a note held does not record the week."""
+    import fcntl  # noqa: PLC0415
+    wf = wfile or week_file()
+    wk = week or this_week()
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    with open(wf.parent / ".weekly.lock", "a+") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            done = json.loads(wf.read_text(encoding="utf-8")).get("week", "") if wf.is_file() else ""
+        except Exception:  # noqa: BLE001
+            done = ""
+        if done == wk:
+            return None
+        res = run(cfg, **kw)
+        if not res["held"] and not res["blind"] and not kw.get("dry"):      # a scan blind to sala (its help, or only op's table, unreadable) skipped checks: the week stays open, the next run tries again
+            tmp = wf.with_name(f"{wf.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps({"week": wk}), encoding="utf-8")
+            os.replace(tmp, wf)
+        return res
 
 
 def report(res: dict[str, Any], dry: bool) -> str:
@@ -658,20 +734,27 @@ def main(argv: list[str]) -> int:
     if a and a[0] == "run":
         a = a[1:]
     dry = "--dry-run" in a
-    a = [x for x in a if x != "--dry-run"]
+    weekly = "--weekly" in a
+    a = [x for x in a if x not in ("--dry-run", "--weekly")]
     opt: dict[str, Path] = {}
     names = {"--terms": "terms", "--schema": "schema", "--sala-help": "help_main", "--op-help": "help_op"}
     while a:
         k = a.pop(0)
         if k not in names or not a:
-            print("usage: rulebook_scan.py run [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]", file=sys.stderr)
+            print("usage: rulebook_scan.py run [--weekly] [--dry-run] [--terms PATH] [--schema JSON] [--sala-help FILE] [--op-help FILE]", file=sys.stderr)
             return 2
         opt[names[k]] = Path(a.pop(0))
     cfg = settings()
     if not dry and not cfg["enabled"]:
         print("rulebook scan: not enabled on this instance ([rulebook_scan] enabled); --dry-run reads and prints without sending")
         return 0
-    res = run(cfg, dry=dry, **opt)
+    if weekly and not dry:
+        res = run_weekly(cfg, dry=dry, **opt)
+        if res is None:
+            print(f"rulebook scan: already scanned in week {this_week()}; the unit's other runs this week skip it")
+            return 0
+    else:
+        res = run(cfg, dry=dry, **opt)
     print(report(res, dry))
     return 1 if res["held"] else 0
 

@@ -97,4 +97,9 @@ LOCALIZE = (r"if(window.SSI&&window.SST&&Object.keys(window.SSI).length){(functi
             r"['send','cancel','undo','your_move','recommended','link'].forEach(function(k){L[k]=e(SST('js.colors.pv_'+k))});"
             r"c.preview=" + _js(PREVIEW_T) + r".replace(/\{(\w+)\}/g,function(m,x){return L[x]==null?m:L[x]})})(window.stackshotColors)}")
 HEAD = "<script>" + LIB + "</script><script>" + CFG_JS + LOCALIZE + "ColorTool.applyStored(window.stackshotColors);</script>"      # appended to render._APP_HEAD: in the head of every page after the theme script, before the first paint
-BODY = "<script>ColorTool.init(window.stackshotColors);</script>"                                                      # appended to render._FAB_PAIR: at the end of every page's body
+# The tool ends its panel with the note as a paragraph. Text that explains goes behind the board's "?" (CONTRIBUTING.md, *Page text*) and the shared file stays as it is, so once the panel is in the page (at
+# init, or later, when a page turns dark) the note moves into a "?" beside Reset. It needs ui/explain.py's script ahead of it.
+NOTE_TO_TIP = ("(function(){function move(){var p=document.querySelector('#ct-pop>p.ct-small'),f=document.querySelector('#ct-pop>.ct-foot');if(!p||!f)return false;"
+               "f.appendChild(window.stackshotExplain('colors',p.textContent,window.SST('js.colors.help')));p.remove();return true}"
+               "if(window.stackshotExplain&&!move()){new MutationObserver(function(m,o){if(move())o.disconnect()}).observe(document.body,{childList:true})}})();")
+BODY = "<script>ColorTool.init(window.stackshotColors);" + NOTE_TO_TIP + "</script>"                                    # appended to render._FAB_PAIR: at the end of every page's body

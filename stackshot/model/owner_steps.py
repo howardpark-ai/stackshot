@@ -28,6 +28,9 @@ from stackshot.model import nextlines as _nl
 from stackshot.model import steps as _steps
 
 KEY = "owner_step"                 # metadata: the first line of the step the server made (see THE STORAGE)
+ROUTE_KEY = "item_sync_step"       # metadata: the open step a script's route added itself (service/item_sync.py), as the route sent it; it says which open line is the route's own, and goes when that line is no longer open or the item closes (states.CLOSE_EXTRA)
+SENT_KEY = "item_sync_sent"        # metadata: the step that route last sent and had on the item, which it never asks again; it stays when the line goes, but is stored empty when a wait took it unanswered
+ANSWERED_KEY = "item_sync_answered"      # metadata: true once he answered the step of an item such a route filed; the route then asks him nothing more on that item
 
 
 def recorded(meta: dict[str, Any]) -> str:
@@ -160,6 +163,64 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
         return
     if not any(same_line(s["text"], rec) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
         meta.pop(KEY, None)
+
+
+def route_answered(meta: dict[str, Any]) -> None:
+    """He answered the step of an item a script's route filed (a Done, or a note that names no later time): kept on the item (ANSWERED_KEY), also when a wait had taken the line and nothing was left to tick."""
+    if "item_sync" in meta:
+        meta[ANSWERED_KEY] = True
+
+
+def route_writes(meta: dict[str, Any], own: str, sent: str, sets_step: bool) -> None:
+    """The record a script's route stores with its write (service/item_sync.py): `own`, the step of the open line that is the route's own ("" when none is), and `sent`, the step it sent. A write that
+    sets the step (`sets_step`) also lets the server's line for the step before it go, not reworded, so a line that is not the route's stays open (the route drops its own line itself, with a dropped mark)."""
+    if sets_step:
+        meta.pop(KEY, None)
+    meta.pop(ROUTE_KEY, None)
+    if own:
+        meta[ROUTE_KEY] = own
+    meta[SENT_KEY] = sent
+
+
+def forget_route_closed(meta: dict[str, Any], keeper: str) -> None:
+    """Forget a route's record of its own step (ROUTE_KEY) once no open line reads as it (his answer, a drop, a rewording), so a line written later with the same words is not taken for the route's."""
+    own = _steps.clean(meta.get(ROUTE_KEY))
+    if own and not any(same_line(s["text"], line_of(own, meta)) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
+        meta.pop(ROUTE_KEY, None)
+
+
+def route_line(meta: dict[str, Any], keeper: str) -> str:
+    """The checklist line that is a script route's own: its step in ROUTE_KEY; on an item the route filed before it kept records (neither key is stored), the first line, when that was written under the item's creator. "" for none."""
+    if ROUTE_KEY in meta or SENT_KEY in meta:
+        own = _steps.clean(meta.get(ROUTE_KEY))
+        return line_of(own, meta) if own else ""
+    first = next(iter(_steps.view(meta, keeper=keeper)), None) if "item_sync" in meta else None
+    return first["text"] if first and first.get("writer") == keeper else ""
+
+
+def route_settled(meta: dict[str, Any], step: str) -> None:
+    """`step`, which the item stores, was replaced or withdrawn by a session. When a wait had taken its line unanswered (SENT_KEY stored empty), it counts as sent again."""
+    if meta.get(SENT_KEY) == "" and _steps.clean(step):
+        meta[SENT_KEY] = _steps.clean(step)
+
+
+def route_replaced(meta: dict[str, Any], keeper: str, step: str, stored: str) -> None:
+    """A session's write withdrew the step (`step` "") or set `step`; `stored` is the step the item stored before it. When that takes the server's line (KEY) and it is the route's own, in other words than `step`, the line is
+    the route's no more: the text the route sent stays sent, whatever then drops the line, a wait too (route_wait_dropped). The same holds for a `stored` step whose line a wait took earlier (route_settled)."""
+    if stored and not (step and same_line(line_of(stored, meta), line_of(step, meta))):
+        route_settled(meta, stored)
+    line = route_line(meta, keeper)
+    if not line or not same_line(line, meta.get(KEY)) or (step and same_line(line, line_of(step, meta))):
+        return
+    meta.pop(ROUTE_KEY, None)
+    meta.setdefault(SENT_KEY, _steps.without_owner(_steps.first_line(line)))
+
+
+def route_wait_dropped(meta: dict[str, Any], line: str, dropped: list[str]) -> None:
+    """A wait took the lines `dropped` off his list. When one is `line`, the route's own (route_line, read before the drop), he never answered it: no step counts as sent (SENT_KEY stored empty), so a repeat open after the wait
+    asks it again."""
+    if line and any(same_line(t, line) for t in dropped):
+        meta[SENT_KEY] = ""
 
 
 def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, make: str = "", writer: str = "", add: bool = True, apart: bool = False) -> list[str]:

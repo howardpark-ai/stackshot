@@ -8,7 +8,7 @@ without a user, a password or a path) and the command to run there, and not one 
 (nothing fetched, written, committed or pushed), through `stackshot publish ...` and `publish.py ...`. Allowed, as without the check: a config that names
 no server host, deploy_ssh naming this box (hostname, short name, user@, localhost, a host word, beside box = false), box = true, and a check that
 cannot run. The shape of a script's call over ssh (an environment of HOME and STACKSHOT_CONFIG alone, the config a ~ path that is a symlink). In a script or
-pass run by hand that imports the publisher or the server's modules: publish() raises, the debounced publish says so once an hour and writes nothing. A
+pass run by hand that imports the publisher or the server's modules: publish() and publish_pages() raise, the debounced publish says so once an hour and writes nothing. A
 standby refuses in its own words. brief and render run on a refused box and write nothing. The serving processes, as real processes against a config that
 names the server by an address or by an ssh alias: `stackshot server` publishes after a reload (the debounced publish), for the bump_versions tool called
 over MCP and on its timer, while a publish command beside it is refused; `stackshot minute`'s run publishes from its runner's own step.
@@ -187,6 +187,10 @@ with contextlib.redirect_stderr(err): first, second = P._publish_now(), P._publi
 check("_publish_now returns the refusal instead of raising", first.startswith("(publish: refused on ") and "publish publish'" in first and "publish bump'" in second and second.endswith(")"), (first, second))
 check("_publish_now logs the refusal once, not at every publish", err.getvalue().count("publish: refused on ") == 1 and len(err.getvalue().splitlines()) == 1, err.getvalue())
 check("a refused publish in the process wrote nothing, roles.json included", changed(before, snapshot(w)) == [], changed(before, snapshot(w))[:20])
+write(w / "repo/pages/p.md", "p\n"); head = git(w / "repo", "rev-parse", "HEAD")
+try: P.publish_pages(["p.md"], "Ada Example"); got = None
+except P.NotServerHost as e: got = str(e)
+check("publish_pages() raises NotServerHost with the line before it even asks whether pages publishing is on, and commits nothing", bool(got) and "\n" not in got and f"ssh {OTHER}" in got and git(w / "repo", "rev-parse", "HEAD") == head, got)
 
 # ---- the address asked of the client
 def address(url):

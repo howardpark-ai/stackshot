@@ -759,6 +759,17 @@ def part_client():
         finally:
             cr._client_open_records = _real_or
         check("http: open-records is answered from the threadpool, not the event loop (it scans the board)", r.status_code == 200 and _loop_seen == [False], (r.status_code, _loop_seen))
+        _real_an = cr._ask_named._client_asks_named; _loop_seen = []
+        def _probe_an(k, since):
+            try: asyncio.get_running_loop(); _loop_seen.append(True)
+            except RuntimeError: _loop_seen.append(False)
+            return _real_an(k, since)
+        cr._ask_named._client_asks_named = _probe_an
+        try:
+            r = c.get("/client/asks-named", params={"key": U, "since": "1"}, headers=H)
+        finally:
+            cr._ask_named._client_asks_named = _real_an
+        check("http: asks-named is answered from the threadpool, not the event loop (it reads the message log and the board)", r.status_code == 200 and _loop_seen == [False], (r.status_code, r.text[:100], _loop_seen))
         r = c.get("/client/open-records", params={"key": "a\nb"}, headers=H); check("http: open-records with a bad key → 400", r.status_code == 400, (r.status_code, r.text[:100]))
         r = c.get("/client/item-record", headers=H); check("http: item-record with no key → 400", r.status_code == 400, (r.status_code, r.text[:100]))
         other = open(client.mint("box-other")).read().strip()

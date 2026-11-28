@@ -10,7 +10,7 @@ small readers the sections of both suites use. A suite imports it whole:
 `scenario()` starts the scenarios that are coming on a few threads while the suite reads the one it is at (tests/_runahead.py; RELEASE_SUITE_PAR=1 runs them one at a time, as before),
 the checks and their order unchanged. A suite ends with `finish()`. The lists `fails`, `ran`, `dirs` and `POLLS` are this module's own, one set per suite process. Nothing here runs a check by itself.
 """
-import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
+import fcntl, json, os, pathlib, re, shutil, socket, subprocess, sys, tempfile, threading, time
 import _scratch, _runahead
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 fails = []; ran = []; dirs = []
@@ -571,6 +571,7 @@ SSH = ('#!/bin/sh\nprintf "%s\\n" "$*" >> "$RT_DIR/ssh.log"\n[ -z "${RT_SSH_FAIL
        '  [ $n -gt "${RT_RECORD_FAILS:-0}" ] || { echo "ssh: connect to host failed: Connection timed out" >&2; exit 255; } ;;\n'
        'esac\n'
        'exec env -u DEPLOY_LOCK_FILE HOME="$RT_DIR/login" RT_REMOTE=1 sh -c "$cmd"\n')
+REAL_CONFIG_FILES = ("stackshot/paths.py", "stackshot/core/config.py", "stackshot/core/agentbox.py", "stackshot/core/xlock.py", "stackshot/core/readonly.py", "stackshot/core/lines.py", "stackshot/core/members.py")   # real_config=True: copied into the scenario's checkout (a scenario's stand-ins replaced)
 POLLS = []   # (scenario, sleeps): checked at the end, see MAX_POLLS
 MAX_POLLS = 200   # a scenario that waits main's run out to the default RELEASE_CAP_MAIN (3 h) polls 540 times: 40 s plainly, past
                   # its 100 s under coverage (a slow run on a busy box). lock-outside-checks' 150 are its point
@@ -680,13 +681,18 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     (d / "bin/ssh").write_text(SSH); (d / "bin/ssh").chmod(0o755)   # what [release] deploy_ssh runs (RT_DEPLOY_SSH)
     if env.get("killtee"): shutil.copy(shutil.which("tee"), d / "bin/tee")   # RT_KILLTEE: the log's tee is the scenario's own copy of the real one, so the stub that ends it finds it by its executable, never by name
     (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
+    real = env.pop("real_config", False)   # the real core/config.py and what it reads (see REAL_CONFIG_FILES), with a TOML file of this scenario's: [release] deploy_ssh = the deploy_ssh value, [hosts] lookup = where-is (a role's host)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
         (box / pkg).mkdir(parents=True, exist_ok=True); (box / pkg / "__init__.py").write_text("")
-    for p, body, x in ((box / "stackshot/core/config.py", CONFIG, False), (box / "stackshot/fleet/client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
+    for p, body, x in (*(() if real else ((box / "stackshot/core/config.py", CONFIG, False),)), (box / "stackshot/fleet/client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
                        (d / "bin/gh", GH_SH, True), (d / "bin/gh.py", GH, False), (d / "bin/git", GIT, True), (d / "bin/sleep", SLEEP, True), (d / "bin/sala", SALA, True), (d / "bin/notify", NOTIFY, True), (d / "bin/date", DATE, True), *(() if nosal else ((d / "bin/salamander", SALAMANDER_SH, True), (d / "bin/salamander.py", SALAMANDER, False)))):
         p.write_text(body); x and p.chmod(0o755)
-    e = {**ENV0, "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
+    if real:
+        for rel in REAL_CONFIG_FILES: shutil.copy(os.path.join(STACK, rel), box / rel)
+        (d / "stackshot.toml").write_text(f'[paths]\nstate = "{d}"\n[release]\ndeploy_ssh = "{env.get("deploy_ssh", "")}"\n[hosts]\nlookup = "{d}/bin/where-is {{role}}"\n')
+        (d / "bin/where-is").write_text(f'#!/bin/sh\ncase "$1" in box) echo {socket.gethostname()} ;; far) echo deploy-host ;; *) exit 1 ;; esac\n'); (d / "bin/where-is").chmod(0o755)
+    e = {**ENV0, **({"STACKSHOT_CONFIG": str(d / "stackshot.toml")} if real else {}), "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
     held = None; timer = None
     if hold is not None:
         (d / "releases").mkdir(exist_ok=True); held = open(d / "releases/deploy.lock", "w"); fcntl.flock(held, fcntl.LOCK_EX)
