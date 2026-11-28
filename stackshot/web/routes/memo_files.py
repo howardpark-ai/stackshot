@@ -51,7 +51,7 @@ async def upload(request: Request):
     if not _answer_same_origin(request):
         return PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
     import hmac
-    if not hmac.compare_digest(request.headers.get("x-answer-token", ""), _answer_token(email, gid)):
+    if not hmac.compare_digest(request.headers.get("x-answer-token", "").encode("utf-8", "surrogatepass"), _answer_token(email, gid).encode("utf-8")):      # bytes: a non-ASCII token is a 403, not a TypeError
         return PlainTextResponse("refused: the page's token does not match; reload the item's page and send again", status_code=403)
     try:
         declared: int | None = int(request.headers.get("content-length", ""))

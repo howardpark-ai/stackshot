@@ -12,9 +12,10 @@ would end in `.tmp` or `.lock` once stored gets `.bin` after it, for the same re
 The limits are the constants below (one block). An upload is streamed to disk in pieces and is never held whole; it is refused as soon as its size passes the limit, by the declared Content-Length first. The 100 MB
 total counts every file on the server together, the uploads not yet sent too, and is checked again under a lock when an upload is whole, so two uploads that arrive together cannot pass it.
 
-A module of the service layer: it reads the config and the file system only (no item, no lock of the store). An item's record of its files is `metadata.answers[].files`: [{id, name, size, type}], written by service/answer.py."""
+A module of the service layer: it reads the config, the id map of re-keyed items and the file system only (no item, no lock of the store). A file stored under an item's old id (a temporary id that was replaced by its final one) is still found under it. An item's record of its files is `metadata.answers[].files`: [{id, name, size, type}], written by service/answer.py."""
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.github import ghsync as _gh
 
 MAX_FILE = 10 * 1024 * 1024          # bytes of one file
 MAX_IMAGE = 5 * 1024 * 1024          # bytes of an image (png, jpeg, gif, webp by its first bytes): kept as uploaded, photo location data included, so a bigger one is refused, not shrunk
@@ -86,16 +88,26 @@ def safe_name(name: Any) -> str:
     s = unicodedata.normalize("NFC", str(name or "")).replace("\\", "/").rsplit("/", 1)[-1]
     s = "".join(c if (c.isalnum() or c in _KEEP_CHARS) and c.isprintable() else "_" for c in s)
     s = s.strip(" .")
-    while len(s) > NAME_CHARS or len(s.encode("utf-8")) > NAME_BYTES:
+    s = _cut(s, NAME_CHARS, NAME_BYTES)
+    if _left_out(s):      # `.bin` follows, so the cut leaves room for it: the whole name, suffix included, stays within the limits
+        s = _cut(s, NAME_CHARS - 4, NAME_BYTES - 4)
+        if _left_out(s):
+            s += ".bin"
+    return s
+
+
+def _left_out(s: str) -> bool:
+    return s.lower().endswith((".tmp", ".lock")) or s.lower() in ("lock", ".lock")
+
+
+def _cut(s: str, chars: int, nbytes: int) -> str:
+    while len(s) > chars or len(s.encode("utf-8")) > nbytes:
         stem, dot, ext = s.rpartition(".")
         if dot and 0 < len(ext) <= 12 and stem:
             s = stem[:-1] + "." + ext
         else:
             s = s[:-1]
-    s = s.strip(" .") or "file"
-    if s.lower().endswith((".tmp", ".lock")) or s.lower() in ("lock", ".lock"):
-        s += ".bin"
-    return s
+    return s.strip(" .") or "file"
 
 
 def sniff(head: bytes) -> str:
@@ -115,11 +127,13 @@ def _inside(path: Path) -> bool:
     return path.resolve().is_relative_to(root().resolve())
 
 
-def total_bytes() -> int:
-    """Every byte under the memo-files folder (a partial upload counts)."""
+def total_bytes(stored_only: bool = False) -> int:
+    """Every byte under the memo-files folder (a partial upload counts, unless `stored_only`: the files that are whole)."""
     n = 0
     for dirpath, _dirs, files in os.walk(root()):
         for f in files:
+            if stored_only and f == PARTIAL:
+                continue
             try:
                 n += os.lstat(os.path.join(dirpath, f)).st_size
             except OSError:
@@ -129,6 +143,36 @@ def total_bytes() -> int:
 
 def _pending_dir(gid: str) -> Path:
     return root() / PENDING / gid
+
+
+@contextlib.contextmanager
+def _claim(gid: str):
+    """One at a time per item through the check of the pending cap and the creation of the upload's folder: the claim is a folder made with mkdir (atomic, whichever process makes it), removed at the end; one older than
+    a minute is a crashed holder's and is taken over."""
+    d = root() / ".claims" / f"{gid}.lock"
+    d.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    end = time.monotonic() + 10
+    while True:
+        try:
+            os.mkdir(d, 0o700)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.lstat(d).st_mtime > 60:
+                    os.rmdir(d)
+                    continue
+            except OSError:
+                continue
+            if time.monotonic() > end:
+                raise Refused(503, "the server is busy with other uploads on this item; try again")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
 
 
 def _single(folder: Path) -> Path | None:
@@ -159,15 +203,26 @@ class Upload:
         self.done = False
         if declared is not None and declared > MAX_FILE:
             raise Refused(413, f"files are limited to {mb(MAX_FILE)}")
-        self.base = total_bytes()
+        self.base = total_bytes(stored_only=True)      # the whole files only: another upload's partial file is not stored yet (it is counted when it is whole, under the lock in `finish`)
         if declared is not None and self.base + declared > MAX_TOTAL:
             raise Refused(507, f"the memo files on the server are full ({mb(MAX_TOTAL)} in all); ask for room to be made")
-        waiting = len(os.listdir(_pending_dir(gid))) if _pending_dir(gid).is_dir() else 0
-        if waiting >= PENDING_PER_ITEM:
-            raise Refused(400, f"{waiting} files wait to be sent on this item; send the note first")
         self.declared = declared
-        self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.fd = os.open(self.dir / PARTIAL, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+        pend = _pending_dir(gid)
+        with _claim(gid):      # the cap and the folder's creation are one step: uploads that arrive together cannot pass the cap
+            for d in (pend.parent, pend):
+                if d.is_symlink() or (d.exists() and not _inside(d)):
+                    raise Refused(400, "this item's upload folder cannot be used")
+            waiting = len(os.listdir(pend)) if pend.is_dir() else 0
+            if waiting >= PENDING_PER_ITEM:
+                raise Refused(400, f"{waiting} files wait to be sent on this item; send the note first")
+            self.dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            if self.dir.is_symlink() or not _inside(self.dir):
+                raise Refused(400, "this item's upload folder cannot be used")
+            self.fd = os.open(self.dir / PARTIAL, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+        except BaseException:
+            self.abort()
+            raise
 
     def write(self, chunk: bytes) -> None:
         if not chunk:
@@ -201,7 +256,7 @@ class Upload:
         os.close(self.fd)
         self.fd = -1
         with _QUOTA_LOCK:
-            if total_bytes() > MAX_TOTAL:
+            if total_bytes(stored_only=True) + self.size > MAX_TOTAL:      # the stored files and this one; another upload's partial file is not counted
                 raise Refused(507, f"the memo files on the server are full ({mb(MAX_TOTAL)} in all); ask for room to be made")
             os.rename(self.dir / PARTIAL, self.dir / self.name)
         self.done = True
@@ -272,6 +327,15 @@ def listing(item: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _homes(gid: str) -> list[str]:
+    """The ids an item's files may be under: its id, then the old ids it was re-keyed from (a temporary id replaced by its final one: the files stay where they were put)."""
+    try:
+        aliases = _gh.load_map()["aliases"]
+    except Exception:      # noqa: BLE001 — no map: the item's own id only
+        aliases = {}
+    return [gid, *sorted(o for o, n in aliases.items() if n == gid and valid_gid(o))]
+
+
 def path_of(gid: str, item: dict[str, Any], fid: str) -> tuple[Path, dict[str, Any]] | None:
     """The stored file `fid` of `item` and its record, or None: the id is not on the item's list, the file is gone, or its path leaves the folder."""
     if not valid_gid(gid) or not valid_id(fid):
@@ -279,10 +343,11 @@ def path_of(gid: str, item: dict[str, Any], fid: str) -> tuple[Path, dict[str, A
     rec = next((f for f in listing(item) if f["id"] == fid), None)
     if rec is None:
         return None
-    p = _single(root() / gid / fid)
-    if p is None or not _inside(p):
-        return None
-    return p, rec
+    for home in _homes(gid):
+        p = _single(root() / home / fid)
+        if p is not None and _inside(p):
+            return p, rec
+    return None
 
 
 def delete_for(gid: str) -> bool:
@@ -297,8 +362,11 @@ def delete_for(gid: str) -> bool:
 
 
 def newest(path: Path) -> float:
-    """The latest modification time of a folder and what is in it."""
-    t = os.lstat(path).st_mtime
+    """The latest modification time of a folder and what is in it; infinity for a folder that is gone (removed since it was listed), which no age test passes, so it is skipped."""
+    try:
+        t = os.lstat(path).st_mtime
+    except OSError:
+        return float("inf")
     for dirpath, dirs, files in os.walk(path):
         for n in (*dirs, *files):
             try:

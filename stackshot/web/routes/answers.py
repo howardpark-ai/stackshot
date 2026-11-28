@@ -69,7 +69,7 @@ async def item_answer(request: Request):
     if not gid or not _path(gid).exists():
         return PlainTextResponse("no such item", status_code=404)
     import hmac
-    if not hmac.compare_digest(f("token"), _answer_token(email, gid)):
+    if not hmac.compare_digest(f("token").encode("utf-8", "surrogatepass"), _answer_token(email, gid).encode("utf-8")):      # bytes: a non-ASCII token is a 403, not a TypeError
         return PlainTextResponse("refused: the form's token does not match; reload the item's page and send again", status_code=403)
     from starlette.concurrency import run_in_threadpool
     who = _members.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name

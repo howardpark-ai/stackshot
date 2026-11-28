@@ -5,8 +5,8 @@ The files a person attaches to a note on an item: where they are kept, the limit
 ## What the server does
 
 - A file is uploaded alone, before the note is sent: `POST /items/{key}/files?name=<file name>` with the file as the request body. The request is checked as an answer is (signed in to the board, the board's own origin, the page's token for that item in the `X-Answer-Token` header). The answer is `201 {id, name, size, type}` (`type` is `image` or `file`, read from the file's first bytes, never from its name). The file waits as pending on the item.
-- The note is sent as before (`POST /items/{key}/answer`) with `files=<ids>` in the form (one field with the ids separated by commas, or the field repeated). The files move from pending to the item, and the note's record on the item carries `files: [{id, name, size, type}]`. A note of files alone, with no words, is a comment. A bad list (more than four, an id twice, an id that is not waiting on this item) is refused with 400 and nothing is written; the files stay waiting.
-- `GET /items/{key}/files/{id}/{name}` sends a file to a person signed in to the board; `GET /client/items/{key}/files/{id}/{name}` sends it to a machine that presents its client token (`Authorization: Bearer ...`). Only a file on one of the item's answers is sent. It is always an attachment of type `application/octet-stream` with `X-Content-Type-Options: nosniff` and a sandbox policy: the browser never renders it, whatever it is.
+- The note is sent as before (`POST /items/{key}/answer`) with `files=<ids>` in the form (one field with the ids separated by commas, or the field repeated). The files move from pending to the item, and the note's record on the item carries `files: [{id, name, size, type}]`. A note of files alone, with no words, is a comment. A bad list (more than four, an id twice, an id that is not waiting on this item) is refused with 400 and nothing is written; the files stay waiting. One send takes a pending id: of notes that name the same id together, one is taken and the others are refused with 400. A note of files alone sent to a closed item is refused, and its files stay pending until the 24-hour sweep removes them.
+- `GET /items/{key}/files/{id}/{name}` sends a file by the item page's own sign-in rule (a person signed in to the board; open to whoever reaches the board when `[auth] ui_open` is on, as the item's page is); `GET /client/items/{key}/files/{id}/{name}` sends it to a machine that presents its client token (`Authorization: Bearer ...`). Only a file on one of the item's answers is sent. It is always an attachment of type `application/octet-stream` with `X-Content-Type-Options: nosniff` and a sandbox policy: the browser never renders it, whatever it is.
 
 ## Limits
 
@@ -22,7 +22,7 @@ An image is kept as it was uploaded, so a larger one is refused, not shrunk. The
 
 ## Where they are kept
 
-Under `<paths.state>/memo-files`, never in the item store (the store is published). `pending/<item>/<id>/<name>` holds an upload not sent yet; `<item>/<id>/<name>` holds a sent file. The name is cleaned (no directory part, no control character, at most 120 characters); a name ending `.tmp` or `.lock` gets `.bin` after it. An upload in progress is `upload.tmp`.
+Under `<paths.state>/memo-files`, never in the item store (the store is published). `pending/<item>/<id>/<name>` holds an upload not sent yet; `<item>/<id>/<name>` holds a sent file. The name is cleaned (no directory part, no control character, at most 120 characters in all, the `.bin` included); a name ending `.tmp` or `.lock` gets `.bin` after it. An item that is re-keyed (a temporary id replaced by its final one) keeps its files under the old id; a download looks under the old id too. An upload in progress is `upload.tmp`.
 
 ## What a session is told
 

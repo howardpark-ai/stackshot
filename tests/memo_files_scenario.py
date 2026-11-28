@@ -200,8 +200,6 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     ro = send("a2", act="comment", text="", files=only["id"])
     check("files alone are a comment", ro.status_code == 200 and ro.json().get("sent") == "comment" and rd(2)["metadata"]["answers"][-1].get("files", [{}])[0].get("name") == "only.txt" and "text" not in rd(2)["metadata"]["answers"][-1], (ro.status_code, ro.text[:200]))
     check("no words and no files is still nothing", send("a2", act="comment", text="").json().get("sent") == "empty")
-    late = up("a4", "late.txt", b"after the close").json() if False else None
-    c4 = c.post("/items/a4/files", params={"name": "late.txt"}, content=b"after the close", headers={**SAME, "X-Answer-Token": tok("a4")}, cookies={})
     c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE)
     c4 = c.post("/items/a4/files", params={"name": "late.txt"}, content=b"after the close", headers={**SAME, "X-Answer-Token": tok("a4")})
     rc = send("a4", act="comment", text="a late note", files=c4.json()["id"])
@@ -221,6 +219,89 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the machine route sends the file for a client token", m.status_code == 200 and m.content == b"hello memo" and m.headers["content-disposition"].startswith("attachment"), (m.status_code, m.text[:100]))
     check("and refuses no token or a wrong one (401), an unknown file (404)", [fetch(f"/client/items/a1/files/{ids[0]}/notes.txt", cookie=None).status_code, fetch(f"/client/items/a1/files/{ids[0]}/notes.txt", auth="w" * 40, cookie=None).status_code,
           fetch(f"/client/items/a1/files/{'0' * 32}/x", auth=CLIENT_TOKEN, cookie=None).status_code] == [401, 401, 404])
+
+    # ---- 4b. the fixes of the review round
+    shutil_ = __import__("shutil")
+    item(12); item(13); item(14); item(15); item(16)
+    # a re-keyed item (a temporary id replaced by its final one): files stored under the old id stay downloadable
+    G.record_issue("a12", 12, STORE, was="l5")
+    old_fid = "e" * 32
+    (MEMO / "l5" / old_fid).mkdir(parents=True); (MEMO / "l5" / old_fid / "kept.txt").write_bytes(b"stored before the re-key")
+    it12 = rd(12); it12["metadata"]["answers"] = [{"ts": now, "kind": "comment", "text": "n", "files": [{"id": old_fid, "name": "kept.txt", "size": 24, "type": "file"}]}]; (STORE / "a/12.json").write_text(json.dumps(it12))
+    dk = fetch(f"/items/a12/files/{old_fid}/kept.txt"); dm = fetch(f"/client/items/a12/files/{old_fid}/kept.txt", auth=CLIENT_TOKEN, cookie=None)
+    check("a file stored under an item's old id (re-keyed since) is still downloaded, by the page and by a machine", dk.status_code == 200 and dk.content == b"stored before the re-key" and dm.status_code == 200, (dk.status_code, dm.status_code))
+    shutil_.rmtree(MEMO / "l5")
+    # the cap of 8 waiting uploads holds when 32 arrive together (a pause after the count makes the old check-then-create overshoot every time)
+    real_listdir = os.listdir
+    def slow_listdir(p="."):
+        r = real_listdir(p)
+        if "pending" in str(p): time.sleep(0.03)
+        return r
+    made, refused, lock_ = [], [], threading.Lock()
+    def one():
+        try:
+            u = memo.Upload("a13", "c.txt", 3)
+            with lock_: made.append(u)
+        except memo.Refused as e:
+            with lock_: refused.append(e.status)
+    os.listdir = slow_listdir
+    try:
+        ths = [threading.Thread(target=one) for _ in range(32)]
+        for t_ in ths: t_.start()
+        for t_ in ths: t_.join()
+    finally:
+        os.listdir = real_listdir
+    check("32 uploads at once on one item: no more than 8 wait, the rest are refused (400)", len(made) == memo.PENDING_PER_ITEM and refused == [400] * 24 and len(pending("a13")) == 8, (len(made), sorted(set(refused)), len(pending("a13"))))
+    for u in made: u.abort()
+    check("the claim folder is gone when the uploads are", not any((MEMO / ".claims").iterdir() if (MEMO / ".claims").is_dir() else ()) and pending("a13") == [], pending("a13"))
+    # another upload's partial file is not stored: it does not take the room of a whole file
+    pf = MEMO / "pending" / "a14" / ("9" * 32) / memo.PARTIAL; pf.parent.mkdir(parents=True)
+    fd = os.open(pf, os.O_WRONLY | os.O_CREAT); os.ftruncate(fd, memo.MAX_TOTAL - MB); os.close(fd)      # sparse: a partial upload of 99 MB, still growing
+    r2 = up("a3", "two.bin", b"x" * (2 * MB))
+    check("another upload's partial file is not counted as stored: 2 MB is taken while a 99 MB partial is on the way", r2.status_code == 201, (r2.status_code, r2.text[:200]))
+    shutil_.rmtree(MEMO / "pending" / "a14"); shutil_.rmtree(MEMO / "pending" / "a3", ignore_errors=True)
+    # only one send takes a pending id: two notes naming it together, one is recorded and the other is refused (400)
+    # (the pause lets both sends read the pending file before either moves it; the old check, made before the item lock, passed both)
+    pid = up("a15", "shared.txt", b"one file").json()["id"]
+    real_records, gate, outs = memo.records, threading.Barrier(2), []
+    def paused(gid, ids):
+        r = real_records(gid, ids)
+        try: gate.wait(timeout=1.5)
+        except threading.BrokenBarrierError: pass
+        return r
+    def sender():
+        try: outs.append(("ok", _answer_service("a15", "", "same file", "comment", "board", None, "", "", [pid])))
+        except memo.Refused as e: outs.append(("refused", e.status))
+    from stackshot.service.answer import _answer as _answer_service
+    memo.records = paused
+    try:
+        ths = [threading.Thread(target=sender) for _ in range(2)]
+        for t_ in ths: t_.start()
+        for t_ in ths: t_.join()
+    finally:
+        memo.records = real_records
+    got = [f for a_ in rd(15)["metadata"].get("answers", []) for f in a_.get("files", [])]
+    check("two notes that name the same pending file at once: one takes it, the other is refused (400), the file is recorded once", sorted(o[0] for o in outs) == ["ok", "refused"] and [o[1] for o in outs if o[0] == "refused"] == [400] and len(got) == 1, (outs, got))
+    # the upload path gets the inside-the-store check of the read path: a symlinked pending folder is refused
+    out_dir = T / "outside"; out_dir.mkdir(); (MEMO / "pending").mkdir(exist_ok=True); os.symlink(out_dir, MEMO / "pending" / "a16")
+    sl = up("a16", "x.txt", b"abc")
+    check("an upload into a symlinked pending folder is refused and writes nothing outside the store", sl.status_code == 400 and os.listdir(out_dir) == [], (sl.status_code, sl.text[:200], os.listdir(out_dir)))
+    os.unlink(MEMO / "pending" / "a16")
+    # a token with a character that is not ASCII is refused like a wrong one, never a 500
+    def status_of(call):
+        try: return call().status_code
+        except Exception as e: return e.__class__.__name__
+    odd_tok = [status_of(lambda: up("a1", "x", b"abc", headers={"X-Answer-Token": "t\u00f6k\u00e9n".encode("utf-8")})), status_of(lambda: send("a1", act="comment", text="x", token="t\u00f6k\u00e9n"))]
+    check("a non-ASCII token is refused (403) on the upload and on the answer, not a 500", odd_tok == [403, 403], odd_tok)
+    # a name keeps the documented 120 characters with the .bin included
+    check("a name that gets .bin after it is still at most 120 characters (and 240 bytes)",
+          all(len(n) <= memo.NAME_CHARS and len(n.encode()) <= memo.NAME_BYTES and n.endswith(".tmp.bin") for n in (memo.safe_name("a" * 400 + ".tmp"), memo.safe_name("\u00e9" * 400 + ".tmp"), memo.safe_name("b" * 118 + ".tmp"))), [len(memo.safe_name("a" * 400 + ".tmp"))])
+    check("a name of 120 characters that needs nothing is kept whole", memo.safe_name("c" * 116 + ".txt") == "c" * 116 + ".txt")
+    # a files-only note on a closed item is refused and its files stay pending
+    cl = up("a4", "closed.txt", b"x").json()
+    rcl = send("a4", act="comment", text="", files=cl["id"])
+    check("a files-only note on a closed item is refused (nothing recorded) and its files stay pending", rcl.json().get("sent") == "closed" and cl["id"] in pending("a4") and not any(cl["id"] == f.get("id") for a_ in rd(4)["metadata"]["answers"] for f in a_.get("files", [])), (rcl.text[:200], pending("a4")))
+    shutil_.rmtree(MEMO / "pending" / "a4", ignore_errors=True)
 
 # ---- 5. clean
 def aged(path, t):
@@ -251,6 +332,17 @@ check("it keeps an item closed 5 days ago, an open one, one it cannot read and a
       (MEMO / "a6").is_dir() and (MEMO / "a7").is_dir() and (MEMO / "a8").is_dir() and new_p.is_dir() and (MEMO / "a9").is_dir())
 item(6, status="completed", outcome="done", reason="done", age=31 * DAY); aged(MEMO / "a6", time.time() - 45 * DAY)
 check("an item closed 31 days ago loses its files at the next pass", clean.main([]) == 0 and not (MEMO / "a6").exists())
+gone = pathlib.Path(tmp) / "gone-folder"
+check("newest() of a folder that is gone is not an error: no age test passes it", memo.newest(gone) == float("inf"))
+stored("a10", age=45 * DAY)
+def closed_then_gone(g):      # the folder is removed between the sweep's listing and its measuring
+    if g != "a10": return 0
+    shutil.rmtree(MEMO / g, ignore_errors=True)
+    return now - 40 * DAY
+shutil = __import__("shutil")
+try: swept = memo.sweep(closed_then_gone)
+except Exception as e: swept = e
+check("a folder that vanishes while the sweep measures it is skipped, the sweep goes on", isinstance(swept, dict), swept)
 check("the program is listed under `stackshot`", subprocess.run([sys.executable, "-m", "stackshot", "memo-files-clean", "--bogus"], cwd=STACK, capture_output=True).returncode == 2)
 svc, tim = (pathlib.Path(STACK) / "units" / f"stackshot-memo-files-clean.{k}.in" for k in ("service", "timer"))
 check("the timer's units: the service runs the program, the timer is daily and persistent",
