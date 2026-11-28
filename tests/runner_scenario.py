@@ -468,7 +468,8 @@ for label, section in (("no retired key", None), ("enabled = true", {"enabled": 
           and any(t.target == runners_[0].loop and t.name == "runner" and t.daemon and getattr(t, "started", False) for t in FakeThread.made), (names_, runners_, [getattr(t, "__name__", t) for t in targets]))
     check(f"4 start with {label}: …the names returned are the runner, then the other loops, and no wake or fleet-watch thread",
           names_ == ["runner", "publish", "watchdog", "router", "search", "ghsync-worker", "ghsync-comments"], names_)
-    check(f"4 start with {label}: …no thread more than the runner's loop and the six others is started", len(targets) == 7 and runners_[0].loop in targets, [getattr(t, "__name__", t) for t in targets])
+    check(f"4 start with {label}: …no thread more than the runner's loop, the six others and the start's roles.json step (a thread of its own, joined before the runner) is started", len(targets) == 8 and runners_[0].loop in targets
+          and sum(t.name == "roles-at-start" for t in FakeThread.made) == 1, [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …the other loops are untouched: publish, watchdog, router, search, the mirror's worker and comments",
           all(f in targets for f in (runner_svc.publish_loop, runner_svc.watchdog_loop, _router_live.loop, _search.loop, _gh.worker_loop, _gh.comments_loop)), [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …no thread of the page-debt call is started: the audit run's pages stage asks the server for it", not hasattr(server, "_page_debt_loop") and not any(getattr(t, "__name__", "") == "_page_debt_loop" for t in targets), [getattr(t, "__name__", t) for t in targets])

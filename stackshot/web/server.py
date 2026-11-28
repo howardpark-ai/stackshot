@@ -233,8 +233,11 @@ def _start_background() -> list[str]:
     except Exception as e:
         print(f"project ids: {e}", file=sys.stderr, flush=True)
     _lap("project ids")
-    _roles_sync_safe()                      # roles.json is current from the first second, before any publish (and projects.json beside it)
-    _lap("roles.json and projects.json")
+    # roles.json (and projects.json beside it) is current from the first second, before any publish and before the runner. Its one slow read is `sala sessions --json`, over ssh when the agents live on
+    # another box (about 2.6 s of a 5.3 s start), and the passes below do not read what it writes: so it runs in a thread beside them and is joined before the runner starts, which is where it used to be done.
+    _roles_start = threading.Thread(target=lambda: _roles_sync_safe(), name="roles-at-start", daemon=True)
+    _roles_start.start()
+    _lap("roles.json and projects.json started")
     _stallsvc.stall_pause_reload()
     _stallsvc.stall_pause_check()                    # a pause of the stall pass read at the start begins its clock now (or keeps the one in <state>/stall_pause.json) and logs its end time
     for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
@@ -299,6 +302,8 @@ def _start_background() -> list[str]:
     except Exception as e:
         print(f"phase sweep failed: {e}", file=sys.stderr, flush=True)
     _lap("wake and phase passes")
+    _roles_start.join()                     # roles.json and projects.json are written before the runner, the publish timer and the first request
+    _lap("roles.json and projects.json waited for")
     _runner.record_server_start()           # this run's start in the state dir, for a runner that restarts alone (service/fleet_events.py flag_start)
     started = _runner.start()               # the minute set's runner, the timer publish and the runner's watchdog (service/runner.py)
     threading.Thread(target=_router_live.loop, daemon=True).start()   # the router's ticks (a call takes minutes), in a thread of their own
