@@ -133,6 +133,13 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
 
 
 _told: set[str] = set()
+_SERVING = False      # set by serving(): this process is the board server (or its runner), where a members file that is not there is a real fault
+
+
+def serving() -> None:
+    """Say that this process serves the board (web/publish.serving calls it, from `stackshot server` and `stackshot minute`). A tool that only reads the config does not call it."""
+    global _SERVING
+    _SERVING = True
 
 
 def _tell(msg: str) -> None:
@@ -201,6 +208,17 @@ def check_verify(value: str | None, cfg: dict[str, Any] | None = None, now: floa
 _cache: dict[str, tuple[tuple[int, int, int, int], bool, dict[str, _files.Member]]] = {}
 
 
+def _nothing_at(p: str) -> bool:
+    """Whether nothing at all is at this path (a link that leads nowhere, a folder or a path that cannot be looked at is not nothing)."""
+    try:
+        os.lstat(p)
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def _read_members(path: str) -> dict[str, _files.Member]:
     """The front door's members file, `{member: Member}` (`frontdoor_files.read_member_records`), read again only when its stamp changed (one stat per call), and always when it was written within RACY_SECONDS of being read.
     A file that cannot be read is nobody (said once in the log), never everybody."""
@@ -219,7 +237,8 @@ def _read_members(path: str) -> dict[str, _files.Member]:
         for line in said:
             _tell(line)
     except _files.FileError as e:
-        _tell(str(e))
+        if _SERVING or not _nothing_at(p):      # a reading-only tool on a machine that never held the file has nothing to say; a file that is there and fails says so everywhere
+            _tell(str(e))
         _cache.pop(p, None)
         return {}
     if st is not None:
