@@ -242,6 +242,9 @@ DEPLOY_SSH="$(python3 -c 'from stackshot.core import config; print((getattr(conf
 WAIT_CHECKS="${RELEASE_WAIT_CHECKS:-3000}"   # seconds a PR's checks may stay pending (50 min); the knob lets the tests prove the give-up on a short cap, one scenario pins this default
 ORPHAN_QUEUED="${RELEASE_ORPHAN_QUEUED:-1800}"   # seconds a workflow run may stay `queued` with an empty job list before the wait for the PR's checks replaces it, or the wait for the merge queue fails on it (30 min): GitHub can leave such a run for days, and it cannot be cancelled or rerun; the knob lets the tests prove it on a short cap, one scenario pins this default
 orphan_done=" "   # ids of the runs already replaced in this release (a replaced run stays listed as queued: it never counts again, even while it is still the newest of its workflow)
+orphan_prior=""   # a rerun's: the run ids of an earlier release's close call (its marker), passed over at this release's FIRST look only: once the PR was reopened GitHub can list them as the newest a moment longer, but
+                  # that close may never have taken effect (a signal during the call, an error), and then the run is still the one that holds the wait: the next look, 5 min later, judges it as any run
+orphan_erred=""   # set when this release's close call errored and GitHub still showed the PR open after it: a close it shows later may be that call's, and is not called someone else's
 gq_since=""   # ghq_read: the second the PR's merge-queue entry was made (GitHub's enqueuedAt), "" with no entry
 MERGEABLE_WAIT="${RELEASE_WAIT_MERGEABLE:-180}"   # seconds GitHub may say mergeable UNKNOWN (it recomputes after main moves) before the release gives up; read every 10 s
 LOCK_FILE="${DEPLOY_LOCK_FILE:-$LOGDIR/deploy.lock}"      # next to the other release state; DEPLOY_LOCK_FILE / DEPLOY_LOCK_WAIT let the tests point elsewhere
@@ -1106,7 +1109,7 @@ try: runs = json.load(sys.stdin)["check_runs"]
 except Exception: sys.exit(1)
 sys.exit(0 if any(r.get("name") == os.environ["NEED"] and r.get("status") == "completed" and r.get("conclusion") == "success" for r in runs) else 1)'
 }
-gh_cached() {   # $1 = a salt (the PR head the answer is about), then gh's arguments. The answer of the last GH_TTL s (any release on this box asked it; <state>/releases/gh-cache, the folder run_state uses) is reused; only a successful, non-empty answer is kept; a failed call prints nothing and returns its status
+gh_cached() {   # $1 = a salt (the PR head the answer is about), then gh's arguments. The answer of the last GH_TTL s (any release on this box asked it; <state>/releases/gh-cache, the folder run_state uses) is reused; only a successful, non-empty answer is kept; a failed call prints nothing on stdout (gh's error goes to stderr) and returns its status
     SALT="$1" GH_CACHE="$GH_CACHE" GH_TTL="$GH_TTL" python3 -c '
 import hashlib, os, subprocess, sys, time
 a = sys.argv[1:]; CD, TTL = os.environ.get("GH_CACHE", ""), float(os.environ.get("GH_TTL") or 0)
@@ -1116,7 +1119,7 @@ if f:
         if time.time() - os.stat(f).st_mtime < TTL: sys.stdout.write(open(f, encoding="utf-8").read()); sys.exit(0)
     except OSError: pass
 r = subprocess.run(["gh", *a], capture_output=True, text=True)
-if r.returncode != 0: sys.exit(r.returncode)
+if r.returncode != 0: sys.stderr.write(r.stderr); sys.exit(r.returncode)
 if f and r.stdout.strip():
     try:
         os.makedirs(CD, mode=0o700, exist_ok=True); t = f + ".%d.tmp" % os.getpid()
@@ -1182,15 +1185,26 @@ orphan_said() {   # $1 = the run ids (space separated: one replacement covers al
 # A release reopens only a PR it KNOWS it closed: GitHub answered its own close call (gh pr close returned, not saying the PR was closed already). GitHub cannot say whose call closed a PR (every gh write here is the
 # same account, and a release cannot tell its writes from another's), so a close call that errored or never answered, and a PR a rerun finds CLOSED, are never reopened by a release: the log says how to do it by hand.
 orphan_open=""      # a PR this release closed (its close call answered) and has not reopened yet: the exit trap reopens it, with no read first, however the release ends
-orphan_closing=""   # a PR whose close call is under way (set right before it, cleared when it returns): a release that ends then (a signal can land after GitHub took the close and before gh answers) cannot tell whether
-                    # its call closed the PR, and the exit trap reopens nothing and says so. The marker file under the state dir ($LOGDIR/orphan-reopen-<pr>, "<epoch> <head> <run ids>": the second before the close
-                    # call, the runs it replaces) outlives a release that ends with the PR maybe closed by it: a rerun that finds the PR CLOSED names it in its failure, one that finds it open passes over those runs
+orphan_closing=""   # a PR whose close call is under way (set right before it, cleared once the release knows what the call did: its answer, or the reads after an error): a release that ends then (a signal can land
+                    # after GitHub took the close and before gh answers) cannot tell whether its call closed the PR, and the exit trap reopens nothing and says so. The marker file under the state dir
+                    # ($LOGDIR/orphan-reopen-<pr>, "<epoch> <head> <run ids>": the second before the close call, the runs it replaces) outlives a release that ends with the PR maybe closed by it: a rerun that finds
+                    # the PR CLOSED names it in its failure, one that finds it open passes over those runs at its first look only (orphan_prior)
 orphan_look() {   # $1 = the PR. GitHub's word on it now, one line "<STATE> <head oid>"; nothing when the answer cannot be read
     gh pr view "$1" --repo "$REPO" --json state,headRefOid 2>/dev/null | python3 -c '
 import json, sys
 try:
     d = json.load(sys.stdin); print(d["state"], d.get("headRefOid") or "-")
 except Exception: pass' 2>/dev/null
+}
+orphan_inq() {   # $1 = the PR. Its merge-queue entry as GitHub has it now: "<STATE> <position>", or "-" when the PR is in no merge queue; nothing, status 1, when the answer cannot be read (a reply without the field
+                 # included). Its own query, not ghq_read: the merge queue wait's globals stay as they are
+    gh api graphql -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){mergeQueueEntry{state position}}}}' \
+        -f o="${REPO%%/*}" -f n="${REPO##*/}" -F p="$1" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    e = json.load(sys.stdin)["data"]["repository"]["pullRequest"]["mergeQueueEntry"]
+    print("-" if e is None else "%s position %s" % (e["state"], e.get("position")))
+except Exception: sys.exit(1)' 2>/dev/null
 }
 orphan_reopen() {   # $1 = the PR. Reopens it (4 tries, 5 s apart). 0 when GitHub took it: the marker and $orphan_open are cleared
     local try
@@ -1213,10 +1227,13 @@ orphan_settled() {   # $1 = the PR, $2 = the seconds between reads. orphan_look 
     done
     [ -z "$last" ] || echo "$last"
 }
-TRAP_LOG="" TRAP_OUT=""   # run(): the PR's log and what the shell's stdout is once it goes to the log's tee (the pipe, from /proc)
+TRAP_LOG="" TRAP_OUT="" TRAP_TEE=""   # run(): the PR's log, what the shell's stdout is once it goes to the log's tee (the pipe, from /proc), and that tee's pid
 trap_out() {   # first in run()'s EXIT trap. gh, git, python3 and sleep are functions here, so a call like `gh ... >/dev/null 2>&1` redirects the shell's own stdout while it runs, and a signal that lands then runs
-               # the trap with it still redirected: its lines would be lost. When stdout is not the tee's pipe, the trap writes to the log file itself
-    [ -z "$TRAP_LOG" ] || [ "$(readlink "/proc/$$/fd/1" 2>/dev/null)" = "$TRAP_OUT" ] || exec >>"$TRAP_LOG" 2>&1
+               # the trap with it still redirected: its lines would be lost. A stop of the whole unit (systemctl stop signals every process of it) can end the tee too, and a write to its pipe would then end the shell
+               # (SIGPIPE) before the rest of the trap. So SIGPIPE is ignored from here on, and when stdout is not the tee's pipe, or the tee is gone, the trap writes to the log file itself
+    trap '' PIPE
+    [ -n "$TRAP_LOG" ] || return 0
+    if [ "$(readlink "/proc/$$/fd/1" 2>/dev/null)" != "$TRAP_OUT" ] || { [ -n "$TRAP_TEE" ] && [ ! -e "/proc/$TRAP_TEE/fd/0" ]; }; then exec >>"$TRAP_LOG" 2>&1; fi
 }
 orphan_exit() {   # in the EXIT trap (after trap_out): a release that ends (a failure, a signal) between its close call and the reopen would leave the PR closed. A close this release knows it made (orphan_open) is reopened
                   # here, 3 tries, with no read first (there is nothing to ask GitHub: the close is this call's, and a read that fails must not keep it closed); a release that ended during its close call (orphan_closing)
@@ -1231,25 +1248,36 @@ orphan_exit() {   # in the EXIT trap (after trap_out): a release that ends (a fa
         say "PR #$pn, closed by this release to replace a run queued with no jobs, could not be reopened on the way out (3 tries): it is CLOSED. Reopen it by hand (gh pr reopen $pn), then run release.sh $pn again"
     elif [ -n "$orphan_closing" ]; then
         pn="$orphan_closing"; orphan_closing=""
-        say "this release ended during its call to close PR #$pn (to replace a run queued with no jobs): whether that call closed the PR cannot be told (GitHub does not say whose call closed a PR), so it is not reopened. If PR #$pn is CLOSED and no one else closed it, reopen it by hand (gh pr reopen $pn), then run release.sh $pn again"
+        say "this release ended during its call to close PR #$pn (to replace a run queued with no jobs), before it could tell what that call did: whether it closed the PR cannot be told (GitHub does not say whose call closed a PR), so it is not reopened. If PR #$pn is CLOSED and no one else closed it, reopen it by hand (gh pr reopen $pn), then run release.sh $pn again"
     fi
     return 0
 }
 orphan_pr() {   # in wait_pr_checks: PR check runs that are orphans are replaced by closing and reopening the PR (the head stays; no commit), once for all of them. $1 = the step, $2 = 1 when this step replaced runs already. 0: replaced (the wait clock restarts), 1: no orphan
-    local ids now out on_txt on_has on_be mk="$LOGDIR/orphan-reopen-$pr"
-    ids="$(orphan_scan pr | tr '\n' ' ')"; ids="${ids% }"; [ -n "$ids" ] || return 1
+    local ids now out inq on_txt on_has on_be mk="$LOGDIR/orphan-reopen-$pr" done0="$orphan_done"
+    orphan_done="$orphan_done$orphan_prior"; ids="$(orphan_scan pr | tr '\n' ' ')"; ids="${ids% }"
+    orphan_done="$done0"; orphan_prior=""   # a rerun's marker runs: passed over at this first look only
+    [ -n "$ids" ] || return 1
     orphan_names "$ids"
     # only a newest run that is not recorded gets here (the replacement's own runs supersede the replaced ones): one queued with no jobs after the replacement is a second failure of GitHub, not the first one again
-    [ "$2" != 1 ] || fail "$1" "$on_txt $on_be queued with no jobs again, after the PR was closed and reopened once for the same reason; GitHub is not starting this PR's runs (it cannot be cancelled or rerun)"
+    [ "$2" != 1 ] || fail "$1" "$on_txt $on_be queued with no jobs again, after the PR was closed and reopened once for the same reason; GitHub is not starting this PR's runs (it cannot be cancelled or rerun). To try again, close and reopen the PR by hand (gh pr close $pr, then gh pr reopen $pr) or push a new commit to it, then run release.sh $pr again"
     # the PR as GitHub has it right before the close: one closed or merged during the wait is not this release's to close (nor to reopen), and a moved head is not the head waited on (closing would cancel its runs)
     now="$(orphan_look "$pr")"
     case "$now" in
         "OPEN $headsha") ;;
         OPEN\ *) fail "$1" "the PR's head moved to $(echo "$now" | cut -d' ' -f2 | cut -c1-7) while this release waited for the checks of ${headsha:0:7} (where $on_txt $on_be queued with no jobs); nothing was closed: run release.sh $pr again for the new head" ;;
         "") say "$on_txt $on_be queued with no jobs, but GitHub's answer about the PR's state and head cannot be read; nothing is closed, looked at again in 5 min"; return 1 ;;
-        *) fail "pr state" "the PR is ${now%% *}: it was closed or merged while this release waited for its checks; this release did not close it and does not reopen it" ;;
+        *) # a close call of this release that errored at an earlier look, with the PR still open on three reads after it (orphan_erred), may be the close GitHub shows now: it is not called someone else's
+           [ -z "$orphan_erred" ] || [ "${now%% *}" != CLOSED ] || fail "pr state" "the PR is CLOSED. This release's call to close it at an earlier look errored and GitHub still showed the PR open after it: whether that call closed it cannot be told (GitHub does not say whose call closed a PR), so it is not reopened. If no one else closed it, reopen it by hand (gh pr reopen $pr), then run release.sh $pr again"
+           fail "pr state" "the PR is ${now%% *}: it was closed or merged while this release waited for its checks; this release did not close it and does not reopen it" ;;
     esac
     mq_line_check   # a group release may have handed the PR to the salamander merge queue while this release waited (as before the enqueue): that queue's PR is not this release's to close
+    # a PR in GitHub's merge queue (a rerun finds it there; an earlier release enqueued it) is not closed: closing would take it out of the queue, and the release never does that. Nothing is closed on an answer it cannot read
+    inq="$(orphan_inq "$pr")" || inq=""
+    case "$inq" in
+        -) ;;
+        "") say "$on_txt $on_be queued with no jobs, but GitHub's answer about the PR's merge queue entry cannot be read; nothing is closed, looked at again in 5 min"; return 1 ;;
+        *) fail "$1" "$on_txt $on_be queued with no jobs, and PR #$pr is in the merge queue ($inq): closing it to replace $([ "$on_be" = is ] && echo it || echo them) would take it out of the queue, which this release does not do (GitHub cannot tell it whether a removal was its own or someone else's), so nothing was closed. If the PR merges from the queue, run release.sh $pr again (it deploys a merged PR); to replace the run instead, remove PR #$pr from the merge queue on GitHub, then run release.sh $pr again" ;;
+    esac
     echo "$(date +%s) $headsha $ids" > "$mk"   # before the close: a release that ends with the PR maybe closed by it leaves it for a rerun (which names it, and never reopens the PR)
     orphan_closing="$pr"   # until gh answers, this release cannot tell whether its call closed the PR (a signal can land after GitHub took the close): the exit trap reopens nothing and says so
     if out="$(gh pr close "$pr" --repo "$REPO" 2>&1 >/dev/null)"; then
@@ -1260,10 +1288,12 @@ orphan_pr() {   # in wait_pr_checks: PR check runs that are orphans are replaced
         esac
         orphan_open="$pr"; orphan_closing=""   # GitHub answered this call: the close is this release's, and the exit trap reopens it however the release ends from here
     else
+        # the call can have closed the PR and still errored (a timeout after the fact), and GitHub can show the close a moment late: asked up to three times. orphan_closing stays set through the reads: a
+        # release that ends during them cannot tell what its call did either, and the exit trap says so
+        now="$(orphan_settled "$pr" 10)"
         orphan_closing=""
-        now="$(orphan_settled "$pr" 10)"   # the call can have closed the PR and still errored (a timeout after the fact), and GitHub can show the close a moment late: asked up to three times
         case "$now" in
-            OPEN\ *) rm -f "$mk"; say "$on_txt $on_be queued with no jobs, but closing the PR to replace it failed; the wait goes on"; return 1 ;;
+            OPEN\ *) rm -f "$mk"; orphan_erred=1; say "$on_txt $on_be queued with no jobs, but closing the PR to replace it failed (GitHub shows it open); the wait goes on"; return 1 ;;
             # closed after a call that errored, or not known: GitHub does not say whose call closed a PR, so this call's close cannot be told from someone else's, and nothing is reopened (the marker stays for a rerun)
             CLOSED\ *) fail "pr state" "closing PR #$pr to replace $on_txt errored, and the PR is CLOSED: whether this release's call closed it cannot be told (GitHub does not say whose call closed a PR), so it is not reopened. If no one else closed it, reopen it by hand (gh pr reopen $pr), then run release.sh $pr again" ;;
             "") fail "$1" "closing PR #$pr to replace $on_txt errored, and GitHub's answer about its state cannot be read: it is not reopened. If the PR is CLOSED and no one else closed it, reopen it by hand (gh pr reopen $pr), then run release.sh $pr again" ;;
@@ -1285,12 +1315,18 @@ wait_pr_checks() {   # $1 = the step a failure is named for (checks: the first w
         checks="[]"; verdict=pending; going=1
         [ $((waited % 300)) -ne 0 ] || say "checks on ${headsha:0:7}: ${ci_line#* * }; waiting on the ci-runs file, no GitHub call"
       else
-        checks="$(gh_cached "$headsha" pr checks "$pr" --repo "$REPO" --json name,bucket 2>/dev/null)" || checks="[]"   # shared for GH_TTL s, keyed by the head too (an updated head is a new answer)
+        # shared for GH_TTL s, keyed by the head too (an updated head is a new answer). gh's "no checks reported" (it exits 1 then) is an answer: no check yet, as when every run of the head is queued with no jobs;
+        # any other failure is no answer (unread below): the wait goes on as for a pending check, and no orphan look comes of it
+        if checks="$(gh_cached "$headsha" pr checks "$pr" --repo "$REPO" --json name,bucket 2>&1)"; then :
+        elif [[ "${checks,,}" == *"no checks reported"* ]]; then checks="[]"
+        else checks=""; fi
         # a failed or cancelled check fails at once (whichever it is); a pass needs the tests job (NEED): the required check, without which GitHub refuses the enqueue whatever the other checks say
         # (a quick check alone must not read as a pass on a new head, and a tests run queued with no jobs reports no check at all)
         verdict="$(echo "$checks" | NEED="$TESTS_CHECK" python3 -c '
 import json,os,sys
-cs=json.load(sys.stdin)
+try:
+    cs=json.load(sys.stdin); assert isinstance(cs, list) and all(isinstance(c, dict) for c in cs)
+except Exception: print("unread"); sys.exit()   # the read failed, or its answer is not the rows
 if not cs: print("none"); sys.exit()   # nothing reported yet
 b={c["bucket"] for c in cs}
 if "fail" in b or "cancel" in b: print("fail"); sys.exit()
@@ -1302,13 +1338,15 @@ print("pending" if "pending" in b else "pass")')"
         case "$verdict" in
             pass) say "$okmsg"; return 0 ;;
             none) [ "$mode" = progress ] || [ $((waited % 300)) -ne 0 ] || say "no $TESTS_CHECK check reported yet" ;;   # every 5 min, as the other lines of a wait (a run held for hours would write it every cycle)
+            unread) [ "$mode" = progress ] || [ $((waited % 300)) -ne 0 ] || say "the checks of ${headsha:0:7} cannot be read this cycle (gh pr checks failed); the wait goes on" ;;
             fail) fail "$step" "a check failed: $(echo "$checks" | python3 -c 'import json,sys; print(", ".join(c["name"]+"="+c["bucket"] for c in json.load(sys.stdin) if c["bucket"] in ("fail","cancel")))')" ;;
         esac
         # --status shows the log's tail: while the wait goes on the newest line says what is waited for, at most 5 min old
-        [ "$mode" != progress ] || [ $((waited % 300)) -ne 0 ] || say "waiting for the PR's tests on ${headsha:0:7} ($([ "$verdict" = none ] && echo "not reported yet" || echo "$verdict")); $((waited/60)) min of up to $((WAIT_CHECKS/60))"
+        [ "$mode" != progress ] || [ $((waited % 300)) -ne 0 ] || say "waiting for the PR's tests on ${headsha:0:7} ($(case "$verdict" in none) echo "not reported yet" ;; unread) echo "not read this cycle" ;; *) echo "$verdict" ;; esac)); $((waited/60)) min of up to $((WAIT_CHECKS/60))"
         # a run of this head queued with no jobs for ORPHAN_QUEUED s never starts: the PR is closed and reopened for a new run, once per step; the wait clock restarts once with it. Looked for at the start and then every 5 min,
-        # on a cycle that read GitHub (the wait has not passed: the tests job is missing or a check pending); never while the poller shows a newest run going (that run would be cancelled; the cycle makes no GitHub call)
-        if [ $going = 0 ] && { [ $orph_at -lt 0 ] || [ $((waited - orph_at)) -ge 300 ]; }; then
+        # on a cycle whose checks read GitHub answered (the wait has not passed: the tests job is missing or a check pending; a read that failed says nothing about now, and no write comes of it); never while the
+        # poller shows a newest run going (that run would be cancelled; the cycle makes no GitHub call)
+        if [ $going = 0 ] && [ "$verdict" != unread ] && { [ $orph_at -lt 0 ] || [ $((waited - orph_at)) -ge 300 ]; }; then
             orph_at=$waited
             if orphan_pr "$step" "$orph_n"; then orph_n=1; waited=0; orph_at=0; sleep "$POLL_PR"; continue; fi
         fi
@@ -1518,7 +1556,7 @@ wait_merged() {   # after the enqueue call, in run(): reads the PR until it is M
             unread=$((unread+1)); poll="$POLL_QUEUE"   # an answer GitHub did not give (a 403/429 is a wait) is not asked again in 10 s: the slow poll from the first unreadable read on
             [ $((now - said)) -lt 300 ] || { said=$now; say "GitHub's answer about the PR could not be read ($unread read(s) in a row); trying again"; }
         fi
-        # the current group's merge_group run of this PR (the newest since its queue entry) queued with no jobs for ORPHAN_QUEUED s never starts, and the PR cannot merge from that group. This release does not replace
+        # the current group's merge_group run of this PR (the newest since its queue entry) queued with no jobs for ORPHAN_QUEUED s never starts, and the PR may not merge from that group. This release does not replace
         # it: taking the PR out of the queue and putting it back needs proof that the removal was this release's own, and GitHub cannot give it (every gh write here is the same account), so a PR someone else took out
         # meanwhile could be put back, merged and deployed. It fails at once, the PR left in the queue, saying what to do by hand. Looked for every 5 min, only on a read that showed the PR in the queue this cycle (a read
         # that failed says nothing about now), once the entry is that old (GitHub's enqueuedAt: a rerun finds the entry an earlier release made; the enqueue call's second when the entry has none)
@@ -1527,7 +1565,7 @@ wait_merged() {   # after the enqueue call, in run(): reads the PR until it is M
             oid="$(orphan_scan queue | tr '\n' ' ')"; oid="${oid% }"
             if [ -n "$oid" ]; then
                 orphan_names "$oid"
-                fail "merge queue" "$on_txt of PR #$pr's merge group $on_has been queued for more than $((ORPHAN_QUEUED/60)) min with no jobs: GitHub never starts such a run and it cannot be cancelled or rerun, so the PR cannot merge from this queue entry. This release does not take the PR out of the merge queue (GitHub cannot tell it whether a removal was its own or someone else's): the PR is still in the merge queue ($gq_entry). To replace the run, remove PR #$pr from the merge queue on GitHub, then run release.sh $pr again (it enqueues the PR again)"
+                fail "merge queue" "$on_txt of PR #$pr's merge group $on_has been queued for more than $((ORPHAN_QUEUED/60)) min with no jobs: GitHub never starts such a run and it cannot be cancelled or rerun, so the PR may not merge from this group (GitHub can still build a new one). This release does not take the PR out of the merge queue (GitHub cannot tell it whether a removal was its own or someone else's): the PR is still in the merge queue ($gq_entry), and if it merges from there this release does not deploy it. To replace the run, remove PR #$pr from the merge queue on GitHub, then run release.sh $pr again (it enqueues the PR again); if the PR merges from the queue meanwhile, run release.sh $pr again (it deploys a merged PR)"
             fi
         fi
         [ $waited -lt "$QUEUE_WAIT" ] || fail "merge queue" "still $([ -n "$gq_entry" ] && echo "in the merge queue ($gq_entry)" || echo "not merged") $((waited/60)) min after the enqueue, which is as long as this release waits; the PR may still merge later: rerun release.sh $pr to carry on from the merge (the next release's deploy carries it too)"
@@ -2252,7 +2290,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
 run() {
     local pr="$1" recycle="${2:-}" log="$LOGDIR/pr-$1.log" title sha restarted step rc_note="" merge_note="" audit_note="" verified="" ROLLED_MARK="$LOGDIR/pr-$1.rolledback" mg_notlive="" q_fail=skip q_note="" q_riders="" qstart=0
     exec > >(tee -a "$log") 2>&1
-    TRAP_LOG="$log"; TRAP_OUT="$(readlink "/proc/$$/fd/1" 2>/dev/null)"   # for trap_out
+    TRAP_TEE="${!:-}"; TRAP_LOG="$log"; TRAP_OUT="$(readlink "/proc/$$/fd/1" 2>/dev/null)"   # for trap_out ($!: the tee, the process substitution just started)
     say "release of PR #$pr starts in $HERE ($REPO)"
     ! q_is_started "$pr" || qstart=1   # the queue started this release (it wrote the mark before the start): its pause and its pre-enqueue stop apply to it
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
@@ -2296,8 +2334,9 @@ run() {
         if [ "$1" = start ] && [ -e "$LOGDIR/orphan-reopen-$pr" ]; then   # an earlier release of this PR called to close it to replace a run queued with no jobs (the marker) and did not reopen it. A rerun never reopens it:
                                                                           # GitHub does not say whose call closed a PR, so a CLOSED PR fails, naming that close and how to reopen it by hand (the marker stays)
             [ "$state" != CLOSED ] || fail "pr state" "the PR is CLOSED. An earlier release of it called to close it to replace a run queued with no jobs ($LOGDIR/orphan-reopen-$pr) and did not reopen it; a release does not reopen a PR it cannot prove it closed itself (GitHub does not say whose call closed a PR). If no one else closed it since, reopen it by hand (gh pr reopen $pr), then run release.sh $pr again"
-            # open again (reopened by hand) or merged: the runs that release replaced (the marker's) are passed over by this release's looks, as its own would be (GitHub can list them as the newest a moment longer)
-            local rid; for rid in $(cut -s -d' ' -f3- "$LOGDIR/orphan-reopen-$pr" 2>/dev/null); do [[ "$rid" =~ ^[0-9]+$ ]] && orphan_done="$orphan_done$rid "; done
+            # open again (reopened by hand) or merged: the runs that close was to replace (the marker's) are passed over at this release's first look only (orphan_prior): GitHub can list them as the newest a
+            # moment after a reopen, but the close may never have taken effect, and then such a run is the one that still holds the wait
+            local rid; for rid in $(cut -s -d' ' -f3- "$LOGDIR/orphan-reopen-$pr" 2>/dev/null); do [[ "$rid" =~ ^[0-9]+$ ]] && orphan_prior="$orphan_prior$rid "; done
             rm -f "$LOGDIR/orphan-reopen-$pr"
         fi
         if [ "$1" = start ] && [ "$state" = MERGED ]; then resumed=1; return 0; fi   # a rerun on a merged PR (4 below)

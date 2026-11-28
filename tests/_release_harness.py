@@ -104,14 +104,35 @@ if a[:1] == ["--orphan-blocks"]:   # the shell part's question, not a gh call: i
     top = max(mine, key=lambda r: (r["_t"], r["id"]), default=None)
     sys.exit(0 if top and top.get("status", "queued") == "queued" and not top.get("jobs") else 1)
 open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
+def kill_release():   # SIGTERM to the release's own shell: the parent, or the shell past a command substitution's subshell (a fork of it: the same program and command line); only a process of this scenario (RT_DIR in its environment)
+    import signal, time
+    if env("RT_KILLTEE"):   # a stop of the whole unit ends the log's tee too, first: the scenario's own copy of tee (bin/tee, put there for RT_KILLTEE), found by its executable; ended before the shell is signalled
+        own = os.path.realpath(f"{d}/bin/tee")
+        for t in [x for x in os.listdir("/proc") if x.isdigit()]:
+            try:
+                if os.readlink(f"/proc/{t}/exe") != own: continue
+                os.kill(int(t), signal.SIGTERM); open(f"{d}/tee_killed", "a").write(t + "\n")
+            except OSError: continue
+            for _ in range(200):   # until it is gone (a zombie, or reaped)
+                try:
+                    if open(f"/proc/{t}/stat").read().rsplit(")", 1)[1].split()[0] == "Z": break
+                except OSError: break
+                time.sleep(0.02)
+    def same(p): return os.readlink(f"/proc/{p}/exe"), open(f"/proc/{p}/cmdline", "rb").read()
+    def up(p): return int(open(f"/proc/{p}/stat").read().rsplit(")", 1)[1].split()[1])
+    p = os.getppid()
+    while up(p) > 1 and same(up(p)) == same(p): p = up(p)
+    if f"RT_DIR={d}".encode() in open(f"/proc/{p}/environ", "rb").read().split(b"\0") and b"release.sh" in open(f"/proc/{p}/cmdline", "rb").read(): os.kill(p, signal.SIGTERM)
 if a[:2] == ["pr", "view"] and a[a.index("--json") + 1] == "state,headRefOid":   # orphan_look: the PR now, one answer per read of this kind, the last repeated: RT_PRNOW, comma-separated, of OPEN (default) | CLOSED (closed
     # by someone else) | MERGED | moved (OPEN on another head) | fail (the read errors) | lag (OPEN on the head, whatever happened: GitHub has not shown a close yet) | handed (OPEN on the head, and the PR is found handed
-    # to the salamander merge queue meanwhile: its marker is written). The PR is CLOSED from a close call to a reopen call whatever RT_PRNOW says (but fail and lag): the file pr_closed (a scenario can start with it).
-    # Every such read is in orphan_calls
+    # to the salamander merge queue meanwhile: its marker is written) | kill (the release ends, SIGTERM to its shell, during this read; then answered as OPEN is). The PR is CLOSED from a close call to a reopen call
+    # whatever RT_PRNOW says (but fail and lag): the file pr_closed (a scenario can start with it). Every such read is in orphan_calls
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
     pn = int(open(f"{d}/prnow_reads").read()) + 1 if os.path.exists(f"{d}/prnow_reads") else 1
     open(f"{d}/prnow_reads", "w").write(str(pn)); pseq = env("RT_PRNOW", "OPEN").split(","); pv = pseq[min(pn, len(pseq)) - 1]
     if pv == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if pv == "kill":
+        import time; kill_release(); time.sleep(0.3); pv = "OPEN"
     head = env("RT_HEAD", HEAD0)
     if pv == "lag": pv = "OPEN"
     elif os.path.exists(f"{d}/pr_closed"): pv = "CLOSED"
@@ -160,14 +181,7 @@ if a[:2] == ["pr", "checks"]:
 # says it is already closed). As the real gh does, a close of a PR that is closed already changes nothing, says so on stderr and exits 0. RT_REOPEN=killfirst: the first reopen call ends the release (SIGTERM to its
 # shell) and errors, later ones work; killfirst2: the same, and the second reopen errors too; killfail: the same, and every later reopen errors. The PR is closed from a close call to a reopen call (the file
 # pr_closed: `gh pr view` says CLOSED; a scenario can start with it). `gh run list --commit` lists only the runs of that head. Every close, reopen and orphan_look read is in orphan_calls, and so is a dequeue call
-# (release.sh makes none: it never takes a PR out of the merge queue).
-def kill_release():   # SIGTERM to the release's own shell: the parent, or the shell past a command substitution's subshell (a fork of it: the same program and command line); only a process of this scenario (RT_DIR in its environment)
-    import signal
-    def same(p): return os.readlink(f"/proc/{p}/exe"), open(f"/proc/{p}/cmdline", "rb").read()
-    def up(p): return int(open(f"/proc/{p}/stat").read().rsplit(")", 1)[1].split()[1])
-    p = os.getppid()
-    while up(p) > 1 and same(up(p)) == same(p): p = up(p)
-    if f"RT_DIR={d}".encode() in open(f"/proc/{p}/environ", "rb").read().split(b"\0") and b"release.sh" in open(f"/proc/{p}/cmdline", "rb").read(): os.kill(p, signal.SIGTERM)
+# (release.sh makes none: it never takes a PR out of the merge queue). kill_release is above.
 if a[:2] in (["pr", "close"], ["pr", "reopen"]):
     open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
     if a[1] == "close" and env("RT_PRCLOSE") == "other": open(f"{d}/pr_closed", "w").write(str(tclock()))
@@ -254,7 +268,15 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
         if mq == "garbage": print("not json"); sys.exit(0)
         pnum = next(x[2:] for x in a if x.startswith("p="))
         print(json.dumps({"data": {"repository": {"mergeQueue": None if mq == "off" else {"id": f"MQ_main_{len(open(d + '/mq_reads').read())}"}, "pullRequest": {"id": f"PRNODE{pnum}"}}}})); sys.exit(0)
-    gn = int(open(f"{d}/gqreads").read()) + 1 if os.path.exists(f"{d}/gqreads") else 1
+    if "mergeQueueEntry" in q and "mergeCommit" not in q:   # the orphan look's read of the PR's merge queue entry alone (orphan_inq), right before a close: one answer per read, the last repeated: RT_PRQUEUE, comma-separated,
+        # of none (default: no entry) | queued (entry QUEUED position 1) | fail (the read errors) | garbage (not JSON). Every such read is in orphan_calls, as "mqentry"
+        open(f"{d}/orphan_calls", "a").write("mqentry\n")
+        qn = int(open(f"{d}/prqueue_reads").read()) + 1 if os.path.exists(f"{d}/prqueue_reads") else 1
+        open(f"{d}/prqueue_reads", "w").write(str(qn)); qseq = env("RT_PRQUEUE", "none").split(","); qv = qseq[min(qn, len(qseq)) - 1]
+        if qv == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
+        if qv == "garbage": print("not json"); sys.exit(0)
+        print(json.dumps({"data": {"repository": {"pullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 1} if qv == "queued" else None}}}})); sys.exit(0)
+    gn =int(open(f"{d}/gqreads").read()) + 1 if os.path.exists(f"{d}/gqreads") else 1
     open(f"{d}/gqreads", "w").write(str(gn)); gseq = env("RT_GQ", "merged").split(","); gv = gseq[min(gn, len(gseq)) - 1]
     open(f"{d}/gq_args", "a").write(" ".join(x for x in a if not x.startswith("query=")) + "\n")
     if env("RT_PARK_GQ") and gn == int(env("RT_PARK_GQ")):
@@ -656,6 +678,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     if env.get("sysrun") in ("timeout", "kill") or env.get("warm_sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
     if units is None and env.get("deploy_ssh"): (d / "bin/systemctl").write_text(SYSTEMCTL); (d / "bin/systemctl").chmod(0o755)   # a release with [release] deploy_ssh restarts the puller here: the stub answers, never the host's systemd (the other scenarios read the real one, as before)
     (d / "bin/ssh").write_text(SSH); (d / "bin/ssh").chmod(0o755)   # what [release] deploy_ssh runs (RT_DEPLOY_SSH)
+    if env.get("killtee"): shutil.copy(shutil.which("tee"), d / "bin/tee")   # RT_KILLTEE: the log's tee is the scenario's own copy of the real one, so the stub that ends it finds it by its executable, never by name
     (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
