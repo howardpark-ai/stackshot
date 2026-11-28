@@ -2,9 +2,9 @@
 
 What this page covers: a canvas, a page an agent shares with the board's owner: its addresses, what a reader sees, what keeps the page apart from the board, where it is kept, and the import that moves pages in. Back to the [README](../README.md).
 
-The code is `stackshot/service/canvas.py` (the store and the import), `stackshot/web/routes/canvas.py` (the read routes), `stackshot/web/ui/canvas.py` (the shell) and `stackshot/web/canvas_guard.py` (the headers). The tests are `tests/canvas_scenario.py` (the routes) and `tests/canvas_check.py` (a browser; CI runs it).
+The code is `stackshot/service/canvas.py` (the store and the import), `stackshot/service/canvas_write.py` (the commands), `stackshot/service/canvas_page.py` (what a page is checked for and given), `stackshot/web/tools/canvas.py` (the `canvas` tool), `stackshot/web/routes/canvas.py` (the read routes), `stackshot/web/ui/canvas.py` (the shell) and `stackshot/web/canvas_guard.py` (the headers). The tests are `tests/canvas_scenario.py` (the routes), `tests/canvas_write_scenario.py` (the commands), `tests/canvas_page_scenario.py` (the page checks) and `tests/canvas_check.py` (a browser; CI runs it).
 
-The board reads canvases and takes them from another store. It does not create or edit them yet: that comes with the cutover from that store, since two stores would give out the same numbers.
+The board reads canvases, takes them from another store and, once `[canvas] write` is true, creates and edits them with the `canvas` tool ([the commands](#the-canvas-tool)). Writes stay off until the import has moved the pages in, since two stores would give out the same numbers.
 
 ## Addresses
 
@@ -12,13 +12,13 @@ The board reads canvases and takes them from another store. It does not create o
 |---|---|
 | `/canvas/<n>` | the canvas on its current page |
 | `/canvas/<n>/versions/<id>` | one version: the page as it was until the time its id names (`20261101T080000.000001Z`, UTC) |
-| `/canvas/<n>/raw`, `/canvas/<n>/versions/<id>/raw` | the page itself, the stored bytes and nothing else |
+| `/canvas/<n>/raw`, `/canvas/<n>/versions/<id>/raw` | the page itself, as saved, with [what it is given](#what-a-page-is-given) when it needs it |
 
 The address is written in one place, `PATH` in `service/canvas.py`. All of them are behind the board's [sign-in](asks-and-answers.md). A browser opening a shell signed out is sent to sign in and back. The raw address answers a signed-out request with a plain 401, since it is read inside a frame. Only GET and HEAD are answered; anything else is refused with 405 (503 on a [standby copy](read-only-standby.md), which serves the reads).
 
 ## What a reader sees
 
-The shell is a page of the board's own with no script: a way back to the board, the canvas's number and title, a link to its item when it has one, one history control that lists the versions newest first by the time each was replaced, and the page in a frame. Changing version loads another shell. The bar is never written into a stored page, so the raw address gives the page alone.
+The shell is a page of the board's own with no script: a way back to the board, the canvas's number and title, a link to its item when it has one, one history control that lists the versions newest first by the time each was replaced, and the page in a frame. Changing version loads another shell. The bar is never written into a stored page, so the raw address gives the page alone, as it was saved, plus [what a page is given when it needs it](#what-a-page-is-given).
 
 ## What keeps a page apart from the board
 
@@ -41,6 +41,31 @@ counter                 the highest number ever given here
 ```
 
 Each file is written whole to a temporary file and renamed into place, bytes before the record that names them. Nothing is deleted: bytes a record no longer names stay on disk. An item is optional. One page is at most 5 MiB; the store as a whole has no limit.
+
+## The canvas tool
+
+One MCP tool, `canvas`, with `action` = `add | update | history | undo | list`. It is the same store as the import, so a canvas written here and one moved in read alike.
+
+| Action | What it does | Reply |
+|---|---|---|
+| `add` (`page`, `title`) | saves the page under the next number (after the counter and after the highest folder) | the address on the first line, `result: added`, a `notice:` line for each thing worth fixing |
+| `update` (`number`, `page`, `title`) | a revision: the page replaces the current one, and the page it replaces is kept as a version whose id is the time of the replacement (always newer than the newest id); the same page again changes nothing; an unknown number is refused | the address, `result: replaced` or `result: unchanged`, the notices |
+| `undo` (`number`) | the newest version is the page again and the page it replaces is kept as a version, so a second undo goes back | the address, `result: restored <id>` |
+| `history` (`number`) | the versions, newest first: id, size, who wrote it | one line each, or `canvas N has no earlier version` |
+| `list` | the canvases that have a page: number, size, age, address, title | one line each, or `no canvases` |
+
+`add`, `update` and `undo` are refused while `[canvas] write` is not true, and on a [standby copy](read-only-standby.md); `history` and `list` always answer. A revision is always `update`: a new `add` gives a new number and a new address, so a link to the old one would keep showing the old page.
+
+A page is refused, with nothing saved, when it is empty, over 5 MiB, not UTF-8 or holds a NUL byte, when a title is over 200 characters, or when its first part holds no link to an item: `href="<board>/items/N"` (the board's own address, [instance] board_url), within the first 2000 characters once comments, styles and scripts are left out. The bare text `board#N` is not a link. The canvas's item is the one the link names.
+
+A **notice** is not a refusal: the page is saved and the reply says what to fix. It is given for a decision page, a page whose item needs the owner's decision, when its visible text is longer than one screen (about 1200 characters) or its first line has no question (a `?`) or no recommendation (the word `recommend`). The link to the item is not counted as text.
+
+## What a page is given
+
+The stored page is never changed. The raw address serves it with two additions, each made once at the end of the page's head and only when the page needs it (`canvas_page.served`):
+
+- **A link color**, when the page has links and no style rule gives a link a color (`a`, `a:link` or `a:visited` in a selector, with a `color`): `:where(a:link,a:visited){color:#2f72de}`, a color with a contrast of 4.5 or more on white and on black. The rule has no specificity, so any rule of the page's own wins over it.
+- **A tooltip**, when the page has an element with `data-tip="..."` and no script of its own that mentions `data-tip`. A click (a tap on a phone) opens the text under the element and a second click on it closes it; a click elsewhere or Esc closes it too, and another tip's click moves it there. It never opens on hover alone. The text is put in as text, never as markup, and an element that takes no focus is given `tabindex="0"`, so Enter or Space open it from the keyboard. The page's own script and style are allowed by the page's policy; nothing else is.
 
 ## Moving canvases in
 

@@ -27,6 +27,7 @@ from stackshot.web.tools import complete as _tool_complete
 from stackshot.web.tools import sessions as _tool_sessions
 from stackshot.web.tools import message as _tool_message
 from stackshot.web.tools import route as _tool_route
+from stackshot.web.tools import canvas as _tool_canvas
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
 from stackshot.web.tools import invite as _tool_invite
@@ -237,6 +238,7 @@ def build(
     _tool_route.register(mcp, anchor_release=anchor_release, watch_label=watch_label)
     _tool_anchors.register(mcp, evw_boxes=evw_boxes, machine_state=machine_state)
     _tool_rules.register(mcp)
+    _tool_canvas.register(mcp)      # the `canvas` tool: add, update, history, undo and list of the pages the board keeps (web/tools/canvas.py)
     _tool_invite.register(mcp)      # the `invite` tool, only on a board whose [invites] names an admin (web/tools/invite.py)
     _signin.register(mcp)
     _routes_door_verify.register(mcp)      # `GET /frontdoor/verify` for the sign-in service, only on a board whose [behind_frontdoor] names a verify_secret_file (web/routes/door_verify.py)

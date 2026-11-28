@@ -8,7 +8,9 @@ network beyond this machine), and a second server on another port, which is anot
   - the frame cannot send itself or the shell's window to another origin: the other server gets nothing;
   - the frame sent to /ui/logout, and the page's own tab sent there, sign nobody out;
   - a reload and a board address inside the frame: what they show is printed; neither writes anything nor sends the browser to sign in;
-  - a page on another origin cannot frame it.
+  - a page on another origin cannot frame it;
+  - a page of `data-tip` spans gets the shared tooltip, which opens on a click, never on hover alone, and closes on a second click, a click outside or Esc, inside the screen; a page with no link color
+    gets the default one.
 
     tests/run-suite canvas_check     → exit 0 / 1
     (the browser, once per machine: uvx playwright@1.63.0 install chromium)
@@ -112,14 +114,17 @@ OLD = '<!doctype html><meta name="viewport" content="width=device-width,initial-
 VID = "20261101T080000.000001Z"
 
 
-def put(content, version=None, **more):
+def put(content, version=None, number=1, **more):
     data = content.encode()
-    code, out = _canvas.post("testbox", {"number": 1, "version": version, "content": base64.b64encode(data).decode(), "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "modified": now, **more})
+    code, out = _canvas.post("testbox", {"number": number, "version": version, "content": base64.b64encode(data).decode(), "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(), "modified": now, **more})
     assert code == 200, (code, out)
 
 
 put(OLD, VID)
 put(PROBE, title="A canvas with a rather long title that has to fit a narrow phone screen", item="a1")
+TIPS = """<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>tips</title><body style="min-height:600px"><p id="p">A <span id="t1" data-tip="the first meaning">first idea</span> and a <span id="t2" data-tip="the second meaning">second idea</span>,
+<a id="lnk" href="#nowhere">a link</a>.</p></body>"""
+put(TIPS, number=2)
 
 fails, ran = [], []
 def check(name, cond, got=None):
@@ -255,6 +260,28 @@ def run(br):
         except Exception as e: texts.append(f"({type(e).__name__})")
     check("a page of another origin cannot frame it: its frame shows neither the page nor the board's own answer", texts and not any("probe page" in t or "signed out" in t for t in texts), texts)
     other.close()
+
+    # ---- 6b. the shared tooltip and the default link color of a page that sets neither
+    frame = open_shell("/canvas/2")
+    frame.wait_for_selector("#t1")
+    bubble = lambda: frame.query_selector_all("[data-canvas-tip-bubble]")
+    frame.hover("#t1"); pg.wait_for_timeout(300)
+    check("a tip does not open on hover alone", bubble() == [], len(bubble()))
+    frame.click("#t1"); pg.wait_for_timeout(200)
+    check("a click opens the tip with its text", len(bubble()) == 1 and bubble()[0].inner_text() == "the first meaning", [b.inner_text() for b in bubble()])
+    shot(pg, "03-tip")
+    frame.click("#t1"); pg.wait_for_timeout(200)
+    check("a second click closes it", bubble() == [], len(bubble()))
+    frame.click("#t1"); frame.click("#t2"); pg.wait_for_timeout(200)
+    check("a click on another tip moves it there", len(bubble()) == 1 and bubble()[0].inner_text() == "the second meaning", [b.inner_text() for b in bubble()])
+    frame.click("body", position={"x": 370, "y": 500}); pg.wait_for_timeout(200)
+    check("a click outside closes it", bubble() == [], len(bubble()))
+    frame.click("#t1"); pg.keyboard.press("Escape"); pg.wait_for_timeout(200)
+    check("Escape closes it", bubble() == [], len(bubble()))
+    box = (frame.click("#t1"), frame.query_selector("[data-canvas-tip-bubble]").bounding_box())[1]
+    check("the tip stays inside a 390 px screen", box["x"] >= 0 and box["x"] + box["width"] <= 390, box)
+    color = frame.evaluate("() => getComputedStyle(document.getElementById('lnk')).color")
+    check("a link of a page with no link color is drawn in the default one", color == "rgb(47, 114, 222)", color)
 
     # ---- 7. signed out
     out = br.new_context(viewport={"width": 390, "height": 800}, ignore_https_errors=True)
