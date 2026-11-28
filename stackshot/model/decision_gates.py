@@ -63,7 +63,7 @@ def _gate_open_question(meta: dict[str, Any]) -> None:
     decide = _open_question(meta)
     if not decide:
         return
-    raise ToolError(f"Refused: this needs=decision item lists no options and its Decide part is an open question (\u201c{_clip_line(decide, 90)}\u201d). "
+    raise ToolError(f"Refused: this ask lists no options and its Decide part is an open question (\u201c{_clip_line(decide, 90)}\u201d). "
                     f"The item page would show Yes / No under it, which cannot answer it. "
                     f"Give {_rmod.OPTIONS_MIN}\u2013{_rmod.OPTIONS_MAX} options, each an answer {OWNER} could pick, exactly one recommended, and name the recommended option's label in the ask's Recommend part: {_OPT_FORM}. "
                     "Or reword the Decide part as a yes/no (pass ask=\u201cDecide: whether to \u2026 \u00b7 Recommend: yes or no \u00b7 Stakes: \u2026 \u00b7 By: \u2026\u201d on the update) with a Recommend part that answers yes or no." + _OPT_RELAUNCH)
@@ -83,7 +83,7 @@ def _gate_recommend_stance(meta: dict[str, Any]) -> None:
     rec = _recommend_not_stance(meta)
     if not rec:
         return
-    raise ToolError(f"Refused: this needs=decision item lists no options and its Recommend part (\u201c{_clip_line(rec, 90)}\u201d) is not a yes or a no. "
+    raise ToolError(f"Refused: this ask lists no options and its Recommend part (\u201c{_clip_line(rec, 90)}\u201d) is not a yes or a no. "
                     f"With no options the item page draws only Yes / No under the ask, which cannot answer a question whose answer is a person, a topic, a date or anything else than a yes or no. "
                     f"Put the choices as options, {_OPT_FORM}, each an answer {OWNER} could pick, exactly one recommended, and name the recommended option's label in the ask's Recommend part. "
                     "Or rephrase the Decide part as a yes/no question (\u201cDecide: whether to \u2026\u201d) with a Recommend part of yes or no." + _OPT_RELAUNCH)

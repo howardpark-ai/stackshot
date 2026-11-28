@@ -245,7 +245,13 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
 (the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not, nor does one on an item left for him to move before and after it: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the title's work no longer reaches it. Words are compared: case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are. A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one such line too: send subject= as the task. {{NEXT_FORM}}
-ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
+ask="none" clears it (so does clear_ask=true). An ask or options written alone (no needs, mover, wait, status or step in the
+same call) on an open item that is not on his call is accepted and adds the decision need itself, as needs=["decision"]
+beside the ask would: he becomes the mover, and the reply says "added the decision need; the question is on his move
+now". On a parked item (a wait is set) the ask and options are stored, no need is added and the wait stays;
+the reply says he does not have the question, which does not reach his move while the item is parked; to put it
+on his move, unpark with clear_wait=true (and clear_hold=true if it holds) and needs=["decision"] in one write.
+A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
 a step that only says he did it ("ran it"; "run it" is a request and ticks nothing) ticks the step, and one in which
