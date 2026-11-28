@@ -670,7 +670,8 @@ def keeper_pages(name: str, reg: dict[str, dict[str, Any]] | None = None) -> lis
 def file_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | None = None, renames: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
     """The roles as roles.json carries them: session_roles(), except that a pane-named name-line session of an active page, and of no
     page with user-facing agents (an `agents:` entry outside `background:`), is "front", on the same project. The only session of a one-session project is a session he talks to directly, so it is a front session; it
-    stays front until its project gets a page that lists user-facing agents. A cloud session (a cse_ id)
+    stays front until its project gets a page that lists user-facing agents. While `[front] agent` is set (sole_front) no session is made front this way: the configured front serves every project that lists none,
+    and a name-line session of such a project keeps its name-line role. A cloud session (a cse_ id)
     and a name-line session of inactive pages only (pages._active) keep NAME_ROLE. Only the
     file reads this: who a notice goes to, the needs and message gates and the board keep session_roles(), where such a
     session is still its page's name-line session. A session of a project the router is live for keeps NAME_ROLE here and gains
@@ -688,7 +689,9 @@ def file_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] | No
             real.add(s)
         if _pages._active(e):
             active.add(s)
-    sole = lambda n, r: r["role"] == NAME_ROLE and not r.get("retired") and n not in real and n in active and not is_id(n)   # a retired entry keeps its role
+    want = str(_cfg.get("front", "agent") or "").strip()                   # with one configured front (sole_front's rule, stopping at the first page that lists it), a project that lists none is served by it: no name-line session is made front
+    one = bool(want) and (bool(sole_front(reg)) if "/" in want else any(want in front_agents(e) for e in reg.values()))
+    sole = lambda n, r: not one and r["role"] == NAME_ROLE and not r.get("retired") and n not in real and n in active and not is_id(n)   # a retired entry keeps its role
     return {n: ({**r, "role": "front"} if sole(n, r) else r) for n, r in session_roles(reg, live, renames).items()}
 
 

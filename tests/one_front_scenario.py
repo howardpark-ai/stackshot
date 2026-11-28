@@ -314,6 +314,21 @@ move(SIDE, CHIEF); move(SOLO, CHIEF)
 check("repoint to another project's front agent: the contact falls to the -main agent, unless that session created the item or is the configured front of a project with none",
       (who(10), who(11), who(12)) == (MAIN, CHIEF, CHIEF), (who(10), who(11), who(12)))
 
+# no front is made from a lone name-line session while a front is configured
+for key, lines in (("projects/lone", "display-name: home-lone-main\n"), ("projects/lead", "display-name: home-lead-main\nagents:\n  background:\n    home-lead-builder: builds the lead's work\n")):
+    (T / f"brain/{key}.md").write_text(f"---\ntype: project\ntitle: {key[9:].title()}\n{lines}status: active\n---\n\n# x\n", encoding="utf-8")
+pages.cmd_registry(quiet=True)
+configured = cfg.CFG["front"]["agent"]
+cfg.CFG["front"]["agent"] = ""
+free = {n: anchors.file_roles().get(n, {}).get("role") for n in ("home-lone-main", "home-lead-main", "home-lead-builder", "home-golf-main")}
+check("a lone name-line session is front when no front is configured, as before", free == {"home-lone-main": "front", "home-lead-main": "front", "home-lead-builder": "back", "home-golf-main": "back"}, free)
+cfg.CFG["front"]["agent"] = configured
+FR = anchors.file_roles()
+check("a lone name-line session is no front while a front is configured: it keeps its name-line role, on its project",
+      FR["home-lone-main"] == {"role": "keeper", "project": "projects/lone"} and FR["home-lead-main"] == {"role": "keeper", "project": "projects/lead"}, (FR.get("home-lone-main"), FR.get("home-lead-main")))
+check("…a background agent stays back, the configured front stays front, and no session of those projects is listed as front",
+      FR["home-lead-builder"]["role"] == "back" and FR[CHIEF]["role"] == "front" and FR[SOLO]["role"] == "back" and not [n for n, r in FR.items() if r["role"] == "front" and r["project"] in ("projects/lone", "projects/lead")], FR)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
 os._exit(1 if fails else 0)
