@@ -467,7 +467,7 @@ def usage():
         rc, out = w.run(script, *args, env={"STACKSHOT_CONFIG": str(w.dir / "none.toml")})
         check(f"usage: {script} with a STACKSHOT_CONFIG that names no file exits 2", rc == 2 and "names no file" in out, (rc, out))
     rc, out = w.run("preflight")
-    check("usage: the pre-flight without a backup folder exits 2", rc == 2 and "--backup-dir" in out, (rc, out))
+    check("usage: the pre-flight without a backup folder or log exits 2", rc == 2 and "--backup-dir" in out and "--backup-log" in out, (rc, out))
     rc, out = w.run("preflight", "--backup-dir", w.backups, "--baseline", w.dir / "none")
     check("usage: a baseline that is no file exits 2", rc == 2 and "--baseline names no file" in out, (rc, out))
     rc, out = w.run("preflight", "--backup-dir", w.backups, "--confirm", "anything")
@@ -541,6 +541,62 @@ def old_backup(w):
 preflight_fails("a backup that is not of today", "a backup of today", old_backup)
 preflight_fails("an empty backup file", "a backup of today", lambda w: (w.backups / "board-1.tar.gz").write_text("") and None)
 preflight_fails("no backup folder", "a backup of today", lambda w: shutil.rmtree(w.backups))
+
+def backup_log(w, *runs):
+    """The log of a backup job that sends its copy off the machine: one (days ago, job, result, bytes) a line, the oldest first."""
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9)))             # an offset of its own: the day is the instance zone's
+    p = w.dir / "backup.log"
+    p.write_text("".join(f"{(now - dt.timedelta(days=ago)).isoformat(timespec='seconds')}\t{job}\t{result}\t{size}\t{job}-copy.gpg; a note\n" for ago, job, result, size in runs))
+    return p
+SENT = (0, "stackshot", "ok", 4096)
+
+@case
+def preflight_proof():
+    w = World()
+    shutil.rmtree(w.backups)
+    log = backup_log(w, (1, "stackshot", "ok", 4096), SENT, (0, "state", "failed", 0))
+    before = w.files()
+    rc, out = w.run("preflight", "--backup-log", log)
+    check("pre-flight: today's run in the backup log passes with no backup folder; another job's later failure is not the board's",
+          rc == 3 and "FAIL" not in out and line(out, "PASS", "a backup of today") and w.files() == before and not acting(w.calls()), (rc, out))
+    rc, out = w.run("preflight", env={"FRONTDOOR_BACKUP_LOG": str(log)})
+    check("pre-flight: the backup log may come from FRONTDOOR_BACKUP_LOG", rc == 3 and line(out, "PASS", "a backup of today"), (rc, out))
+    rc, out = w.run("preflight", "--backup-dir", w.backups, "--backup-log", log)
+    check("pre-flight: a log with today's run passes beside a folder that is not there", rc == 3 and line(out, "PASS", "a backup of today"), (rc, out))
+    w = World()
+    rc, out = w.run("preflight", "--backup-dir", w.backups, "--backup-log", backup_log(w, (3, "stackshot", "ok", 4096)))
+    check("pre-flight: a folder with today's copy passes beside a stale log", rc == 3 and line(out, "PASS", "a backup of today"), (rc, out))
+
+def proof_fails(name, says, content):
+    """`content` is the log: runs for backup_log, the file's own text, or None for no file."""
+    def run():
+        w = World()
+        shutil.rmtree(w.backups)
+        log = w.dir / "backup.log"
+        if isinstance(content, str): log.write_text(content)
+        elif content is not None: backup_log(w, *content)
+        rc, out = w.run("preflight", "--backup-log", log, *confirmed())
+        row = [x for x in out.splitlines() if x.startswith("FAIL") and "a backup of today" in x]
+        check(f"pre-flight refuses a backup log: {name}", rc == 1 and len(row) == 1 and says in row[0] and not acting(w.calls()), (rc, out))
+    run.__name__ = f"preflight log {name}"; CASES.append(run)
+
+proof_fails("the last run is days old", "is dated", [(3, "stackshot", "ok", 4096)])
+proof_fails("a run that failed after an earlier good one", "failed", [SENT, (0, "stackshot", "failed", 0)])
+proof_fails("a skipped run", "skipped", [(0, "stackshot", "skipped", 0)])
+proof_fails("a good run that sent nothing", "0 bytes", [(0, "stackshot", "ok", 0)])
+proof_fails("only another job's runs", "no run of stackshot", [(0, "state", "ok", 4096)])
+proof_fails("an empty log", "no run of stackshot", "")
+proof_fails("no log file", "cannot read", None)
+proof_fails("a time without its offset", "cannot be read", f"{dt.datetime.now().isoformat(timespec='seconds')}\tstackshot\tok\t4096\tx\n")
+proof_fails("a line cut short", "cannot be read", f"{dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}\tstackshot\tok")
+
+@case
+def preflight_neither():
+    w = World()
+    shutil.rmtree(w.backups)
+    rc, out = w.run("preflight", "--backup-dir", w.backups, "--backup-log", backup_log(w, (3, "stackshot", "ok", 4096)), *confirmed())
+    check("pre-flight: a missing folder and a stale log together fail, and the line says both", rc == 1 and any(x.startswith("FAIL") and "no folder" in x and "is dated" in x for x in out.splitlines()), (rc, out))
+
 for unit in RESTORE:
     preflight_fails(f"{unit} not installed", f"restart are installed", lambda w, unit=unit: (w.home / ".config/systemd/user" / unit).unlink())
 
