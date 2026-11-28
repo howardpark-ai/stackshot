@@ -223,10 +223,12 @@ def handover_down(name: str) -> str:
         return f"its pane could not be read ({e.__class__.__name__})"
 
 
-def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "list[Callable[[], Any]] | None" = None) -> dict[str, Any] | None:
+def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "list[Callable[[], Any]] | None" = None, unnamed: "tuple[str, ...] | list[str]" = ()) -> dict[str, Any] | None:
     """A step of the item is done (ticked by its proof, or marked by hand) and the item is still open: when the next open step opens with another session, the item's mover becomes that session and it is told, with the step's text
     (handover.py has the rules). That session down or unknown: the item stays with its mover, who is told the step and why. The owner, a front agent and a name that is no session: nothing moves. Idempotent by the record
-    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
+    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed.
+    `unnamed`: sessions the update that marked the step done named and took back (an agent's plain edit on the owner's move, service/update.py). Who holds the item and whether it is left alone are
+    read with them in needs, so the step ends where it would with them named; the needs stored stay without them."""
     sends: list[tuple[str, str, str, bool]] = []      # (gid, the session id or name, the notice, whether it stands as told to that session): collected under the item lock, sent when it is let go
     def flush() -> None:
         for g, to, text, told in sends:
@@ -234,7 +236,7 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
             if told:        # recorded after the send returned: a send that raised is not "told" (the release event then tells that session itself)
                 PROOF_TOLD_SID[g] = (to, now)
     try:
-        return _handover_locked(gid, now, done, dry, sends)
+        return _handover_locked(gid, now, done, dry, sends, tuple(unnamed))
     finally:
         if defer is not None:
             defer.append(flush)         # the caller holds the item lock round a loop of items: it sends what was collected when it lets go
@@ -242,16 +244,17 @@ def handover(gid: str, now: float, done: list[str], dry: bool = False, defer: "l
             flush()
 
 
-def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str, bool]]) -> dict[str, Any] | None:
+def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: list[tuple[str, str, str, bool]], unnamed: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """The body of `handover`, under the item lock; the notices are appended to `sends`, not sent."""
     with _writes.ITEM_LOCK:
         it = _load(gid)
         if it.get("status") != "open":
             return None
         meta = dict(it.get("metadata") or {})
-        mover = _telling.holder(it)
+        seen = {**it, "metadata": {**meta, "needs": _canon_needs([*_needs_of(meta), *unnamed])}} if unnamed else it      # the holder and the skip read the item as it would stand with the taken-back names
+        mover = _telling.holder(seen)
         row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "action": "none", "to": "", "step": "", "why": "", "told": ""}
-        if (why := _live.released_skip(it, meta, mover)):
+        if (why := _live.released_skip(seen, seen["metadata"], mover)):
             return {**row, "action": "left", "why": why}
         plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, lambda n: handover_kind(n, str(meta.get("project") or "")), handover_down, _handoff.ho_same)
         step = _clip_line(_steps.first_line(plan["step"]), 140)

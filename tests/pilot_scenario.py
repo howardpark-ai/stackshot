@@ -3174,7 +3174,7 @@ check("auto-name: a conflict keeps the session already named, adds the agent aft
       and len([m for m in p[n0:] if m[0] == "work-osprey-bld" and "now names work-osprey-x in its needs too (work-osprey-ops was already named), after its update by work-osprey-x" in m[1]]) == 1, (needs46(c1), res, p[n0:]))
 k1 = mk46(); _update_svc._update(k1, needs=["decision"], ask=ASK, sender="work-osprey-main")
 res = _update_svc._update(k1, next="prepping while he decides", sender="work-osprey-x")
-check("auto-name: a needs=decision item keeps decision first and stays in his lane", needs46(k1) == ["decision", "work-osprey-x"] and k1 in [r["gid"] for r in ui_render.Board(str(T / "store")).n_call], (needs46(k1), res))
+check("auto-name: a background agent's write on a needs=decision item names nobody, and the item stays in his lane", needs46(k1) == ["decision"] and "(named" not in res and k1 in [r["gid"] for r in ui_render.Board(str(T / "store")).n_call], (needs46(k1), res))
 # only plain work names the agent: a write by it that sets needs itself (none included), parks the item (hold, wake) or sets a recycle
 # leaves needs as the write says.
 wk46 = (datetime.datetime.now(_wt_text.ZONE).date() + datetime.timedelta(days=3)).isoformat()
