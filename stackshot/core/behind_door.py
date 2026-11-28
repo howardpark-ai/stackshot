@@ -14,7 +14,7 @@ The `[behind_frontdoor]` table of the config:
     identity_secret_file      the secret the front door signs with. Set: the board takes calls to /mcp through the front door only. Unset: no call is checked (the board as it was)
     identity_max_age_seconds  the replay window: how old a signed identity may be (1 to 3600, default 300)
     members_file              the front door's members file ({"alice": ["main", "side"]}, member -> the backends the member is on). Set: this file is the board's list of members
-    board_name                the name this board has in the front door's [[frontdoor.backends]] and in that file (required with members_file)
+    board_name                the name this board has in the front door's [[frontdoor.backends]] and in that file (required with members_file; it must pass core/board_names.py: lower-case letters, digits and hyphens, a letter first, not a reserved word)
     verify_secret_file        the secret the sign-in service signs a token check with. Set: the board answers `GET /frontdoor/verify` (web/routes/door_verify.py) for a request that carries that signed
                               header and a bearer token: who the board's own sign-in says the token is for. Unset: the route does not exist. Independent of the other keys (a board can offer the check before it
                               takes calls through the door only). Its value must differ from identity_secret_file's: a board whose two files hold the same value answers no check
@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from stackshot.core import board_names as _names
 from stackshot.core import config as _cfg
 from stackshot.core import frontdoor_files as _files
 from stackshot.core import frontdoor_identity as _ident
@@ -112,7 +113,10 @@ def parse(cfg: dict[str, Any] | None = None, files: bool = False) -> tuple[Setti
     if members:
         if not members_file:
             out.append(f"[{TABLE}] members_file is not a path, so this board has no members until it is fixed: set it to the front door's members file")
-        if not NAME.fullmatch(board):
+        if board and NAME.fullmatch(board) and (why := _names.valid(board)):
+            out.append(f"[{TABLE}] board_name: {why}, so this board has no members until it is fixed: set it to this board's name in the front door's [[frontdoor.backends]]")
+            board = ""      # a name the rule refuses names no board: the same fail-closed state as a missing one
+        elif not NAME.fullmatch(board):
             out.append(f"[{TABLE}] board_name is {'missing' if not board else repr(board[:40])}, so this board has no members until it is fixed: set it to this board's name in the front door's "
                        f"[[frontdoor.backends]] (letters, digits, '.', '_' and '-')")
         if _cfg.get("members", cfg=cfg) is not None:

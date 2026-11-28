@@ -1,7 +1,7 @@
 """config.py: what the front door reads from disk: its settings, the files of credentials and the members file.
 
     load(cfg=None)           → the Settings of the config (`core/frontdoor_config.py` parses and judges them), or ConfigError saying why the front door
-                               cannot start; a line for each smaller fault is left to the config notes (`notes()` in `core/config.py`) and printed at start
+                               cannot start (a backend's name that `core/board_names.py` refuses is one reason); a line for each smaller fault is left to the config notes (`notes()` in `core/config.py`) and printed at start
     read_secret(path, ...)   → the one value in a secret file, or FileError naming the path and the reason (never the content)
     read_members(path)       → {member: [backend names]} from the members file, read at each call
                                (both are `core/frontdoor_files.py`, shared with a board behind the front door, and are re-exported here)
@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
+from stackshot.core import board_names as _names
 from stackshot.core import config as _cfg
 from stackshot.core import frontdoor_config as _fc
 from stackshot.core.frontdoor_config import Backend, Settings
@@ -32,6 +33,7 @@ def load(cfg: dict[str, Any] | None = None) -> Settings:
     """The settings of `cfg` (the running config when None); ConfigError when the front door cannot serve with them."""
     settings, problems = _fc.parse(cfg)
     why = _fc.blocking(settings)
+    why += [f"backend {b.name!r}: {r}" for b in settings.backends if (r := _names.valid(b.name))]      # a backend's name is a board's address segment (core/board_names.py)
     if why:
         raise ConfigError("the front door does not start: " + "; ".join(why) + ("\n" + "\n".join(problems) if problems else ""))
     return settings

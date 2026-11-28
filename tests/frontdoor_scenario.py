@@ -875,7 +875,7 @@ asyncio.run(main())
 
 # ------------------------------------------------------------------------------------------------ 12. the entry point, as a subprocess (stopped by its PID)
 def toml_for(servers_, port, members):
-    rows = "\n".join(f'[[frontdoor.backends]]\nname = "{n}"\nurl = "{servers_[n].url}/mcp"\ntoken_file = "{board_tok_file[n]}"\n' for n in "ab")
+    rows = "\n".join(f'[[frontdoor.backends]]\nname = "box-{n}"\nurl = "{servers_[n].url}/mcp"\ntoken_file = "{board_tok_file[n]}"\n' for n in "ab")
     return (f'[frontdoor]\nlisten_port = {port}\nidentity_header = "X-Forwarded-User"\nidentity_secret_file = "{ident_file}"\nmembers_file = "{members}"\nhealth_cache_seconds = 0\n\n{rows}')
 free = socket.socket(); free.bind(("127.0.0.1", 0)); eport = free.getsockname()[1]; free.close()
 cfg_ok = T / "fd-ok.toml"; cfg_ok.write_text(toml_for(servers, eport, members_path))
@@ -884,7 +884,7 @@ env = {**{k: v for k, v in os.environ.items() if not k.startswith("STACKSHOT_")}
 def run_main(*args, cfg=cfg_ok, timeout=60):
     return subprocess.run([sys.executable, "-m", "stackshot.frontdoor", *args], env={**env, "STACKSHOT_CONFIG": str(cfg)}, capture_output=True, text=True, timeout=timeout, cwd=tmp)
 r = run_main("--check")
-check("entry point: --check on a good config exits 0 and names the backends", r.returncode == 0 and "board a" in r.stdout and "board b" in r.stdout and f":{eport}" in r.stdout, (r.returncode, r.stdout, r.stderr[-300:]))
+check("entry point: --check on a good config exits 0 and names the backends", r.returncode == 0 and "board box-a" in r.stdout and "board box-b" in r.stdout and f":{eport}" in r.stdout, (r.returncode, r.stdout, r.stderr[-300:]))
 # --check reads what a request would read: a secret, a token file or the members file that cannot be used is exit 2, each one named
 def unusable(label, changes, *want):
     text = cfg_ok.read_text()
@@ -899,15 +899,15 @@ def unusable(label, changes, *want):
 gone = T / "not-there"
 unusable("no identity secret file", [(str(ident_file), f"{gone}.identity")], "identity_secret_file", f"{gone}.identity")
 unusable("no members file", [(str(members_path), f"{gone}.members")], f"{gone}.members")
-unusable("no token file", [(str(board_tok_file["a"]), f"{gone}.token")], "backend a: ", f"{gone}.token")
+unusable("no token file", [(str(board_tok_file["a"]), f"{gone}.token")], "backend box-a: ", f"{gone}.token")
 open_token = secret_file("open-board.token", BOARD_TOK["a"], 0o644)
-unusable("a token file others can read", [(str(board_tok_file["a"]), str(open_token))], "backend a: ", "open-board.token")
+unusable("a token file others can read", [(str(board_tok_file["a"]), str(open_token))], "backend box-a: ", "open-board.token")
 short_token = secret_file("short-board.token", "tiny")
-unusable("a token that is too short", [(str(board_tok_file["b"]), str(short_token))], "backend b: ", "short-board.token")
+unusable("a token that is too short", [(str(board_tok_file["b"]), str(short_token))], "backend box-b: ", "short-board.token")
 broken = T / "broken-members.json"; broken.write_text("{broken")
 unusable("a members file that does not read", [(str(members_path), str(broken))], "broken-members.json")
 p = unusable("several at once", [(str(ident_file), f"{gone}.identity"), (str(members_path), f"{gone}.members"), (str(board_tok_file["a"]), f"{gone}.a"), (str(board_tok_file["b"]), f"{gone}.b")],
-             f"{gone}.identity", f"{gone}.members", "backend a: ", "backend b: ")
+             f"{gone}.identity", f"{gone}.members", "backend box-a: ", "backend box-b: ")
 served = subprocess.Popen([sys.executable, "-m", "stackshot.frontdoor"], env={**env, "STACKSHOT_CONFIG": str(p)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=tmp)
 try:
     code = None
@@ -932,7 +932,7 @@ try:
         if proc.poll() is not None: break
         try: code, body = http_get(f"http://127.0.0.1:{eport}/healthz"); break
         except (urllib.error.URLError, ConnectionError, OSError): time.sleep(0.2)
-    check("entry point: `python -m stackshot.frontdoor` serves /healthz on its configured port (a is down, so 503; b is up)", code == 503 and json.loads(body)["backends"]["b"]["ok"] is False, (code, body, proc.poll()))
+    check("entry point: `python -m stackshot.frontdoor` serves /healthz on its configured port (a is down, so 503; b is up)", code == 503 and json.loads(body)["backends"]["box-b"]["ok"] is False, (code, body, proc.poll()))
     code2, _ = http_get(f"http://127.0.0.1:{eport}/mcp") if proc.poll() is None else (None, None)
     check("entry point: and /mcp without the identity header is 401", code2 == 401, code2)
 finally:
