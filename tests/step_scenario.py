@@ -708,8 +708,6 @@ check("10 text: …the description's own line sends a command to a `Oliver:` nex
 check("12 text: create's and update's description say the Oliver next line gets the command check, naming `next line`",
       "(or `AE:`, `オリバー:`) and asks him to run something" in snap["create"]["description"] and "gets the command check (where it runs, the ssh form) on create and update" in snap["create"]["description"]
       and "only for the lines the call sets" in snap["create"]["description"] and "A line that only mentions a command" in snap["create"]["description"]
-      and "A next line that starts with his name" in snap["update"]["description"] and "gets the command check (where it runs, the ssh form), on create and update" in snap["update"]["description"]
-      and "refused as `next line: …`; a line that only mentions a command" in snap["update"]["description"]
       and "outside backticks or a fence after a run cue" in snap["update"]["description"], None)
 check("12 text: F2 and F7 are in the tool text: someone else running it is no cue, a bare command has a flag, path or quoted argument",
       all("is not a cue" in snap[k]["description"] and "say go and I will run" in snap[k]["description"] for k in ("create", "update"))

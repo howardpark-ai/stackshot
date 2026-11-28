@@ -102,8 +102,8 @@ _HOLD_PARAM = Annotated[bool, Field(description=_T.param("HOLD"))]
 _WAIT_BASIS_PARAM = Annotated[str, Field(description=_T.param("WAIT_BASIS"))]
 
 
-_RANK_PARAM = Annotated[int, Field(description=_T.param("RANK"))]
-_CLEAR_RANK_PARAM = Annotated[bool, Field(description=_T.param("CLEAR_RANK"))]
+_RANK_PARAM = int                  # retired: refused, and the refusal says so (no parameter text)
+_CLEAR_RANK_PARAM = bool
 
 
 _UPDATE_DESC = _T.piece("UPDATE_DESC")

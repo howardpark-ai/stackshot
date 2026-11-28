@@ -7,7 +7,7 @@ An entry the board writes carries `invited`:
 
 The front door, the sign-in service and the board read it as any other member, so removing it refuses the next request. What only an invited entry asks for is
 checked by the board, which is the sign-in server: the Google sign-in has to report the address as verified, the first one records the Google account's id
-(`sub`), and every later one has to be that account (`admit`; the words for a refusal are `frontdoor_identity.REFUSALS`). A members entry without `invited` is not touched by anything here, and a board with no
+(`sub`), and every later one has to be that account, and not one an earlier registration of the address was taken off its last board with (`admit`; the words for a refusal are `frontdoor_identity.REFUSALS`). A members entry without `invited` is not touched by anything here, and a board with no
 `[behind_frontdoor] members_file` is not affected at all.
 
 The check holds for any invited entry of the members file, whether or not this board registers people. Registering is on only with `[invites]`:
@@ -44,7 +44,8 @@ TABLE = "invites"
 KEY = "invited"                       # the key of a members entry the board wrote
 PIN = "google_sub"                    # inside it: the id of the Google account that joined first ("" until one has)
 REMOVED = "removed_from"              # inside it: the boards taken off an entry that kept its recorded account for others; registering one of them again is refused until that account is let go
-PAGE_PATH = "/join"                  # the setup page the link names (web/routes/join.py)
+FORMER = "former_subs"                # inside it: the Google accounts of an earlier registration taken off its last board; they are refused on any later registration of the address
+PAGE_PATH = "/join"                   # the setup page the link names (web/routes/join.py)
 LOCK_SECONDS = 2.0                    # the longest a change waits for another change of the file
 
 # The redirect URIs of the apps the setup page names, added to [auth] allowed_client_redirect_uris while registering is on. Each is the one its app documents:
@@ -196,6 +197,17 @@ def _invitations(doc: _Object, address: str) -> list[Any]:
     return [v for k, v in doc.pairs if isinstance(v, dict) and KEY in v and _holds(k, v, address)]
 
 
+def _held(doc: _Object, address: str) -> list[Any]:
+    """`_invitations` less the entries that list no board (a person taken off their last board, kept only for the accounts to refuse): the sign-in checks speak of the rest."""
+    return [v for v in _invitations(doc, address) if v.get("boards") != []]
+
+
+def _former(value: Any) -> list[str]:
+    inv = value.get(KEY)
+    got = inv.get(FORMER) if isinstance(inv, dict) else None
+    return [x for x in got if isinstance(x, str)] if isinstance(got, list) else []
+
+
 def _pin_of(value: Any) -> str | None:
     """The account id an invited entry has recorded, "" for none yet, None when the entry's `invited` cannot be read."""
     inv = value.get(KEY)
@@ -281,12 +293,14 @@ def admit(email: Any, sub: Any, verified: Any) -> str:
     address = str(email or "").strip().lower()
     account = sub if isinstance(sub, str) else ""
     try:
-        held = _invitations(_document(path), address)
+        held = _held(_document(path), address)
     except _files.FileError as e:
         _door._tell(str(e))
         return UNREADABLE
     if not held:
         return ""
+    if account and any(account in _former(v) for v in held):
+        return OTHER_ACCOUNT
     if not (verified is True or (isinstance(verified, str) and verified.lower() == "true")):      # Google's token check says it as text, and "false" is not empty
         return UNVERIFIED
     pins = [_pin_of(v) for v in held]
@@ -299,7 +313,7 @@ def admit(email: Any, sub: Any, verified: Any) -> str:
 
     def pin(doc: _Object) -> tuple[str, bool]:
         changed = False
-        for value in _invitations(doc, address):
+        for value in _held(doc, address):
             have = _pin_of(value)
             if have is None:
                 return UNREADABLE, False
@@ -336,14 +350,23 @@ def session_holds(email: str, sub: str) -> bool:
     if path is None:
         return True
     try:
-        held = _invitations(_document(path), email.strip().lower())
+        held = _held(_document(path), email.strip().lower())
     except _files.FileError as e:
         _door._tell(str(e))
         return False
-    return not held or (bool(sub) and all(_pin_of(v) == sub for v in held))
+    return not held or (bool(sub) and all(_pin_of(v) == sub and sub not in _former(v) for v in held))
 
 
 # ------------------------------------------------------------------------------------------------ registering and removing
+
+def has_former(address: str, s: Settings) -> bool:
+    """Whether the entry of `address` lists earlier accounts in `former_subs` (they are refused on this registration). False when the file cannot be read."""
+    try:
+        path = s.members_file
+        return any(_former(v) for v in _invitations(_document(path), address.strip().lower()))
+    except _files.FileError:
+        return False
+
 
 def register(address: str, by: str, s: Settings) -> tuple[bool, bool]:
     """Register `address` (as `address_of` gives it) on this board, by the admin `by`. (whether the file changed, whether an account has joined with it already)."""
@@ -379,7 +402,7 @@ def _listed_on(value: Any, board: str) -> bool:
 
 
 def remove(address: str, s: Settings) -> tuple[tuple[str, ...], bool]:
-    """Take this board from the registration of `address`; an entry left on no board is deleted. (the boards the registration is still on, whether an entry
+    """Take this board from the registration of `address`; an entry left on no board is deleted, unless an account joined with it: it then stays on no board, with that account's id in `former_subs`, which a later registration refuses. (the boards the registration is still on, whether an entry
     that was not registered this way still lists the address on this board)."""
     def take(doc: _Object) -> tuple[tuple[tuple[str, ...], bool], bool]:
         holders = [(k, v) for k, v in doc.pairs if _holds(k, v, address)]
@@ -399,6 +422,11 @@ def remove(address: str, s: Settings) -> tuple[tuple[str, ...], bool]:
                 left.extend(b for b in value["boards"] if isinstance(b, str))
                 if isinstance(value.get(KEY), dict) and _pin_of(value):      # the recorded account stays for the other boards: say this board was taken off
                     value[KEY][REMOVED] = list(dict.fromkeys([*(value[KEY].get(REMOVED) or []), s.board]))
+            elif isinstance(value.get(KEY), dict) and _pin_of(value):      # the account that joined may still hold tokens: keep its id, so a later registration refuses it
+                inv = value[KEY]
+                inv[FORMER] = list(dict.fromkeys([*_former(value), _pin_of(value)]))
+                inv[PIN] = ""
+                inv.pop(REMOVED, None)
             else:
                 del doc[key]
         listed = any(_listed_on(v, s.board) for _k, v in holders if not (isinstance(v, dict) and KEY in v))

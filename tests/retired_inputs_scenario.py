@@ -153,7 +153,6 @@ for name in ("update", "create", "get", "brief", "complete"):
     d = tools[name].description
     bad = re.findall(r"(?:state=(?:doing|your-call|your-step|outside|blocked|parked|verifying|<one)|clear_state=true|chase_note=<|party=<|chase=YYYY|proof=<|end=YYYY)", d)
     check(f"gone: the {name} description teaches none of them as an input", not bad, bad)
-check("gone: update's description says they are refused, and what to use", "a call that passes state, clear_state, party, chase, end, proof or chase_note is refused with what to pass instead" in tools["update"].description, None)
 
 # ================================================================ 5 step_supplies
 item(10, needs=[BACK], mover=BACK, next="team-back: build it")

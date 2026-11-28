@@ -43,12 +43,7 @@ tells the item's mover. clear_wait=true is how an update drops a stored wait (wa
 wait_event of none and clear_wait_basis do not. To change a wait send the new wait_kind without clear_wait (the two
 do not go in one call); a stored wait_anchor or wait_event stays beside it unless the call sends another or "none". An update that newly adds needs=decision to an item that stores a wait is refused unless it
 also passes clear_wait=true: the wait would otherwise win and get would list a model conflict. clear_after=true clears
-the after list, as after=[] or after="none" do; some clients drop an empty list, so the flag always arrives. A write
-that clears a wait while an open next line still defers on what it cleared in words goes through, and its reply
-carries one line per stale next line (`(note: next line N still waits on board#X, whose wait was just cleared: reword
-it)`): reword or drop those lines in the same turn. An item stores alive or waiting directly; there is no state to
-set, and these are not parameters of this tool or of create: a call that passes state, clear_state, party, chase, end,
-proof or chase_note is refused with what to pass instead. Whose move it is goes in mover; {{OWNER}}'s call is
+the after list, as after=[] or after="none" do; some clients drop an empty list, so the flag always arrives. Whose move it is goes in mover; {{OWNER}}'s call is
 needs=["decision"] with an ask; his own step is step=<one line, no command, of the single thing only {{OWNER}} does;
 what he runs goes in a next line that starts `{{OWNER}}:`; a step that asks him to open or check something carries the link itself, [words](url), never "the link above" or "the mockup I sent"> (the board ticks it when he says it is done; never ask him
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
@@ -188,12 +183,9 @@ command he runs goes in a next line that starts `{{OWNER}}:`, whole in backticks
 step that carries a command (a backticked span with a space in it that reads as a shell command, a `! ` line, a ```
 block) is refused, and the refusal says to put the command in a next line that starts `{{OWNER}}:` (a step stored with
 a command before keeps the older checks on a write that leaves it alone{{P_OLD}}). A button or menu label is not a
-command: put it in bold or quotes, not backticks ("Make a copy", **Sort by date**). A next line that starts with his
-name (`{{OWNER}}:`) and asks him to run something gets the command check{{P_CHK}}, on create and update, whatever the
-item's state, for the lines the call sets (the cue and the `! ` rule are under next above): a command outside
-backticks{{P_BARE}} is refused as `next line: …`; a line that only mentions a command is not checked. A bare command
+command: put it in bold or quotes, not backticks ("Make a copy", **Sort by date**). A bare command
 with a flag, path or quoted argument, written outside backticks or a fence after a run cue or a place phrase
-({{P_EX2}}), is a command too: the step carries none, and a next line gets it in backticks so the board shows a copy
+({{P_EX2}}), is a command too: the step carries none, and a next line gets it in backticks, whatever the item's state, so the board shows a copy
 box{{P_BARE}}. A write that leaves an item for him to move (him as mover, in his step, or with his decision in needs)
 is refused when its description adds a numbered line (`1.`, `2)`) or a `! ` line outside a fenced block: the
 description is the background, never steps. A write that leaves an item in your-step for him is refused, in one line
@@ -213,12 +205,6 @@ dates take it, each basis bound to the date it was given for: a park's, a verify
 further out is refused whatever the basis). A bare date within the cap takes wait_reason on your own item and a basis
 there is dropped, the reply saying so; a new park within the cap takes his recorded words, not a basis. A park with a date and no basis takes the line of next or the description that says
 what the work waits for.
-
-## param RANK
-Retired: refused. Ranks are retired; a call that carries this is refused.
-
-## param CLEAR_RANK
-Retired: refused. Ranks are retired; a call that carries this is refused.
 
 ## text NEXT_FORM trail
 next replaces only your own lines: every line of next remembers the session whose update wrote it (the sender, or the
@@ -244,7 +230,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not, nor does one on an item left for him to move before and after it: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the title's work no longer reaches it. Words are compared: case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are. A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one such line too: send subject= as the task. {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not, nor does one on an item left for him to move before and after it: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one reply line: send subject= as the task. {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). An ask or options written alone (no needs, mover, wait, status or step in the
 same call) on an open item that is not on his call is accepted and adds the decision need itself, as needs=["decision"]
 beside the ask would: he becomes the mover, and the reply says "added the decision need; the question is on his move
@@ -285,17 +271,14 @@ queue, a run or subagent of yours): do not park it: its mover's park is refused 
 session parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window,
 a trial week, a timer it started): until=<when the window ends>, wait_kind="time", wait_basis="<what the window collects>
 ends <YYYY-MM-DD>" (a window of {{CAP_DAYS}} days or less on your own item is a bare until with wait_reason). A session does not park to defer work it could do now: an item not parked is one its mover can
-move now, so work it in your next free turn. A date that is no park, whose next says the work waits for that day
-("collect logs until <that day>, then review") gets a note on the reply, never a refusal: the item stays on agent and
-the note gives the park form above. When your write sets or keeps a date with no park over an hour ahead, you are the
+move now, so work it in your next free turn. When your write sets or keeps a date with no park over an hour ahead, you are the
 item's mover and every open step opens with a time at the date's hour or day ("at 03:00", "on <that day>", "tomorrow
 at 9"), the server parks it itself (parked, wait_basis from your wait_reason; the reply says `(parked: …)`); to work
 a step now, write it as the action and pass clear_hold=true. A next line that says in words it waits for an open item,
 a pull request's merge or release, a machine coming back online or a link, while the item stores no wait for it, is
 set by the ten-minute pass when the line is the item's only open step and one thing is named (after, an event wait, an
 anchor wait, or a step proof): clear_after=true, clear_wait=true or step_proof="none" sends it back and the server
-leaves that line alone. Steps started by an outside event ("when the next release lands") get a note instead: park
-with until, wait_kind="time", wait_basis, wait_reason (needs=external for a named outside party's reply). Neither applies to
+leaves that line alone. Neither of these applies to
 an action to take now, another party's step in flight, or an item not on agent (parked, waiting on {{OWNER}}'s
 decision or an open after item, needs=external, outside, verifying, blocked). An item that waits on another item is
 not parked but names it: after=["board#N"]. Nor is one that waits on {{OWNER}}: needs=decision with its ask, after=<the item that carries the ask>, or his call parked as above. An item that waits on a named person outside (needs=external) is not parked,
@@ -359,4 +342,4 @@ already parked, on a time wait or verifying (a wait_basis does there): to check 
 wait_reason with no wait_kind. A date after by, due or before is a deadline, not a wait.
 
 ## description update
-{{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{MACHINE_FORM}}{{ANCHOR_OFFER_FORM}}{{WAIT_FORM}}
+{{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{WAIT_FORM}}

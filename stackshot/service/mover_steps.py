@@ -323,7 +323,7 @@ def _state_check_notes(item: dict[str, Any]) -> list[str]:
             out.append(f"note: next names {who} but the state is {s}: pass step=… (or needs=decision with an ask)")
     _hits, broad = _hooks().wait_words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
     if broad:
-        out.append(f"(flag: next uses {', '.join(broad)}, words that can hide a wait: if it waits, set the wait; the auditor reads this)")
+        out.append(f"(flag: next uses {', '.join(broad)}, words that can hide a wait: if it waits, set the wait (until=YYYY-MM-DD with wait_kind=\"time\" to park it, or wait_kind and wait_event for an event); the auditor reads this)")
     ns = m.get("next_stale")
     if isinstance(ns, dict) and ns.get("fields"):
         try:
