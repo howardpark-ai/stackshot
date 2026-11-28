@@ -667,6 +667,11 @@ tell_owner = true                                   # another session's close of
 handback_hold_seconds = 180                          # the one line a front agent keeper hears when a builder hands an item back to it alone is held this long; a close of the item
                                                     # inside the window drops it, so the keeper hears only the close. 0 = sent at once. A held line survives a restart (<state>/handback-held.json). Live
 
+[glossary]                                          # retired role words in an item's subject or description, put right when the item is saved (stackshot/model/glossary_words.py; create and update)
+terms = ""                                          # the path of the glossary JSON on the machine the server runs on (a copy the instance keeps current; `~` allowed): its "avoid" entries with
+                                                    # hook = true and a regex are the retired words. A word with one `use` term is rewritten to it and the reply says so; a word with two or more is saved as written and the reply names its terms (when the file's ask_writer_when_unclear is true); a save is never refused for it.
+                                                    # Words in quotes, backticks, code blocks and links are left alone. "" = off. A missing or broken file = off. Live
+
 [canvas]                                            # canvases: pages an agent shares with the board's owner, kept in <paths.state>/canvas/ and read at /canvas/<number>; see docs/canvas.md
 import = false                                      # true: POST /client/canvas-import (a machine token) puts a page of another store into the board's, under its own number and version ids, and
                                                     # replaces a page with newer content; false (the default): it answers 403 to everyone. The operator turns it on to move pages in and off after. Live

@@ -13,6 +13,7 @@ from stackshot.model.ids import _norm_id
 from stackshot.service import gates as _gates, telling as _telling, wait_fixes as _wait_fixes, writes as _writes
 from stackshot.service.store import _load
 from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
+from stackshot.web import glossary_line as _glossary
 from stackshot.web.auth import oauth as _oauth
 from stackshot.model.field_gates import _fleet_tool, _when_idle
 from stackshot.web.tools.notes import _off_map_note_item, _owner_param, _sender_required
@@ -188,6 +189,7 @@ def stackshot_update(
     _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
+    subject, description, gloss_note = _glossary.apply(subject, description)      # a retired role word with one term is rewritten; one with several is saved as written and the reply names its terms
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     fixes: list[tuple[str, str, str]] = []; fix_note = ""
     status = _close_status(status, outcome, reason, outcome_text, superseded_by)      # before every gate that reads status
@@ -231,7 +233,7 @@ def stackshot_update(
                            goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
                            clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
                            done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode,
-                           **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note
+                           **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note + gloss_note
             if alias_used:
                 out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
             return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
