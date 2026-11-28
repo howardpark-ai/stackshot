@@ -78,7 +78,7 @@ bd = ui_render.Board(str(T / "store"))
 BOX = lambda i: {"action": f"/items/a{i}/answer", "token": "TOKEN", "sent": ""}
 page = lambda i: bd.item_html(f"a{i}", answer=BOX(i))
 def howto(h):
-    m = re.search(r'<ul class="istephowto">(.*?)</ul>', h, re.S)
+    m = re.search(r'<details class="istephowto">.*?<ul>(.*?)</ul></details>', h, re.S)
     return re.findall(r"<li>(.*?)</li>", m.group(1), re.S) if m else []
 home = bd.html()
 def row(i):
@@ -90,10 +90,13 @@ for where, h in (("page", page(1)), ("home", row(1))):
     li = howto(h)
     check(f"1 {where}: the click path and the attach line are drawn under his step, in order, and nothing else", len(li) == 2 and "Open Settings" in li[0] and "Export CSV" in li[0] and li[1].startswith("Attach the file") and "files.example.org" in li[1], (li, h[:600]))
     check(f"1 {where}: ...after his step, not before it", 0 <= h.find("Export the billing CSV and attach it") < h.find('class="istephowto"'), h[:600])
+    check(f"1 {where}: the lines sit in a fold that starts closed, with the count in its summary, inside the Your step body", re.search(r'<details class="istephowto"><summary>How to \(2\)</summary>', h) is not None, h[-700:])
     check(f"1 {where}: no label, date, warning, negation or fact is drawn", not any(w in "".join(howto(h)) for w in ("Goal", "slow today", "2026-11-20", "Legacy")), h[-600:])
 
 # ---- 2. nothing once the step ends, nor for facts, nor for what the step says
 check("2 a completed item draws none", howto(page(2)) == [], page(2)[:300])
+check("1 the item page holds the fold inside the Your step element", re.search(r'<div class="iask istep"><b>Your step</b><div class="istepbody">.*<details class="istephowto">.*</details></div></div>', page(1), re.S) is not None, page(1)[-900:])
+check("1 a home row draws no description text of its own: nothing but the step, the fold and the note form", "Problem" not in row(1) and "slow today" not in row(1), row(1)[:600])
 check("2 an item that is not his step draws none", 'class="istephowto"' not in page(3) and 'class="istephowto"' not in row(3), None)
 check("2 a description of facts draws none", 'class="istephowto"' not in page(4) and 'class="istephowto"' not in row(4), None)
 check("2 a path the step already says is not drawn twice", 'class="istephowto"' not in page(5) and 'class="istephowto"' not in row(5), None)
@@ -132,7 +135,7 @@ mpage = lambda who: bd.item_html("a6", answer={**BOX(6), "member": who})
 check("5 the owner's step block draws the bullets", len(howto(mpage("Oliver"))) == 2,mpage("Oliver")[:600])
 check("5 the other member's step block (the stored step is asked of someone else) draws none", "Check the export looks right" in mpage("Pat") and 'class="istephowto"' not in mpage("Pat"), mpage("Pat")[:600])
 css = bd._css()
-check("5 the stylesheet has the list's rules, muted and compact, in the shared variables", "ul.istephowto{list-style:disc;" in css and "ul.istephowto>li{margin:2px 0}" in css and "color:var(--mut)" in css.split("ul.istephowto{", 1)[1].split("}", 1)[0], None)
+check("5 the stylesheet has the fold's and the list's rules, muted and compact, in the shared variables", "details.istephowto>summary{" in css and "details.istephowto>ul{list-style:disc;" in css and "details.istephowto>ul>li{margin:2px 0}" in css and "color:var(--mut)" in css.split("details.istephowto>ul{", 1)[1].split("}", 1)[0], None)
 
 # ---- 6. the detector: an imperative opener wins over when/if, irregular past openers are out, the cap
 check("6 when or if after an imperative opener is kept", ok("Upload [the drive](https://files.example.org/d) when ready") and ok("Attach https://files.example.org/a.csv if asked") and ok("Open Settings → Billing → Export when ready"), None)
