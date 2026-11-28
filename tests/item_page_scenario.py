@@ -432,7 +432,7 @@ check(", only the step form has a Done button (act=done) and a Send note (act=no
 check("the decision item keeps today's ask block and form", 'class="iask"' in p1 and '<form class="ianswer"' in p1 and 'name="choice" value="Ship"' in p1 and 'name="act" value="done"' not in p1)
 check("with no answer box (signed out) the step is still on the page, with no form", "<b>Your step</b>" in page("a30") and "<form" not in blk(page("a30")) and 'value="done"' not in page("a30"))
 check("the answer script is on the page only when the page has a form: a step item with the box has it, signed out (the step block alone) has not",
-      "querySelector('form.ianswer')" in S20 and "querySelector('form.ianswer')" not in page("a30"), None)
+      "form.ianswer,form.hanswer" in S20 and "form.ianswer,form.hanswer" not in page("a30"), None)
 check("ctrl+enter: the item page carries the key script exactly when it carries an answer or comment box (a step item, a decision, a comment-only item), not signed out",
       S20.count(ui_render._SENDKEY_JS) == 1 and page("a30").count(ui_render._SENDKEY_JS) == 0 and page("a1", answer=BOX).count(ui_render._SENDKEY_JS) == 1 and page("a1").count(ui_render._SENDKEY_JS) == 0
       and "requestSubmit(b)" in ui_render._SENDKEY_JS and "e.isComposing" in ui_render._SENDKEY_JS, None)
