@@ -1312,15 +1312,20 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&drag){e.pre
 # act) go with the form's fields, url-encoded as the plain form sends them. While the request runs every button of the form
 # is disabled; a refusal or no answer shows inline under the buttons with the server's own words, the form left as it was.
 # Without script, or a browser without SubmitEvent.submitter, the form is the plain POST and 303 it always was.
-_ANSWER_JS = r"""<script>(function(){var F=document.querySelector('form.ianswer');if(!F||!window.fetch||!window.URLSearchParams)return;
-var E=F.querySelector('.aerr'),busy=false,S=null,L='';
-function btns(on){[].forEach.call(F.querySelectorAll('button'),function(b){b.disabled=!on})}
-function fail(t){busy=false;btns(true);F.removeAttribute('aria-busy');if(S){S.removeAttribute('aria-busy');S.innerHTML=L;S=null}if(E){E.textContent=SST('js.answer.nothing_sent',{why:t});E.hidden=false}if(window.ssCards)ssCards.sync(F)}
-F.addEventListener('submit',function(ev){var s=ev.submitter;if(s===undefined)return;ev.preventDefault();if(busy)return;
-var d=new FormData(F);if(s&&s.name)d.append(s.name,s.value);busy=true;btns(false);F.setAttribute('aria-busy','true');if(s){S=s;L=s.innerHTML;s.setAttribute('aria-busy','true');if(s.name==='act')s.textContent=SST('js.answer.sending')}if(E)E.hidden=true;
-fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',redirect:'follow'}).then(function(r){
-var u=new URL(r.url,location.href);if(r.ok&&r.redirected&&u.origin===location.origin&&/^@ROOTR@\/items\/[^\/]+$/.test(u.pathname)){location.replace(u.href);return}
-return r.text().then(function(t){t=String(t||'').replace(/\s+/g,' ').trim();if(!r.ok&&t&&t.length<400&&!/^</.test(t))return fail(t);
+# This one script serves every send form of a decision or memo (the item page's form.ianswer and the home rows' form.hanswer, the Done / Send note step forms included), by one delegated listener, so the home
+# page's in-place swap needs no re-binding. The moment Send is pressed: the form is aria-busy (a second press does nothing), its buttons are off, the pressed one is aria-busy (the spinner of .b[aria-busy], _BTN_CSS)
+# and reads Sending…, and the card around the form (the home row, else the form) carries data-sending, which dims it. The POST asks for JSON ({sent}, and for a home row {to}, the page the redirect would open);
+# on success the page opens there, on any failure the card, the label and the typed text come back as they were and the .aerr line says why.
+_ANSWER_JS = r"""<script>(function(){if(!window.fetch||!window.URLSearchParams)return;
+function btns(F,on){[].forEach.call(F.querySelectorAll('button'),function(b){b.disabled=!on})}
+document.addEventListener('submit',function(ev){var F=ev.target,s=ev.submitter;if(!F||!F.matches||!F.matches('form.ianswer,form.hanswer')||ev.defaultPrevented||s===undefined)return;ev.preventDefault();if(F.hasAttribute('aria-busy'))return;
+var E=F.querySelector('.aerr'),S=s,L=s?s.innerHTML:'',C=F.closest('[id^="task-"]')||F,d=new FormData(F);if(s&&s.name)d.append(s.name,s.value);
+btns(F,false);F.setAttribute('aria-busy','true');C.setAttribute('data-sending','');if(s){s.setAttribute('aria-busy','true');if(s.name==='act')s.textContent=SST('js.answer.sending')}if(E)E.hidden=true;
+function fail(t){btns(F,true);F.removeAttribute('aria-busy');C.removeAttribute('data-sending');F._sent=0;if(S){S.removeAttribute('aria-busy');S.innerHTML=L}if(E){E.textContent=SST('js.answer.nothing_sent',{why:t});E.hidden=false}if(window.ssCards)ssCards.sync(F)}
+fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){
+return r.text().then(function(t){var j=null;try{j=JSON.parse(t)}catch(e){}
+if(r.ok&&j&&typeof j.sent==='string'){var to=typeof j.to==='string'?j.to:F.getAttribute('action').replace(/\/answer$/,'')+'?sent='+encodeURIComponent(j.sent);if(/^\/(?!\/)/.test(to)){location.replace(to);return}}
+t=String(t||'').replace(/\s+/g,' ').trim();if(!r.ok&&t&&t.length<400&&!/^</.test(t))return fail(t);
 fail(SST('js.answer.bad_reply',{what:r.ok?SST('js.answer.unexpected_page'):r.status}))})
 },function(){fail(SST('js.answer.no_answer'))})})})();</script>"""
 # The answer boxes' resize handle, by the main pointer. Fine pointer (a mouse or trackpad): the browser's own corner grip is off (resize:none) and the box's whole bottom edge is the
@@ -1354,6 +1359,10 @@ _BTN_CSS = """
 @media(hover:hover){.b.main:hover:not(:disabled){background:color-mix(in srgb,var(--fg) 14%,var(--acc));border-color:color-mix(in srgb,var(--fg) 14%,var(--acc));color:var(--on-acc)}}
 .b.main:active:not(:disabled){background:color-mix(in srgb,var(--fg) 24%,var(--acc));border-color:color-mix(in srgb,var(--fg) 24%,var(--acc));color:var(--on-acc)}
 .b.main.busy,.b.main[aria-busy=true],form[aria-busy] .b.main{background:var(--acc);border-color:var(--acc);color:var(--on-acc);opacity:.75}
+.b[aria-busy=true]::before{content:"";flex:none;width:12px;height:12px;box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:ss-spin .8s linear infinite}
+@keyframes ss-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.b[aria-busy=true]::before{animation-duration:2.4s}}
+[data-sending]{opacity:.6;pointer-events:none;transition:opacity .12s}
 """
 # The panel order's style: the grip at the right end of a section's header (28 px, 36 on a coarse pointer, laid over the section's top padding, --pt, so the header's height stays the title's),
 # the drop line (--acc, the orange accent), the move menu and the live region (visually hidden).
@@ -3113,7 +3122,7 @@ class Board:
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
                 + fold("notices", _t("routing.sec_notices"), len(notes), f'<div class="rwrap"><table class="rlog"><thead><tr><th>{_t("routing.th_when", tz=_cfg.tz_abbr())}</th><th>{_t("routing.th_source")}</th><th>{_t("routing.th_what")}</th><th>{_t("routing.th_for")}</th><th>{_t("routing.th_ruling")}</th><th>{_t("routing.th_reason")}</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else f'<p class="empty">{_t("routing.nothing")}</p>', open_=False)
-                + (f'<script>(function(){{{_LACT_JS}}})();</script>' if 'data-at="' in items_body else '') + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
+                + (f'<script>(function(){{{_LACT_JS}}})();</script>' if 'data-at="' in items_body else '') + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _ANSWER_JS + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
 
     # ---------------- the emitters ----------------
     def render(self, modes) -> dict:
@@ -3829,7 +3838,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         form = (f'<form class="hanswer hstep" data-step method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
                 + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{esc(_t("home.step_note_aria"))}" placeholder="{esc(_t("home.step_note"))}"></textarea>', f'astep-{esc(r["gid"])}') +
                 f'<div class="abtns"><button type="submit" class="b main" name="act" value="done" disabled>{esc(_t("home.step_done"))}</button>'
-                f'<button type="submit" class="b" name="act" value="note" title="{esc(_t("home.step_send_note_hint"))}" data-hint="{esc(_t("home.step_send_note_hint"))}" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div></form>')
+                f'<button type="submit" class="b" name="act" value="note" title="{esc(_t("home.step_send_note_hint"))}" data-hint="{esc(_t("home.step_send_note_hint"))}" data-needs-text disabled>{esc(_t("home.step_send_note"))}</button></div><p class="isent warn aerr" role="alert" hidden></p></form>')
         return self.your_step_html(r, home=True, member=member), form
     def home_ask(self, r, token=""):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none; `token` fills the form's token for a page drawn per signed-in viewer (the answer frame, ui/answer_frame.py), and is empty on the pages the script fills. The question is the ask's Decide part (a watcher's
@@ -3845,7 +3854,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         send = (f'<button type="submit" class="b main" name="act" value="answer" disabled>{esc(_t("home.send"))}</button>' + (f'<span class="ahint" hidden>{esc(_t("home.pick_hint"))}</span>' if cards else ""))
         form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="back" value="">{_ref_field(r)}{cards}'
                 + _abox(f'<textarea id="atext-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{hint}" placeholder="{hint}"></textarea>', f'atext-{esc(r["gid"])}') +
-                f'<div class="abtns{"-send" if cards else ""}">{send}</div></form>')
+                f'<div class="abtns{"-send" if cards else ""}">{send}</div><p class="isent warn aerr" role="alert" hidden></p></form>')
         return self.md_line(q, r["gid"]) + mockup_link(r, q), form       # the mockup a design decision is about, beside the question
     def ask_question(self, r):
         """The question of an open decision as a row words it (home_ask), None when the item carries none."""
@@ -4710,6 +4719,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 {self.sent_notes_html()}
 {_CARDS_JS}
 <script>{_HOME_JS}</script>
+{_ANSWER_JS}
 <script>{_ABOX_JS}</script>
 {_SENDKEY_JS}
 {_COPY_JS}

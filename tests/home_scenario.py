@@ -605,6 +605,49 @@ console.log(JSON.stringify(out));
           _go[:4] == [False, True, True, False], (_go, _gr.stderr[:300]))
     check("home answer: a form with no token is cancelled, a form that is not an answer form is left alone, another answer form is not held by the first one's window",
           _go[4:] == [True, False, False, False], (_go, _gr.stderr[:300]))
+_aj = render._ANSWER_JS
+check("send pending: the home page carries the one shared send script once (the item page's), every home answer form (decision and step) has the error line it shows a refusal in, and the script is not a copy per form",
+      h.count(_aj) == 1 and "form.ianswer,form.hanswer" in _aj and re.findall(r"<form class=\"hanswer.*?</form>", h, re.S) and all(f.count(chr(60) + "p class=\"isent warn aerr\" role=\"alert\" hidden></p></form>") == 1 for f in re.findall(r"<form class=\"hanswer.*?</form>", h, re.S)), None)
+_css = render.Board._css(None)
+check("send pending: a busy button draws a spinner from the existing text colour, still under reduced motion (slower), and a sending card dims; no new colour",
+      ".b[aria-busy=true]::before{" in _css and "border:2px solid currentColor" in _css and "@keyframes ss-spin" in _css and "prefers-reduced-motion:reduce){.b[aria-busy=true]::before{animation-duration:2.4s}}" in _css
+      and "[data-sending]{opacity:.6;pointer-events:none" in _css and not re.search(r"\.b\[aria-busy=true\]::before\{[^}]*#[0-9a-f]{3,6}", _css))
+if shutil.which("node"):
+    _send_js = r"""
+const src = require('fs').readFileSync(0, 'utf8').replace(/^<script>/, '').replace(/<\/script>$/, ''); const out = []; let handler = null, resolve, reject, calls = [], replaced = null;
+const SSD = {'js.answer.sending': 'Sending', 'js.answer.nothing_sent': 'Nothing sent: {why}', 'js.answer.bad_reply': 'bad {what}', 'js.answer.no_answer': 'no answer', 'js.answer.unexpected_page': 'page'};
+const attrs = el => el.attrs;
+function el(extra) { const e = Object.assign({attrs: {}, hidden: false, disabled: false, textContent: '', innerHTML: ''}, extra);
+  e.setAttribute = (k, v) => { e.attrs[k] = v }; e.removeAttribute = k => { delete e.attrs[k] }; e.hasAttribute = k => k in e.attrs; return e; }
+const btn = el({name: 'act', value: 'answer', innerHTML: 'Send', textContent: 'Send'}), other = el({name: '', innerHTML: 'x'}), err = el({hidden: true});
+const card = el({});
+const form = el({action: '/items/g1/answer', matches: s => s === 'form.ianswer,form.hanswer', closest: s => s === '[id^="task-"]' ? card : null,
+  querySelector: s => s === '.aerr' ? err : null, querySelectorAll: s => s === 'button' ? [btn, other] : [], getAttribute: k => k === 'action' ? '/items/g1/answer' : null});
+const ctx = {SST: (k, f) => (SSD[k] || k).replace(/\{(\w+)\}/g, (m, n) => f[n]), FormData: function () { this.append = () => {} }, URLSearchParams: function (d) { return {d} },
+  fetch: (u, o) => { calls.push([u, o.headers.Accept]); return new Promise((a, b) => { resolve = a; reject = b }) },
+  location: {replace: u => { replaced = u }}, window: {fetch: true, URLSearchParams: true}, document: {addEventListener: (t, fn) => { if (t === 'submit') handler = fn }}};
+ctx.window.fetch = ctx.fetch; require('vm').runInNewContext(src, ctx);
+function press() { let stopped = false; handler({target: form, submitter: btn, defaultPrevented: false, preventDefault: () => { stopped = true }}); return stopped; }
+const tick = () => new Promise(r => setImmediate(r));
+(async () => {
+press(); out.push([btn.textContent, btn.attrs['aria-busy'], form.attrs['aria-busy'], 'data-sending' in card.attrs, btn.disabled, other.disabled]);
+press(); out.push(calls.length);
+resolve({ok: false, status: 500, text: () => Promise.resolve('the board is busy')}); await tick(); await tick();
+out.push([btn.innerHTML, btn.attrs['aria-busy'], form.attrs['aria-busy'], 'data-sending' in card.attrs, btn.disabled, err.hidden, err.textContent]);
+press(); out.push(calls.length);
+resolve({ok: true, status: 200, text: () => Promise.resolve('{"sent":"decision","to":"/?sent=decision&item=g1"}')}); await tick(); await tick();
+out.push([replaced, 'data-sending' in card.attrs]);
+console.log(JSON.stringify(out));
+})();
+"""
+    _sr = subprocess.run(["node", "-e", _send_js], input=_aj, capture_output=True, text=True, timeout=30)
+    _so = json.loads(_sr.stdout) if _sr.returncode == 0 and _sr.stdout.strip() else []
+    check("send pending: the moment Send is pressed the button reads Sending and is busy, the form is busy, the card is marked sending and the buttons are off; a second press sends nothing",
+          _so[:2] == [["Sending", "true", "true", True, True, True], 1], (_so, _sr.stderr[:300]))
+    check("send pending: a refusal puts the card, the button and its label back as they were, shows the server's words in the error line, and lets the next press send again",
+          len(_so) >= 4 and _so[2] == ["Send", None, None, False, False, False, "Nothing sent: the board is busy"] and _so[3] == 2, (_so, _sr.stderr[:300]))
+    check("send pending: an answer opens the page the server names (to) and leaves the card dimmed until it does", len(_so) == 5 and _so[4] == ["/?sent=decision&item=g1", True], (_so, _sr.stderr[:300]))
+check("send pending: the home page's answer forms carry no copy of the script", "form.hanswer'))return" in _hj and _aj not in _hj)
 check("home answer: the page stays where it was sent from: scrollY saved in sessionStorage as the form is sent, restored once on the page the ?sent= answer lands on, only when fresh (under 15 s), the same path and without a hash, the notice's height added, the notice kept in view",
       "sessionStorage.setItem(SK,JSON.stringify({y:Math.round(window.scrollY||0),t:Date.now(),p:location.pathname}))" in _hj and "sessionStorage.removeItem(SK)" in _hj and "window.scrollTo(0,Y)" in _hj
       and "S.p===location.pathname" in _hj and "!location.hash" in _hj and "Date.now()-S.t<15000" in _hj and "document.documentElement.scrollHeight-h0" in _hj and "position:sticky" in _hj and "addEventListener('load'" in _hj
