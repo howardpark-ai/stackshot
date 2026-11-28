@@ -1,6 +1,6 @@
 """client_reads.py: the reads of the client API and the item facts they carry.
 
-What a machine's hooks read: the page registry, the brief, the rulebook, a page's freshness, the open items a session moves (`items?key=`), the open items it is the contact of or an observer on (`involved?key=`), the owner's whole Your move group (`your-move`) and what the end-of-turn check needs about the items a reply names
+What a machine's hooks read: the page registry, the brief, the rulebook, a page's freshness, the open items a session moves (`items?key=`), the open items it is the contact of or an observer on (`involved?key=`), the owner's whole Your move group (`your-move`), the open asks a message named to a session this turn (`asks-named?key=&since=`, service/ask_named.py) and what the end-of-turn check needs about the items a reply names
 (`item-facts`), served to a machine that proves itself with its own token, so a client needs no checkout of the repository. `_client_get` is the one entry of the read calls (web/routes/client_api.py is the thin
 surface that serves it); `_client_items`, `_client_involved` and `_client_item_facts` read the store once per call; `_wait_fields`, `_then_label_raw`, `_item_mover_model`, `_item_mover`, `_item_mover_label`, `_basis_wait_of` and
 `_item_list` are the readers of an item's mover, its `then`, its wait and its list that those two (and the wake passes, the update's hand-over and the tools that probe an item) share.
@@ -48,6 +48,7 @@ from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe
 from stackshot.service import agents as _agents
 from stackshot.service import answer_handover as _handover
+from stackshot.service import ask_named as _ask_named
 from stackshot.service import contacts as _contacts
 from stackshot.service import foryou as _fy
 from stackshot.service import gates as _gates
@@ -120,6 +121,8 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     if what == "involved":              # the open items a session is the contact of or an observer on, newest write first (client.py get involved <session>)
         with _passmemo.scope():         # its contact lookup asks for the session roles once per open item: built once for the read
             return _client_involved(str(params.get("key") or ""))
+    if what == "asks-named":            # the standing asks the session wrote or moves that a message which reached it since its turn began names (service/ask_named.py; the end-of-turn board question)
+        return _ask_named._client_asks_named(str(params.get("key") or ""), str(params.get("since") or ""))
     if what == "item-facts":
         return _client_item_facts(str(params.get("key") or ""), str(params.get("ids") or ""))
     if what == "item-record":           # one item's stored record, as the file holds it (client.py get item-record <id>)
@@ -152,7 +155,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
         return 200, "application/json", json.dumps(_inbox_holds.waiting(keys), ensure_ascii=False)
     if what == "for-you":               # the For you list: {"generated", "rows": newest first, "flags": {item: watch | mute}} (the fleet tool's items sheet reads it)
         return 200, "application/json", json.dumps(_fy.payload(_gh.shown), ensure_ascii=False)
-    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | involved?key=<session> | item-facts?key=<session>&ids=<id,…> | item-record?key=<item id> | open-records?key=<session> | anchors-record | projects-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | your-move | whoami | config | roles | state-files"
+    return 404, "text/plain", NO_SUCH_READ + ": registry | rules | brief | project?key=<id | page key | slug> | projects?scope=<" + "|".join([*_prj.scopes(), "all"]) + r">[&q=<text>] | agent-name?key=<project>&names=<a,b,c> | page-ts?key=<page key or project id> | items?key=<session> | involved?key=<session> | item-facts?key=<session>&ids=<id,…> | asks-named?key=<session>&since=<epoch> | item-record?key=<item id> | open-records?key=<session> | anchors-record | projects-record | answer?key=<item id> | notice?key=<notice id> | holds | inbox-holds[?key=<key>] | inbox-waiting?key=<name[,id]> | for-you | your-move | whoami | config | roles | state-files"
 
 
 def _json_file(path: Any) -> Any:

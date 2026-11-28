@@ -411,8 +411,8 @@ def _dropped_lines_note(old: Any, new: Any) -> str:
 
 
 def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) -> str:
-    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title and the `Goal:` bullet name one outcome, so the subject is quoted, with what to send when
-    the outcome moved. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
+    """The reply line of a write that changed the words of the item's Goal sentence and left its subject as stored: the title names the work that reaches the `Goal:` bullet's outcome, so the subject is quoted, with what to send when
+    that work changed with it. Counted in the call log (call_log.noted). Information only: nothing is refused or stored differently. `sent` is the description as the call passed it: the words must differ both there and as
     stored, so neither the server's split of a long bullet nor a long Goal sent again and split the same way is a change. "" when the stored description opens with no `Goal:` bullet, the one it replaces gave no
     sentence, the words are the same (a re-formatting, a label put right) or the write stored another subject."""
     new, old, said = goal_of(item.get("description")), stated_goal(item_was.get("description")), stated_goal(sent)
@@ -420,7 +420,7 @@ def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) 
     if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
         return ""
     _calls.noted("goal-moved")
-    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the outcome moved)'
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the work it names no longer reaches that Goal)'
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -677,12 +677,13 @@ def update_unlocked(
     waits: list[dict[str, Any]] | str | None = None,
     wait_mode: str = "",
     busy_note: str | None = None,
+    route_record: dict[str, str] | None = None,      # a script route's write for its step (service/item_sync.py), no tool passes it: step= then replaces no line by itself, and this is what the route records, {"own": …, "sent": …} (owner_steps.route_writes)
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
     if not _steps.reword_given(reword):
         reword = None             # {} and "{}" name no step: the call is as if it passed none
-    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
+    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note", "route_record") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     fc = _faults.current()          # the faults of the form this write finds are kept and refused together (model/faults.py): the gates up to the checkpoint below go on past a fault on stand-in values
     h = _hooks()
     filing_only = bool(given) and set(given) <= (_FILING_ONLY | ({"said"} if "tell_him" in given else set()))      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
@@ -944,6 +945,7 @@ def update_unlocked(
     description = _fg.fix_bare_urls(description, str(item_was.get("description") or ""), session=_writes.session_next())       # a bare address in a description becomes a link to itself (the reply says so); next and ask keep the refusal
     for f_ in _fg.bare_url_faults({"description": description, "next": next, "ask": ask}, {"description": item_was.get("description"), "next": meta.get("next"), "ask": ask_was}, session=_writes.session_next()):   # only the fields this call sets; a stored bare URL is no reason to refuse
         fc.add(f_, text=True)
+    subject_sent = subject       # all its words, for the title note
     if subject:
         subject = _fg.fix_long_subject(subject, str(item.get("subject") or ""))       # a subject over the limit is cut at its last word that fits (the reply says so)
         for f_ in _fg.subject_faults(subject, str(item.get("subject") or "")):
@@ -969,7 +971,7 @@ def update_unlocked(
     was_meta = item_was.get("metadata") or {}
     group = {k for k in was_meta.get("step_lines") or [] if isinstance(k, str)} if str(was_meta.get("step") or "").strip() else set()      # the keys of the lines the stored step was split into: they belong to it only while it is stored
     step_same = bool(group) and not step_lines and bool(state_given.get("step")) and _states.clean(state_given.get("step")) == _states.clean(was_meta.get("step"))      # the stored summary sent again: not a new step, so nothing of its split goes
-    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and not closing and not step_same and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
+    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and route_record is None and not closing and not step_same and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
     step_kept = step_same and not clear_next      # clear_next wipes every line of next, so the record of the split goes and nothing is said to be unchanged
     if step_kept and not closing:
         _calls.fixed("step-split", "the step is the one the item holds already: the lines of next it was split into stay as they are, nothing was changed", fields=["step"])
@@ -1494,6 +1496,10 @@ def update_unlocked(
                                               ("wake", wake or clear_wake), ("hold", hold or clear_hold), ("ask", ask or clear_ask), ("next", next_touch),
                                               ("wait_basis", basis_txt or clear_wait_basis)) if v)
     work_note += hold_note + h.state_apply(meta, str(item.get("status") or ""), state_st, state_given, state_touched, step_withdrawn)   # the state last: it reads the item as every gate above left it
+    if route_record is not None:
+        _hs.route_writes(meta, route_record["own"], route_record["sent"], "step" in state_given)      # before the save settles his step: the line the server kept for the step before is not reworded away
+    elif step_withdrawn or state_given.get("step"):
+        _hs.route_replaced(meta, str(meta.get("owner") or ""), state_given.get("step") or "", str((item_was.get("metadata") or {}).get("step") or ""))      # before the save drops lines: a step a session replaced or withdrew is not one a wait dropped
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
@@ -1697,11 +1703,19 @@ def update_unlocked(
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} dropped-lines note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     goal_note = ""
-    if description.strip() and _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
+    if _writes.session_next() and not reformat and not sender.strip().startswith("a script on "):      # the writes the goal gate judges: a session's own words
         try:
-            goal_note = _goal_moved_note(item_was, item, desc_sent)
+            if description.strip():
+                goal_note = _goal_moved_note(item_was, item, desc_sent)
         except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
             print(f"update: {gid} goal note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        try:
+            # a write that names the item anew, moves its Goal under the same title or gives it its first Goal is told when the open item's title does not read as work; other rewrites do not name it again
+            title, first_goal = str(item.get("subject") or ""), stated_goal(item_was.get("description")) is None and goal_of(item.get("description")) is not None
+            if item.get("status") == "open" and (goal_note or first_goal or title.strip() != str(item_was.get("subject") or "").strip()):
+                goal_note += _fg.subject_form_note(title, subject_sent)
+        except Exception as e:  # noqa: BLE001  — as above
+            print(f"update: {gid} title note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     machine_note = h.machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     offer_note = _anchor_offers.item_line(gid, item, item_was)      # a relay wait this write set, or a source link it put in the description, that no anchor watches: one line with the ready anchors call, never a refusal
     if dropped_hold:

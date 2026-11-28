@@ -12,8 +12,8 @@ A proxy server forwards a backend's instructions only when its own are unset, an
     --- instructions of boards b, c (the same text, verbatim) ---
     ...
 
-Each backend's text is read live from its own initialize reply, kept five minutes (a backend that does not answer is skipped and tried again at the next
-request), and put in unchanged. A caller sees the backends it is a member of and no other; with no caller (the server's own start) the text is the preface.
+Each backend's text is read live from its own initialize reply, kept five minutes for the caller it was read for (a board answers its members only, so one
+caller's text is never handed to another; a backend that does not answer, or gives the caller no text, is asked again at the next request), and put in unchanged. A caller sees the backends it is a member of and no other; with no caller (the server's own start) the text is the preface.
 """
 from __future__ import annotations
 
@@ -29,10 +29,10 @@ CACHE_SECONDS = 300.0
 class Instructions:
     def __init__(self, door: Door):
         self.door = door
-        self._cache: dict[str, tuple[float, str]] = {}
+        self._cache: dict[tuple[str, str], tuple[float, str]] = {}      # (backend, caller)
 
     async def _of(self, name: str, user: str) -> str | None:
-        have = self._cache.get(name)
+        have = self._cache.get((name, user))
         if have and time.monotonic() - have[0] < CACHE_SECONDS:
             return have[1]
 
@@ -47,7 +47,8 @@ class Instructions:
         except Exception as e:      # noqa: BLE001  (the backend is down or refuses: its text is left out this time)
             log.warning("instructions: %s '%s' did not answer (%s: %s)", self.door.backends.by_name[name].kind, name, type(e).__name__, str(e)[:160])
             return None
-        self._cache[name] = (time.monotonic(), text)
+        if text:      # a board gives no text to a caller it does not list: not kept, so a caller it lists a moment later gets the text
+            self._cache[(name, user)] = (time.monotonic(), text)
         return text
 
     async def compose(self, user: str | None) -> str:

@@ -396,7 +396,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             ids = body.get("ack")
             if not (isinstance(ids, list) and all(isinstance(x, str) for x in ids)):
                 return 400, {"error": "ack = the list of line ids the hook printed"}
-            return 200, {"removed": _held.ack(uuid, name, ids=ids)}
+            return 200, {"removed": _held.ack(uuid, name, ids=ids, shown=True)}
         _held.mark_client(uuid, name)       # this session's hook fetches held lines: from now on a notice that asks nothing of it is held (the rollout gate)
         text, ids = _held.lease(uuid, name)
         return 200, {"text": text, "ids": ids}
@@ -656,7 +656,7 @@ async def _client_api_read(request: Request, machine: str, what: str):
             return JSONResponse(await run_in_threadpool(_project_activity.payload), headers={"Cache-Control": "no-store"})
         except _project_activity.Unreadable as e:   # a record it needs cannot be read: an error with the reason, never a smaller answer
             return PlainTextResponse(str(e), status_code=503, headers={"Cache-Control": "no-store"})
-    if what in ("items", "involved", "open-records", "inbox-holds", "inbox-waiting", "your-move", "page-ts"):   # a scan of the board, a read of the hold files, a walk of the inbox, a render of the board and a page's time (git, and a few seconds' wait for a fetch): off the event loop, so the pages keep answering while it runs
+    if what in ("items", "involved", "open-records", "inbox-holds", "inbox-waiting", "your-move", "page-ts", "asks-named"):   # a scan of the board, a read of the hold files, a walk of the inbox, a render of the board and a page's time (git, and a few seconds' wait for a fetch): off the event loop, so the pages keep answering while it runs
         from starlette.concurrency import run_in_threadpool
         status, ctype, body = await run_in_threadpool(_client_get, what, dict(request.query_params))
     else:

@@ -1379,7 +1379,7 @@ sus, _skip = AR.suspects(mixed, now, env())
 check("why-not-now: ranks after the other checks (a wrong-needs suspect comes first)", sus[0]["id"] == f"board#{BID_05}" and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
 rec_clear()
 
-# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do both name a finished outcome?"
+# ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do the title and the Goal say what is to be done and what done looks like?"
 GU = "goal-unclear"
 def gitem(i, subject="[home] Make the nightly run finish by 06:00", goal="The nightly run finishes by 06:00", status="open", **kw):
     k, d = clean(i) if status == "open" else item(i, status=status, wrote=now - 2 * H)
@@ -1399,8 +1399,8 @@ check("goal-unclear: a yes is a finding from the model on the item's mover, with
       and fnd[0]["detail"] == "the subject names the failure, not the result wanted" and rec["judged"][f"board#{BID_04}"]["fix"] == AR.FIX[GU], rec["findings"])
 check("goal-unclear: one call, whose message names the check with the subject and the Goal sentence, and the rubric carries the check",
       len(calls()) == 1 and rec["calls"]["made"] == 1 and f"- {GU}: the subject and the Goal bullet are new or reworded" in calls()[0]["stdin"] and "Goal: The nightly run finishes by 06:00" in calls()[0]["stdin"]
-      and "\ngoal-unclear\n  An item states its goal twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
-check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the finished outcome and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
+      and "\ngoal-unclear\n  An item says what is wanted twice" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
+check("goal-unclear: delivered as '<id> · goal-unclear · <reason> · <fix>' to the mover", any(to == "home-agent" and f"board#{BID_04} · goal-unclear · the subject names the failure" in t and "reword the subject to the task that closes the item and the first bullet to `Goal:" in t for to, t, fy in sent), sent)
 check("goal-unclear: the verdict and the (subject, Goal) stamp are on the record", rec["judged"][f"board#{BID_04}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_04}"]["gsig"] == sus[0]["gsig"] and rec["goal_judged"] == {f"board#{BID_04}": sus[0]["gsig"]},
       (rec["judged"], rec.get("goal_judged")))
 
@@ -1639,8 +1639,9 @@ split = [day(n, found(2, f"q{n}-agent")) for n in (97, 96, 95, 94)]
 got = trips(a2(), day(98, a2()), *split, day(93, found(1)), day(93, found(1)))
 check("…both runs of the seventh day are read", got == [SESSION("a-agent")], got)
 para = RUBRIC_TEXT.split("\ngoal-unclear\n", 1)[1].split("\n\n", 1)[0]
-check("the rubric's goal-unclear paragraph asks for the same finished outcome as the tool text and flags an activity, a question, a topic or a symptom",
-      all(w in para for w in ("Both must name the same finished OUTCOME", "never an activity, a question, a topic or a symptom", 'a question ("Should X change?") or a topic ("X settings")')), para)
+check("the rubric's goal-unclear paragraph asks the title the tool text asks for: a task as the subject, a finished outcome as the Goal, a symptom, a statement, a should sentence or a question flagged",
+      all(w in para for w in ("names the work that closes the item, as a task", "names the finished OUTCOME that work reaches", "never an activity, a question, a topic or a symptom", 'a symptom or a statement of state ("X fails when Y", "X is broken", "X is live")',
+                              'a "should" or "must" sentence, a question, a cause, a trigger or a bare topic ("X settings") instead of a task', "is the form wanted")) and "Both must name the same finished OUTCOME" not in para, para)
 # the audit agent's records name the session `owner` and have no `mover`
 def agents(n, who, **kw):
     return [{**{k: v for k, v in f.items() if k not in ("mover", "detail")}, "owner": who, **kw} for f in found(n)]

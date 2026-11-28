@@ -408,7 +408,7 @@ from stackshot.fleet import client as _fclient
 mw = server.mcp.middleware
 names = [type(m).__name__ for m in mw]; i_ = names.index("RequestRoute") if "RequestRoute" in names else -1
 check("wiring: the route hook is the first of the board's tool middleware (only FastMCP's own may come before it)", i_ >= 0 and all(type(m).__module__.startswith("fastmcp") for m in mw[:i_]), names)
-check("wiring: the other tool middleware keep their order after it", names[i_ + 1:i_ + 6] == ["_Fingerprint", "_LinkIds", "_RefusalLog", "_ReadOnly", "_RetiredInputs"], names)
+check("wiring: the other tool middleware keep their order after it", names[i_ + 1:i_ + 7] == ["_Fingerprint", "_LinkIds", "_RefusalLog", "_MembersOnly", "_ReadOnly", "_RetiredInputs"], names)
 check("wiring: the server's http_app is the wrapper around FastMCP's app", isinstance(server.mcp.http_app(path="/mcp"), WR.RequestLogMiddleware) and server.mcp.http_app(path="/mcp").state is not None)
 tok = open(_fclient.mint("box-far")).read().strip()
 holder = {}; req = types.SimpleNamespace(scope={WR.KEY: holder})

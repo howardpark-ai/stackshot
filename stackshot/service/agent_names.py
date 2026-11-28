@@ -32,6 +32,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.save_hooks import hooks as _hooks
 from stackshot.service.store import _path
+from stackshot.waits import held as _held
 
 
 # The server links a background agent to the item it works on, in code and at
@@ -239,6 +240,9 @@ def _writer_named_back(sender: str, was: str, plain: bool, closing: bool) -> boo
 
 
 def _router_delivered(target: str, text: str, outcome: str) -> str:
-    """The router's push to `target` came back `outcome`: an open hand-off to it of an item the text names is delivered (_handoff.handoff_told_text). → the outcome, unchanged."""
+    """The router's push to `target` came back `outcome`: an open hand-off to it of an item the text names is delivered (_handoff.handoff_told_text), and a line that
+    reached it is kept (held.note_reached: the board question reads it). → the outcome, unchanged."""
     _handoff.handoff_told_text(target, text, outcome, link_only=True)
+    if str(outcome).startswith(("delivered", "queued", "inbox")):
+        _held.note_reached(target, [text])
     return outcome
