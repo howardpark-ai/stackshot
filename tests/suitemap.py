@@ -165,7 +165,7 @@ and that is narrow on purpose:
     name inside a longer word) that is a name the fixtures patch, read or grep: the table and key names of the file itself (old and new)
     and the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py. A comment with `=`, `[`, a quote,
     a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
-    replaces text without anchoring it). A blank at the end of a whole-line comment or of a blank line is no change (the line is compared without it);
+    replaces text without anchoring it). A blank at the end of a whole-line comment or of a blank line is no change (the line is compared without it; the first line of the file excepted);
     a blank at the end of a code line is one (a suite's pattern may end on the line). → the direct readers
   * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
     takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is a change at, or directly
@@ -3142,10 +3142,11 @@ FUNCTION_WORDS = frozenset("a an and are as at be by do for from if in into is i
 def name_words(paths, items):
     """the lowercase words of every name a fixture suite may patch, read or grep: the dotted paths of the constants of tests/_instance.py and
     of every table and key of the example (old and new)"""
-    words = set()
+    words, keys = set(), set()
     for p in list(paths) + [p for p, _ in items]:
         words |= set(re.findall(r"[a-z]+", p.lower()))
-    return words - FUNCTION_WORDS
+        keys |= set(p.lower().split("."))
+    return words - (FUNCTION_WORDS - keys)          # a function word that is a whole key or table name (`at` of [audit]) is a name, not prose
 
 
 def plain_comment(line, words):
@@ -3172,8 +3173,9 @@ def layout_only(ot, nt, pinned, words):
     ofree = set(range(len(oraw))) - {n for n, _ in oc}
     nfree = set(range(len(nraw))) - {n for n, _ in nc}
     # a free line (a comment or a blank line outside a string) is compared without the blanks at its end; a code line, and any line of a string, as it is
-    oraw = [l.rstrip(" \t") if n in ofree else l for n, l in enumerate(oraw)]
-    nraw = [l.rstrip(" \t") if n in nfree else l for n, l in enumerate(nraw)]
+    # (line 0 stays as it is: cli.py's anchor matches its text, and its end)
+    oraw = [l.rstrip(" \t") if n in ofree and n else l for n, l in enumerate(oraw)]
+    nraw = [l.rstrip(" \t") if n in nfree and n else l for n, l in enumerate(nraw)]
 
     def anchors(raw, cl):
         found = {}

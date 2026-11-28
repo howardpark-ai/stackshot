@@ -1181,15 +1181,27 @@ def e8():
     ls[i:i + 3] = ["[registries]", "projects.key = " + ls[i + 1].split("=", 1)[1].split("#")[0].strip(), "projects.match = " + ls[i + 2].split("=", 1)[1].strip()]
     put("\n".join(ls))
 REAL_PLAIN = "# Some plain prose about nothing in particular."
-out, err = real_sel(lambda: swap("[router]  ", "# This is for one thing at a time.\n[router]  "), "real: comment with function words of names")
-check("real example: a plain comment holding only English function words of compound names (for, one, at, the) selects the direct readers only", out.split() == ["direct"], (out, err))
+first = REAL_EX.split("\n", 1)[0]
+out, err = real_sel(lambda: swap("[router]  ", "# This is for one thing to be in the way of the rest.\n[router]  "), "real: comment with function words of names")
+check("real example: a plain comment holding only English function words of compound names (for, one, to, be, in, the) selects the direct readers only", out.split() == ["direct"], (out, err))
 check("name_words: the function words of a compound name are no name, its content words are", smod.name_words({"zone.no_such_file", "zone.ssh_for_one"}, set()) == {"zone", "such", "file", "ssh"})
+check("name_words: a function word that is a whole key or table name stays a name (at of [audit]), one only inside a compound does not", smod.name_words({"audit.at", "zone.ssh_for_one"}, set()) == {"audit", "at", "zone", "ssh"})
+check("name_words: any function word that is a whole segment of a path stays a name", smod.name_words({"zone.up", "in.zone"}, set()) == {"zone", "up", "in"})
+out, err = real_sel(lambda: swap("[router]  ", "# at\n[router]  "), "real: comment at")
+check("real example: a plain comment 'at' (the key of [audit]) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: swap("[router]  ", "# one up\n[router]  "), "real: comment one up")
+check("real example: a plain comment 'one up' holds no whole key name (one is only inside one_mover), so it stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: swap("[router]  ", "# look at it\n[router]  "), "real: comment look at it")
+check("real example: a plain comment 'look at it' keeps the wide set, because at is a key of [audit]", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: put(first + "  \n" + REAL_EX.split("\n", 1)[1]), "real: blank at the end of line 1")
+check("real example: a blank at the end of the first line selects the fixture readers (cli.py anchors on it)", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "  \n[router]  "), "real: comment with trailing blank")
+check("real example: a plain comment line with a blank at its end stays at the direct readers", out.split() == ["direct"], (out, err))
 for word in ("git", "ssh", "cap"):
     out, err = real_sel(lambda: swap("[router]  ", f"# the {word} thing\n[router]  "), f"real: comment with {word}")
     check(f"real example: a plain comment holding the short key word {word!r} selects the fixture readers (whole-word test, not only the 4-letter substring)", out.split() == FIX, (out, err))
 out, err = real_sel(lambda: put(REAL_PLAIN + "\n" + cur()), "real: comment above line 1")
 check("real example: a plain comment inserted above the first line selects the fixture readers (cli.py anchors on it)", out.split() == FIX, (out, err))
-first = REAL_EX.split("\n", 1)[0]
 out, err = real_sel(lambda: put(REAL_EX.replace(first, REAL_PLAIN, 1)), "real: line 1 changed")
 check("real example: a change to the first line selects the fixture readers", out.split() == FIX, (out, err))
 out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment")
