@@ -19,6 +19,7 @@ item, not on agent. Fixture items in a temporary store, a fake clock (every read
   4c the front test the board and the passes use: the one the server installed is the one used; a front test that cannot answer counts as front (nothing is queued on a guess), in the queue path only; the
      server's `front_keeper` answers False on an unreadable role map by default and True when asked strictly
   4d the readers' edges: an item behind a closed one is not queued, a record dated ahead of now, the 30 s memo, a failed read is swallowed
+  4e a mover stored by its permanent session id on one item and by name on another is one mover on both Boards, as it is in the passes; the front test is asked by name
   10 revert-proof: each rule above is mutated (the newest item no longer chosen, the hour ignored, front agents queued, the gate ignored, a reader that no longer asks) and the check that guards it must fail
 
     tests/run-suite queued_behind      -> exit 0 / 1"""
@@ -315,6 +316,27 @@ with mutate(SL, "queued", failing):
     finally: sys.stderr = old_err
 check("4d a read that fails is swallowed: {} and a line on stderr, never an error to the caller; and it is not kept (the next call reads again)", swallowed == {} and "queued: not read" in err.getvalue() and audit_ticks_svc._QUEUE_CACHE["map"] == {"a9": "a8"}, (swallowed, err.getvalue()))
 off(); check("4d …and with the gate off the map is {} without reading anything", audit_ticks_svc._queue_map(now0 + 200) == {})
+
+# ================================================================ 4e. a mover stored by its permanent id
+PID, FID = "00000000-0000-4000-8000-000000000101", "00000000-0000-4000-8000-000000000102"
+(T / "sala/a").mkdir(parents=True)
+(T / "sala/a/session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-01-01T00:00:00Z",
+    "sessions": {i: {"id": i, "name": n, "aliases": [], "transcripts": []} for i, n in ((PID, "home-peer"), (FID, "home-front"))}}))
+client = _cfg.CFG.setdefault("client", {}); links = client.get("session_links")
+client["session_links"] = str(T / "sala"); _fleet_sessions_registry.reset(); on()
+try:
+    for how, first, second in (("the item in hand by id", PID, "home-peer"), ("the quiet item by id", "home-peer", PID)):
+        wipe(); put(1, mover=first, act=180, last=10); put(2, mover=second, act=180, last=120)
+        passes = audit_ticks_svc._queue_map(now0, items())
+        for label, md in (("the home page's Board", False), ("board.md's Board", True)):
+            b = board(md=md); L = lists_of(b)
+            check(f"4e {label}, {how}: the id and the name are one mover, so the quiet item is queued, as the passes read it", b.queue_map() == passes == {"a2": "a1"} and L[WT] == ["a2"] and L[AG] == ["a1"],
+                  (b.queue_map(), passes, L))
+    wipe(); put(1, mover=FID, act=180, last=10); put(2, mover=FID, act=180, last=120)
+    for label, md in (("the home page's Board", False), ("board.md's Board", True)):
+        check(f"4e {label}: the front test is asked by name, so a front agent stored by id has nothing queued", board(md=md).queue_map() == {}, board(md=md).queue_map())
+finally:
+    client["session_links"] = links; _fleet_sessions_registry.reset(); off()
 
 # ================================================================ 5. it ends by itself
 wipe(); put(1, act=180, last=10); put(2, act=180, last=120)
