@@ -158,7 +158,7 @@ def paused(*names): PAUSED.write_text("\n".join(U[n] for n in names)) if names e
 def rec(to, frm="home-send", **kw):
     """A hand-off record made by the machinery an hour ago (delivered, not taken), for an item that is written to disk with it (the store holds records only this machinery made)."""
     return H.new_record(to, U[to], frm, now0 - 3600, **{"delivered_at": now0 - 3500, **kw})
-def set_cfg(**kw): _cfg.CFG["model"] = {"wait_alias_until": "2099-12-31", "post_wake_alias_until": "2099-12-31", **kw}      # [model] set whole drops the alias windows tests/_instance.py holds open: the old wait parameters (hold, wake) this suite passes would be refused from the day after them, so it keeps both open
+def set_cfg(**kw): _cfg.CFG["model"] = {"wait_alias_until": "2099-12-31", **kw}      # [model] set whole drops the alias window tests/_instance.py holds open: the old wait parameters (hold, wake) this suite passes would be refused from the day after it, so it keeps it open
 set_cfg()
 _cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the last rung of the ladder asks it, once, to recover a session nobody could hand the item to
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
@@ -1130,11 +1130,11 @@ item(92); upd(92, "home-send", needs=["team-back"], next="team-back: do the thin
 check("15 needs: a hand-off through needs records the session in needs", ho(92).get("to") == "team-back", ho(92))
 upd(92, "home-send", needs=["home-docs"], next="home-docs: do the thing"); drain()
 check("15 needs: …and a later needs naming another one moves the record there", ho(92).get("to") == "home-docs" and not stale_now(92), ho(92))
-# 15.4 a time wait's post_wake_mover takes effect on a wake: the server's own save records it, the wake notice delivers it
+# 15.4 a time wait's mover takes effect on a wake: the server's own save records it, the wake notice delivers it
 dayp = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * 86400.0 + ZONE_OFFSET))
-item(93, wait_kind="time", hold=True, wake=dayp(-1), post_wake_mover="team-back", needs=[], handoff=rec("home-peer"))
+item(93, wait_kind="time", hold=True, wake=dayp(-1), mover="team-back", needs=[], handoff=rec("home-peer"))
 clear_pushes(); woke = wakes_svc.wake_pass(); drain()
-check("15 wake: a time wait's post_wake_mover becomes the mover on the wake, and the record names it, from the server (the record to the one before goes to the history)",
+check("15 wake: a time wait's mover becomes the mover on the wake, and the record names it, from the server (the record to the one before goes to the history)",
       "a93" in woke and mt(93).get("mover") == "team-back" and ho(93).get("to") == "team-back" and ho(93).get("from") == "stackshot" and "home-peer" in hist(93) and not stale_now(93), (woke, mt(93)))
 check("15 wake: …and the wake notice delivered it (the clock can start)", isinstance(ho(93).get("delivered_at"), float) and len(pushes_to("team-back", "a93")) >= 1, (ho(93), pushes()))
 # 15.5 a cold call's hand-on
@@ -1191,7 +1191,7 @@ item(110, mover="team-back", handoff=rec("home-peer"))                        # 
 item(111, mover="home-peer", handoff=rec("home-peer"))                        # fine
 item(112, mover="team-back", handoff=rec("home-peer", taken_at=now0 - 100))   # taken: history
 item(113, status="completed", handoff=rec("home-peer"))                       # closed (the older code left its record open)
-item(114, handoff=rec("home-peer"), wait_kind="time", hold=True, wake=dayp(3), post_wake_mover="team-back", needs=[])   # waiting: no mover
+item(114, handoff=rec("home-peer"), wait_kind="time", hold=True, wake=dayp(3), mover="team-back", needs=[])   # waiting: no mover
 before = {i: json.dumps(rd(i), sort_keys=True) for i in (110, 111, 112, 113, 114)}
 mine = lambda rows: sorted(r["gid"] for r in rows if r["gid"] in (f"a{110}", f"a{111}", f"a{112}", f"a{113}", f"a{114}"))      # (section 12 leaves two stored states of the older code on the board: the repair sees them too)
 rows = handoff_svc.handoff_repair()
@@ -1206,7 +1206,7 @@ check("15 repair: nobody is told and no record is made new", not pushes() and "h
 
 # 15.11 review fixes: a server-made record runs no take clock, and a taken record to the same name does not stand in for the wake's new hand-off
 def parked(i, post, **kw):
-    item(i, wait_kind="time", hold=True, wake=dayp(-1), post_wake_mover=post, needs=kw.pop("needs", []), **kw)
+    item(i, wait_kind="time", hold=True, wake=dayp(-1), mover=post, needs=kw.pop("needs", []), **kw)
 parked(116, "team-back", handoff=rec("team-back", taken_at=now0 - 900))          # team-back took it, then parked it for itself
 clear_pushes(); woke = wakes_svc.wake_pass(); drain()
 r_wake = ho(116); h_wake = (mt(116).get("handoff_history") or [{}])[-1]

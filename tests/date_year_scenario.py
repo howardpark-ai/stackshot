@@ -47,7 +47,7 @@ S1 = "00000000-0000-4000-8000-000000000001"
 def item(i, subject, status="open", updated=None, **meta):
     updated = updated or (NOW - datetime.timedelta(days=1)).timestamp()
     meta = {"owner": S1, "next": "team-back: do the thing", "project": "projects/hmp", **meta}
-    if meta.get("hold") and not meta.get("needs"): meta.setdefault("post_wake_mover", S1)
+    if meta.get("hold") and not meta.get("needs"): meta.setdefault("mover", S1)
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": subject, "description": "A fixture item.", "status": status, "updated": updated, "state_updated": updated,
                                                     "confirmed": updated, "metadata": meta}))
 

@@ -92,7 +92,7 @@ A1, A2, A3, A4, A5 = (f"https://github.com/o/r/pull/{n}" for n in (101, 102, 103
 def anchors(**pages): _anc.save({k.replace("_", "/", 1): v for k, v in pages.items()})
 def entry(url, items=None): return {"url": url, "items": items, "added": now0, "by": "x"}
 def wait(gid, url, **kw):
-    return _update_svc._update(gid, sender=FRONT, wait_kind="anchor", wait_anchor=url, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none", **kw)
+    return _update_svc._update(gid, sender=FRONT, wait_kind="anchor", wait_anchor=url, wait_event="PR merged", ask_by=day(6), mover=BACK, **kw)
 
 # ================================================================ an update
 item(60, subject="[home] waits on an unlisted anchor", needs=[BACK])
@@ -131,7 +131,7 @@ _wt_anchors._anchors("projects/alpha", add=[A5], items=["a64"])
 accepted("order: …and accepted once the anchors tool has added it scoped to the item", lambda: wait("a64", A5))
 
 # ================================================================ an unchanged re-save, a changed anchor
-item(65, subject="[home] stored anchor wait, anchor not listed", wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[])
+item(65, subject="[home] stored anchor wait, anchor not listed", wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(5), mover=BACK, needs=[])
 anchors(projects_alpha=[])
 accepted("re-save: a new backstop day on a stored anchor wait whose anchor is not listed is not refused", lambda: _update_svc._update("a65", sender=FRONT, ask_by=day(8)))
 check("re-save: …the new day stands", mt(65).get("until") == day(8) and mt(65).get("wait_anchor") == A1, mt(65))
@@ -139,18 +139,18 @@ accepted("re-save: the same wait_kind and wait_anchor sent again are not refused
 accepted("re-save: the wait_event changed alone is not refused", lambda: _update_svc._update("a65", sender=FRONT, wait_event="PR merged and live"))
 refused("re-save: a changed wait_anchor is judged", lambda: _update_svc._update("a65", sender=FRONT, wait_anchor=A2), "anchors list", A2)
 check("re-save: …and the stored anchor stays", mt(65).get("wait_anchor") == A1, mt(65))
-item(66, subject="[home] stored time wait, turned into an anchor wait", wait_kind="time", hold=True, wake=day(3), post_wake_mover=BACK, needs=[])
+item(66, subject="[home] stored time wait, turned into an anchor wait", wait_kind="time", hold=True, wake=day(3), mover=BACK, needs=[])
 refused("change: a stored wait of another kind turned into an anchor wait on an unlisted anchor is judged", lambda: _update_svc._update("a66", sender=FRONT, wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6)), "anchors list", A1)
 
 # ================================================================ a create
 refused("create: an unlisted anchor is refused, the message offers the project-wide add",
         lambda: _wt_create._create(subject="[home] new anchor wait", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
-                               wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"),
+                               wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), mover=BACK),
         "Refused", A1, 'anchors(project="projects/alpha", add=["' + A1 + '"])', "without the wait")
 anchors(projects_alpha=[entry(A1)])
 accepted("create: a project-wide anchor of the project is accepted",
          lambda: _wt_create._create(subject="[home] new anchor wait, listed", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
-                                wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"))
+                                wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), mover=BACK))
 
 # ================================================================ an unreadable anchors file, a value that is no anchor shape
 AF = T / "store/anchors.json"
@@ -165,7 +165,7 @@ item(81, subject="[home] anchors file unreadable, create", needs=[BACK]); AF.wri
 with contextlib.redirect_stderr(io.StringIO()) as err2:
     accepted("unreadable file: a create with an anchor wait is written too",
              lambda: _wt_create._create(subject="[home] new anchor wait, file unreadable", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
-                                    wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"))
+                                    wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), mover=BACK))
 check("unreadable file: …with its stderr line", "not judged" in err2.getvalue(), err2.getvalue())
 item(82, subject="[home] anchors file missing", needs=[BACK]); AF.unlink()
 refused("missing file: is an empty list, the anchor wait is refused", lambda: wait("a82", A1), "Refused", "anchors list", A1)
@@ -183,21 +183,21 @@ for label, val in (("free text", "the merge of the release PR"), ("an unparseabl
 check("no shape: …nothing was stored", raw(83) == before83, mt(83))
 refused("no shape: a create with free text is refused the same way",
         lambda: _wt_create._create(subject="[home] new anchor wait, free text", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
-                               wait_kind="anchor", wait_anchor="the release PR", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"),
+                               wait_kind="anchor", wait_anchor="the release PR", wait_event="PR merged", ask_by=day(6), mover=BACK),
         "not an anchor shape the anchors tool accepts")
 anchors(projects_alpha=[])
 
 # ================================================================ other kinds are not judged
 anchors(projects_alpha=[])
 item(70, subject="[home] time wait", needs=[BACK])
-accepted("other kinds: a time wait is not judged", lambda: _update_svc._update("a70", sender=FRONT, wait_kind="time", hold=True, wake=day(3), post_wake_mover=BACK, mover="none"))
+accepted("other kinds: a time wait is not judged", lambda: _update_svc._update("a70", sender=FRONT, wait_kind="time", hold=True, wake=day(3), mover=BACK))
 item(71, subject="[home] relay wait", needs=[BACK])
-accepted("other kinds: a relay wait is not judged", lambda: _update_svc._update("a71", sender=FRONT, wait_kind="relay", wait_event="the countersigned NDA", ask_by=day(6), post_wake_mover=BACK, mover="none"))
+accepted("other kinds: a relay wait is not judged", lambda: _update_svc._update("a71", sender=FRONT, wait_kind="relay", wait_event="the countersigned NDA", ask_by=day(6), mover=BACK))
 item(72, subject="[home] item wait", needs=[BACK]); item(73, subject="[home] the blocker")
-accepted("other kinds: an item wait is not judged", lambda: _update_svc._update("a72", sender=FRONT, wait_kind="item", after=["a73"], ask_by=day(6), post_wake_mover=BACK, mover="none"))
+accepted("other kinds: an item wait is not judged", lambda: _update_svc._update("a72", sender=FRONT, wait_kind="item", after=["a73"], ask_by=day(6), mover=BACK))
 item(74, subject="[home] anchor wait standing on a scoped anchor, no wait_anchor", needs=[BACK])
 anchors(projects_alpha=[entry(A2, ["a74"])])
-accepted("other kinds: an anchor wait that names no wait_anchor (its anchor scoped to the item) is not judged", lambda: _update_svc._update("a74", sender=FRONT, wait_kind="anchor", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"))
+accepted("other kinds: an anchor wait that names no wait_anchor (its anchor scoped to the item) is not judged", lambda: _update_svc._update("a74", sender=FRONT, wait_kind="anchor", wait_event="PR merged", ask_by=day(6), mover=BACK))
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

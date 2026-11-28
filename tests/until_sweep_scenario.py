@@ -102,7 +102,7 @@ KINDS = [("", {}), ("time", {"wait_kind": "time"}), ("item", {"wait_kind": "item
          ("event", {"wait_kind": "event", "wait_event": "box_online box-b"}), ("event, bogus", {"wait_kind": "event", "wait_event": "bogus"})]
 AFTERS = [("", {}), ("open", {"after": ["g31"]}), ("closed", {"after": ["g32"]})]
 HOLDS = [("", {}), ("hold", {"hold": True, "hold_set": {"at": now0 - DAY, "by": BACK}}), ("hold+recycle", {"hold": True, "hold_set": {"at": now0 - DAY, "by": BACK}, "recycle": {"at": now0}})]
-NEEDS = [("back", {"needs": [BACK]}), ("external", {"needs": ["external"], "post_wake_mover": BACK})]
+NEEDS = [("back", {"needs": [BACK]}), ("external", {"needs": ["external"], "mover": BACK})]
 BASES = [("", False), ("basis", True)]
 PLAIN = ("past", "soon", "later")
 grid, spaced_grid = [], []

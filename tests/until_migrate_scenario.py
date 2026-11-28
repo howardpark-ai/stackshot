@@ -110,7 +110,7 @@ CASES = {
     1:  ("hold + wake with the kind time", dict(needs=[BACK], wait_kind="time", hold=True, wake=day(3), state="parked")),      # a hold stored the state word parked with it: without the word the item would read as doing once the hold is gone (a new model conflict: case 14 of section 16)
     2:  ("hold + wake + a reason",         dict(needs=[BACK], hold=True, wake=day(4), hold_set={"at": now0 - DAY, "by": BACK}, wait_basis=BASIS)),
     3:  ("ask_by beside an after link",    dict(needs=[BACK], after=["g31"], ask_by=day(5))),
-    4:  ("a relay's ask_by",               dict(needs=["external"], wait_kind="relay", wait_event="the vendor's reply", ask_by=day(6), post_wake_mover=BACK)),
+    4:  ("a relay's ask_by",               dict(needs=["external"], wait_kind="relay", wait_event="the vendor's reply", ask_by=day(6), mover=BACK)),
     5:  ("an anchor's wake and ask_by",    dict(needs=[BACK], wait_kind="anchor", wait_anchor="https://example.com/x", wake=day(6), ask_by=day(5))),
     6:  ("a bare wake (a backstop)",       dict(needs=[BACK], mover=BACK, wake=day(3))),
     7:  ("no wait at all",                 dict(needs=[BACK])),
@@ -634,10 +634,10 @@ OKB = UP.plan_for({"hold": True, "wake": day(4), "wait_basis": {"text": "x", "wa
 check("16.5 …and a reason bound to the very clean date still migrates (no regression)", OKB["edits"].get("until") == day(4) and not OKB["listed"], OKB)
 
 # 16.6 a hold + wake whose release differs from the old wake pass's is listed in the plan (migrated, not held back), past or future
-put(215, needs=[OWN], hold=True, wake=day(3)); put(216, needs=[BACK], hold=True, wake=day(3), post_wake_mover="home-other"); put(217, needs=[BACK], hold=True, wake=day(3))
+put(215, needs=[OWN], hold=True, wake=day(3)); put(216, needs=[BACK], hold=True, wake=day(3), mover="home-other"); put(217, needs=[BACK], hold=True, wake=day(3))
 st_, d_ = call(op="until", items=["g215", "g216", "g217"], dry=True)
 r6 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
-check("16.6 needs naming the owner, and a post_wake_mover that is not the one session in needs, are listed with how the release differs; a plain hold + wake is not", r6[215]["action"] == "would_set" and "owner" in r6[215]["differs"] and r6[216]["action"] == "would_set" and "post_wake_mover home-other" in r6[216]["differs"]
+check("16.6 needs naming the owner, and a mover that is not the one session in needs, are listed with how the release differs; a plain hold + wake is not", r6[215]["action"] == "would_set" and "owner" in r6[215]["differs"] and r6[216]["action"] == "would_set" and "mover home-other" in r6[216]["differs"]
       and r6[217]["differs"] == "", {i: (r6[i]["action"], r6[i]["differs"]) for i in r6})
 check("16.6 …the plan lists them (one line each), and the signature carries them so a change stops the apply", len(UM.differ_lines(list(r6.values()))) == 2 and UM.signature(list(r6.values())) != UM.signature([{**r, "differs": ""} for r in r6.values()]), UM.differ_lines(list(r6.values())))
 check("16.6 …past or future alike: the pure test does not read the date's side", UP.release_differs({"hold": True, "wake": day(-4), "needs": [OWN]}, _model.is_owner) != "" and UP.release_differs({"wake": day(3), "needs": [OWN]}, _model.is_owner) == "", None)
@@ -807,7 +807,7 @@ for d_ in (run14, run14b, run14d, base_v): shutil.rmtree(d_, ignore_errors=True)
 # 16.9 a front agent's watch_reason goes with the wake when the watchers end the wait (the old wake pass dropped it)
 REASON = "no push reaches this session for the vendor"
 put(219, needs=[BACK], wait_kind="time", until=day(-1), watch_reason=REASON)
-put(221, needs=["external"], wait_kind="relay", until=day(-1), watch_reason=REASON, post_wake_mover=BACK)
+put(221, needs=["external"], wait_kind="relay", until=day(-1), watch_reason=REASON, mover=BACK)
 woke16 = wakes_svc.wake_pass()
 check("16.9 the watchers end a time wait and a relay's ask-by day and take watch_reason with them", {"g219", "g221"} <= set(woke16) and "watch_reason" not in mt(219) and "watch_reason" not in mt(221) and "until" not in mt(219), (woke16, wk(mt(219)), wk(mt(221))))
 check("16.9 …the list of what the end of a wait clears names it (one list for the watcher's arrival and the owner's Done)", "watch_reason" in WK_.LIVE_DROP and "watch_reason" in WK_.DATE_DROP, None)

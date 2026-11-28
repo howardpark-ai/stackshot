@@ -88,7 +88,7 @@ put(13, subject="[home] contact and observer", age=3, contact=A, observers=[A, B
 put(14, subject="[home] names neither of work-a", age=2, contact=B, observers=[B, M], mover=S)
 put(15, subject="[home] closed, names it twice", status="completed", age=2, contact=A, observers=[A], mover=S, outcome="done")
 put(16, subject="[home] held", age=4, contact=A, hold=True, mover=S)
-put(17, subject="[home] waits on a date", age=6, contact=B, observers=[A], mover=OWNER, wait_kind="time", wake=D(6), post_wake_mover=S)
+put(17, subject="[home] waits on a date", age=6, contact=B, observers=[A], wait_kind="time", wake=D(6), mover=S)
 put(18, subject="[home] observer stored as the permanent id, the newest", age=0.5, contact=B, observers=[SESS[A]], mover=S)
 put(19, subject="[home] a stored contact that is no front agent", age=7, contact="ghost-one", mover=S)
 put(20, subject="[home] no contact stored", age=8, mover=OWNER)

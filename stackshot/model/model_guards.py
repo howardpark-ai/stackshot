@@ -58,7 +58,7 @@ GUARDS = ("mover", "wait_input", "post_wake", "snooze", "filler", "no_end", "dec
 LABELS = {"mover": "mover", "wait_input": "wait input", "post_wake": "post-wake mover", "snooze": "snooze", "filler": "filler", "no_end": "wait with no end",
           "decision_hold": "decision that is parked", "mover_state": "agent mover on his state", "owner_mover": f"{_cfg.owner()} as mover with no step or ask", "second_mover": "second mover", "next_unnamed": "next line with no name", "next_wait": "wait in next", "next_windows": "his next line with a command that is not in backticks, does not say where it runs, runs on the wrong machine or is a `! ` line", "alarm": "alarming word", "description": "description not in bullets"}
 CLOSED_NO_OUTCOME = "closed_no_outcome"
-STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "cap_ok", "wait_basis", "waits", "wait_mode"})
+STATE_FIELDS = frozenset({"needs", "hold", "wake", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "cap_ok", "wait_basis", "waits", "wait_mode"})
 WAIT_SETTING = STATE_FIELDS - {"mover", "then", "cap_ok"}      # the fields that make or restate a wait: an update that sets none of them leaves an old ask_by with no kind standing as the wait's end (no_end)
 FIELD_GUARDS = frozenset({"subject", "goal", "next", "ask", "wait_event", "description"})       # the fields a text guard reads
 _STATE_GUARDS = frozenset({"mover", "wait_input", "post_wake", "snooze", "no_end", "decision_hold", "mover_state", "owner_mover", "second_mover"})
@@ -1125,7 +1125,7 @@ def report(items: dict[str, dict[str, Any]], ctx: Ctx | None = None, *, anchors:
         if mod.state == _model.ALIVE and not mod.mover_explicit:
             rep.defaulted["mover"] = rep.defaulted.get("mover", 0) + 1
         if mod.state == _model.WAITING and mod.wait is not None and not mod.wait.mover_explicit:
-            rep.defaulted["post_wake_mover"] = rep.defaulted.get("post_wake_mover", 0) + 1
+            rep.defaulted["picker"] = rep.defaulted.get("picker", 0) + 1
     return rep
 
 

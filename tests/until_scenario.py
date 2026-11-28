@@ -171,11 +171,11 @@ check("event: no end without a backstop; with an until it can end, is due as bac
       and WK.due({"metadata": {**evw, "until": day(2)}}, now) == "" and WK.next_moment({**evw, "until": at(2, "09:30")}) == ep(at(2, "09:30")))
 check("event: the until counts as the backstop an event wait needs, so the gap 'no backstop day' no longer reads", WK.can_end({**evw, "until": day(2)}) and EW.problem(evw["wait_event"]) == "")
 
-full = {"until": day(2), "wait_kind": "anchor", "wait_anchor": "https://example.test/x", "wait_event": "a notice", "ask_by": day(3), "post_wake_mover": BACK, "wake": day(1), "hold": True, "hold_set": {"at": 1, "by": "x"},
+full = {"until": day(2), "wait_kind": "anchor", "wait_anchor": "https://example.test/x", "wait_event": "a notice", "ask_by": day(3), "mover": BACK, "wake": day(1), "hold": True, "hold_set": {"at": 1, "by": "x"},
         "wait_basis": {"text": "t", "wake": day(2)}, "cap_ok": {"wake": day(2), "by": "x", "quote": "ok"}, "after": ["a9"], "needs": [BACK], "mover": BACK, "project": "projects/quill"}
 mm = copy.deepcopy(full); WK.end_wait(mm)
 check("end_wait: until goes with the kind group, the hold, the wake, the basis and the owner's words; the rest stays",
-      not any(k in mm for k in ("until", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "wake", "hold", "hold_set", "wait_basis", "cap_ok", "after")) and mm["needs"] == [BACK] and mm["project"] == "projects/quill", mm)
+      not any(k in mm for k in ("until", "wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "hold", "hold_set", "wait_basis", "cap_ok", "after")) and mm["needs"] == [BACK] and mm["project"] == "projects/quill", mm)
 mm = copy.deepcopy(full); WK.turn_alive(mm, BACK, "its until came", now)
 check("turn_alive: the wait ends with its until, the post-wake mover moves the item and the arrival is recorded", "until" not in mm and "wait_kind" not in mm and mm["mover"] == BACK and mm["woke"]["what"] == "its until came")
 mm = copy.deepcopy(full); WK.turn_to_owner(mm, BACK, "Decide: x", [], "its until came", now)
@@ -262,7 +262,7 @@ try:
     gates.gate_model_args({"wait_kind": "time"}, {"wait": True}); msg = ""
 except Exception as e:  # noqa: BLE001
     msg = str(e)
-check("refusal text: clear_wait names the five a caller can pass, never `until` (it is no write field yet)", msg.startswith("Refused: clear_wait drops wait_kind") and "post_wake_mover" in msg and "until" not in msg and "does not go with a new wait_kind" in msg, msg)
+check("refusal text: clear_wait names the four a caller can pass, never `until` (it is no write field yet)", msg.startswith("Refused: clear_wait drops wait_kind") and "until" not in msg and "does not go with a new wait_kind" in msg, msg)
 _, dropped = gates.gate_model_args({}, {"wait": True})
 check("clear_wait still drops the whole wait group, `until` among it", "until" in dropped and "wait_kind" in dropped, dropped)
 

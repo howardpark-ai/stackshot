@@ -146,7 +146,7 @@ item(81, A, "projects/alpha", "[home] his Next lines in the Your step block", ag
 M = datetime.timedelta(minutes=1); DAYS = datetime.timedelta(days=1)
 # open items he does not move, one per state, for the comment box that takes the answer box's slot: doing, waiting on a date, verifying
 item(90, A, "projects/alpha", "[home] a doing item with a title of a reasonable length", age=1 * H, needs=[CLX], next=f"{CLX}: do the work and say when it is done")
-item(91, A, "projects/alpha", "[home] a wait on a date", age=1 * H, needs=["external"], wait_kind="time", wake=(now + 8 * DAYS).strftime("%Y-%m-%d"), post_wake_mover=CLX, next=f"{CLX}: check the date")
+item(91, A, "projects/alpha", "[home] a wait on a date", age=1 * H, needs=["external"], wait_kind="time", wake=(now + 8 * DAYS).strftime("%Y-%m-%d"), mover=CLX, next=f"{CLX}: check the date")
 item(92, A, "projects/alpha", "[home] a verifying item", age=1 * H, state="verifying", proof="the link opens on the phone", end=(now + 3 * DAYS).strftime("%Y-%m-%d"), needs=[CLX], next=f"{CLX}: check the link")
 item(60, A, "projects/alpha", "[home] a decision with a long question and options whose labels run long", age=6 * DAYS, needs=["decision"], next="Oliver: answer the ask",      # its mockup link: Mockup ↗ beside the long question
      desc="- The layout is drawn in [the mockup](https://claude.ai/artifact/00000000-0000-4000-8000-000000000052)",
@@ -167,24 +167,24 @@ item(69, A, "projects/alpha", "[home] Move the widget to shelf-2 and let it sync
 item(62, X, "projects/alpha", "[home] handed over to a session with a long name", age=10 * M, needs=["ops-falcon-engineer"], mover="ops-falcon-engineer", next="ops-falcon-engineer: take it",
      handoff={"to": "ops-falcon-engineer", "from": "ops-falcon-main", "at": (now - 10 * M).timestamp(), "delivered_at": (now - 9 * M).timestamp(), "taken_at": None},
      woke={"what": "the wake day came for " + LONG, "to": "ops-falcon-engineer", "at": (now - 10 * M).timestamp()})
-item(63, A, "projects/alpha", "[home] a wait on an anchor with a long address", age=2 * DAYS, needs=["external"], wait_kind="anchor", post_wake_mover="ops-falcon-engineer", next="ops-falcon-engineer: deploy it",
+item(63, A, "projects/alpha", "[home] a wait on an anchor with a long address", age=2 * DAYS, needs=["external"], wait_kind="anchor", mover="ops-falcon-engineer", next="ops-falcon-engineer: deploy it",
      wait_anchor="https://example.invalid/example-owner/stackshot/pull/7123456789/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", wait_event="the pull request with the very long name " + LONG + " merges",
      wake=(now + 9 * DAYS).strftime("%Y-%m-%d"), chases=[{"at": (now - 60 * M).timestamp(), "by": "x", "note": "mailed"}, {"at": (now - 30 * M).timestamp(), "by": "x", "note": "mailed again"}])
 item(64, A, "projects/alpha", "[home] a relay come due", age=20 * M, needs=["decision"], ask="Decide: has the party's reply with a very long name arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop", then="ops-falcon-engineer",
      options=[{"label": "arrived", "line": "It came.", "recommended": False}, {"label": "not yet, ask again on <date>", "line": "Give the date in the box.", "recommended": True}, {"label": "drop", "line": "No longer wanted.", "recommended": False}],
      woke={"what": "the ask-by day came", "to": "Oliver", "at": (now - 20 * M).timestamp()}, next="ops-falcon-engineer: read the reply")
 # a Waiting row of each wait kind: a time wait with a then-mover that is long, an item wait, a relay, an anchor wait whose anchor is only scoped to the item, one with no anchor anywhere (no watcher), a time wait with no date (no watcher)
-item(71, A, "projects/alpha", "[home] a time wait with a long then-mover and a goal that wraps onto a second line at phone width", age=2 * DAYS, hold=True, wake=(now + 3 * DAYS).strftime("%Y-%m-%d"), post_wake_mover=LONG, next=f"{LONG}: take it after the wake")
-item(72, A, "projects/alpha", "[home] an item wait", age=2 * DAYS, after=["a2"], post_wake_mover="ops-falcon-engineer", next="ops-falcon-engineer: continue once a2 closes")
-item(73, A, "projects/alpha", "[home] a relay", age=2 * DAYS, needs=["external"], wait_kind="relay", wait_event="the reviewer with a rather long name indeed", ask_by=(now + 5 * DAYS).strftime("%Y-%m-%d"), post_wake_mover="ops-falcon-engineer", next="Oliver: nothing yet")
-item(74, A, "projects/alpha", "[home] an anchor wait with no anchor recorded", age=2 * DAYS, needs=["external"], wait_kind="anchor", wait_event="the vendor answers", wake=(now + 8 * DAYS).strftime("%Y-%m-%d"), post_wake_mover="ops-falcon-engineer", next="ops-falcon-engineer: look again")
+item(71, A, "projects/alpha", "[home] a time wait with a long then-mover and a goal that wraps onto a second line at phone width", age=2 * DAYS, hold=True, wake=(now + 3 * DAYS).strftime("%Y-%m-%d"), mover=LONG, next=f"{LONG}: take it after the wake")
+item(72, A, "projects/alpha", "[home] an item wait", age=2 * DAYS, after=["a2"], mover="ops-falcon-engineer", next="ops-falcon-engineer: continue once a2 closes")
+item(73, A, "projects/alpha", "[home] a relay", age=2 * DAYS, needs=["external"], wait_kind="relay", wait_event="the reviewer with a rather long name indeed", ask_by=(now + 5 * DAYS).strftime("%Y-%m-%d"), mover="ops-falcon-engineer", next="Oliver: nothing yet")
+item(74, A, "projects/alpha", "[home] an anchor wait with no anchor recorded", age=2 * DAYS, needs=["external"], wait_kind="anchor", wait_event="the vendor answers", wake=(now + 8 * DAYS).strftime("%Y-%m-%d"), mover="ops-falcon-engineer", next="ops-falcon-engineer: look again")
 item(75, A, "projects/alpha", "[home] an anchor wait whose anchor is scoped to the item", age=2 * DAYS, needs=["external"], state="outside", party="the vendor", wake=(now + 8 * DAYS).strftime("%Y-%m-%d"), next="ops-falcon-engineer: read the thread when it moves")
 item(76, A, "projects/alpha", "[home] a time wait with no date", age=2 * DAYS, hold=True, next="ops-falcon-engineer: someone must look")
 item(3, A, "projects/alpha", "[home] done last week", status="completed", outcome="done", reason="shipped", priority="p2")
 # a waiting item (the item model's page step 3): a long goal, an anchor wait with a long URL and event, a long post-wake mover, two chases, five next lines (two fold as "+2 more")
 item(4, A, "projects/alpha", "[home] waiting on a reply", goal="Get the reply that unblocks " + LONG + " and the tests/fixtures/a/long/path/that/does/not/break/anywhere/x.json", wait_kind="anchor",
      wait_anchor="https://github.com/example-owner/stackshot/pull/7123456789/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", wait_event="the review of " + LONG + " comes back",
-     post_wake_mover=LONG, wake="2099-01-01", priority="p2", party="a reviewer with a rather long name indeed",
+     mover=LONG, wake="2099-01-01", priority="p2", party="a reviewer with a rather long name indeed",
      chases=[{"at": now.timestamp() - 3600, "by": LONG, "note": "asked again in " + "a-very-long-unbroken-token-" * 6}, {"at": now.timestamp() - 1800, "by": "ops-falcon", "note": "no reply yet"}],
      next="\n".join(f"{LONG}: step {k} " + "x" * 60 for k in range(1, 6)))
 # the Task board table at every width: many ids in each of the three id columns of one project, whose agents carry long names

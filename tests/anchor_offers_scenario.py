@@ -91,7 +91,7 @@ def create(subject, desc=DESC, **kw):
 def gid_of(reply): return re.search(r"created (\S+) —", reply).group(1)
 def stored(g): return json.loads(next(T.glob(f"store/*/{re.sub(r'[^0-9]', '', g)}.json")).read_text())
 def relay(gid, event="the countersigned NDA from the lawyer", **kw):
-    return _update_svc._update(gid, sender=FRONT, wait_kind="relay", wait_event=event, ask_by=day(6), post_wake_mover=BACK, mover="none", **kw)
+    return _update_svc._update(gid, sender=FRONT, wait_kind="relay", wait_event=event, ask_by=day(6), mover=BACK, **kw)
 def call(gid, *adds, project="projects/alpha"):
     return f'anchors(project="{project}", add=[' + ", ".join(f'"{a}"' for a in adds) + f'], items=["{_gh.shown(gid)}"])'
 
@@ -146,7 +146,7 @@ check("relay update: a project-wide anchor of its page is no thread of this item
 anchors()
 
 # ================================================================ a relay wait, set by a create
-r = create("created with a relay wait", wait_kind="relay", wait_event="the signed form from Kim", ask_by=day(6), post_wake_mover=BACK, mover="none")
+r = create("created with a relay wait", wait_kind="relay", wait_event="the signed form from Kim", ask_by=day(6), mover=BACK)
 g = gid_of(r)
 check("relay create: the reply starts as a create's and carries one offer line with the ready call", r.startswith("created ") and count(r) == 1 and call(g, "<their Slack thread or Drive file link, or gmail:q:from:<their address>>") in r, r)
 check("relay create: …and the item is stored", stored(g)["metadata"].get("wait_kind") == "relay", stored(g)["metadata"])
@@ -229,7 +229,7 @@ check("new project: a project made with no page is offered nothing (the anchors 
 # ================================================================ the switch, live; a value that is no boolean
 _cfg.CFG["anchors"] = {"offers": False}
 item(74, needs=[BACK]); item(75, needs=[BACK])
-r_up = relay("a74"); r_cr = create("switched off", desc=DESC + f"\n- Thread: {SL1}", wait_kind="relay", wait_event="Kim", ask_by=day(6), post_wake_mover=BACK, mover="none")
+r_up = relay("a74"); r_cr = create("switched off", desc=DESC + f"\n- Thread: {SL1}", wait_kind="relay", wait_event="Kim", ask_by=day(6), mover=BACK)
 r_up2 = _update_svc._update("a75", sender=FRONT, description=DESC + f"\n- File: {DR1}")
 st, out = mk("projects/switched-off")
 check("off: [anchors] offers = false ends every offer: a relay update, a create, a link update and a new project", count(r_up) == 0 and count(r_cr) == 0 and count(r_up2) == 0 and "Anchor offer" not in out["note"]

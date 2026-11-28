@@ -67,7 +67,7 @@ FIXTURE = [
     item(7, "[home] a closed item", status="completed", needs=["decision"], outcome="done", reason="shipped as asked"),
     item(8, "[home] clean", mover="team-other", next="team-other: x"),
     item(9, "[home] the owner as mover", mover="Oliver", next="Oliver: look"),
-    item(10, "[home] the owner as then", mover="team-other", then="Oliver", post_wake_mover="Oliver", next="team-other: x"),
+    item(10, "[home] the owner as then", mover="team-other", then="Oliver", next="team-other: x"),
 ]
 for it in FIXTURE:
     (T / "store" / "a" / f"{it['id']}.json").write_text(jd(it), encoding="utf-8")

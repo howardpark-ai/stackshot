@@ -43,11 +43,11 @@ FIVE = "\n".join(f"Oliver: step {k}" for k in range(1, 6))
 item(1, "[home] ask item", goal="Ship the thing", needs=["decision"], ask=ASK, options=OPTS, mover="Oliver", then="home-other", next=FIVE, priority="p1")
 item(2, "[home] agent item", mover="home-other", next="do the first thing\nhome-other: second thing\n- a sub step\nhome-other: third\nhome-other: fourth",
      handoff={"to": "home-other", "from": "home-here", "at": now - 600, "delivered_at": now - 590, "taken_at": None}, woke={"what": "the PR merged", "to": "home-other", "at": now - 700})
-item(3, "[home] time wait", wait_kind="time", wake="2099-01-01", post_wake_mover="home-other", next="home-other: check the date", wait_basis={"text": "the vendor's holiday", "wake": "2099-01-01"})
-item(4, "[home] item wait", wait_kind="item", after=["a2"], post_wake_mover="home-other", next="home-other: go on")
-item(5, "[home] anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", post_wake_mover="home-other", wake="2099-02-01",
+item(3, "[home] time wait", wait_kind="time", wake="2099-01-01", mover="home-other", next="home-other: check the date", wait_basis={"text": "the vendor's holiday", "wake": "2099-01-01"})
+item(4, "[home] item wait", wait_kind="item", after=["a2"], mover="home-other", next="home-other: go on")
+item(5, "[home] anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", mover="home-other", wake="2099-02-01",
      chases=[{"at": now - 2 * H, "by": "home-here", "note": "asked in the PR"}, {"at": now - H, "by": "home-here", "note": "pinged the reviewer"}], next="home-here: wait for it")
-item(6, "[home] relay wait", wait_kind="relay", wait_event="the contract", party="Acme", ask_by="2099-03-01", post_wake_mover="home-other", next="home-other: read it")
+item(6, "[home] relay wait", wait_kind="relay", wait_event="the contract", party="Acme", ask_by="2099-03-01", mover="home-other", next="home-other: read it")
 item(7, "[home] done item", status="completed", su=now - 2 * DAY, outcome="done", reason="shipped as asked", mover=None)
 item(8, "[home] history item", mover="home-other", next="home-other: x", written_by="home-other")
 item(9, "[home] no ask item", mover="home-other", next="home-other: x", needs=["home-other"])
@@ -67,7 +67,7 @@ item(11, "[home] bulleted next", mover="home-other", next="- home-other: step 1\
 item(12, "[home] named bullet", mover="home-other", next="home-other: do x\n- Oliver: run `cmd`")
 item(16, "[home] unnamed bullets", mover="home-other", next="home-other: do x\n- an unnamed bullet\n  an indented line\n3. a numbered one")
 item(13, "[home] fenced next", mover="home-other", next="Oliver: run this:\n```\nls -l\nOliver: not a line\n```\nhome-other: then this\n~~~\nsecond\n~~~")
-item(14, "[home] waiting with a decision", wait_kind="time", wake="2099-05-01", post_wake_mover="home-other", needs=["decision"], ask=ASK, options=OPTS, next="home-other: x")
+item(14, "[home] waiting with a decision", wait_kind="time", wake="2099-05-01", mover="home-other", needs=["decision"], ask=ASK, options=OPTS, next="home-other: x")
 item(15, "[home] <script>alert(1)</script> & \"q\"", goal="Goal <b>bold</b> & <script>x</script>", mover="home-other", next="home-other: <img src=x onerror=alert(1)> & more\n- <i>sub</i>", written_by="<u>who</u>")
 LINK = "[PR #28](https://github.com/example-owner/stackshot/pull/28)"
 item(19, "[home] oliver step, handed", mover="Oliver", next="Oliver: run it", handoff={"to": "Oliver", "from": "home-here", "at": now - 600, "delivered_at": now - 590, "taken_at": None})

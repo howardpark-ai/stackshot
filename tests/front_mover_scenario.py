@@ -1,6 +1,6 @@
 """Scenario test for: a front agent is never made an item's mover by another session — fixture data, no live store, no network.
 
-Also covers the sibling hand-over: a live front agent of the item's project may hand an item to another live front agent of it (mover, then, post_wake_mover, agent) when the write carries the owner's words in
+Also covers the sibling hand-over: a live front agent of the item's project may hand an item to another live front agent of it (mover, then, agent) when the write carries the owner's words in
 `said`, checked as the wake cap checks them; the value then stays as sent and the sibling is told by the hand-off notice, which states who handed it over and his quoted words. With no words (none, or words the
 check refuses) the swap or refusal stays and ends with one clause on how to send them; a background agent, another project's session, a target that is no front agent of the project and a project with no builder are as before.
 
@@ -142,14 +142,14 @@ put(8, mover=BUILD, then=MAIN)
 r = refusal(lambda: _wt_update.stackshot_update(item_id="a8", sender=REVIEW, then=MAIN))
 check("update: re-sending the item's current front-agent then is not refused", "no hand-off notice" not in r, r)
 
-# ---- post_wake_mover is the mover once a wait ends: gated like mover and then
+# ---- the mover once a wait ends is the stored mover: gated like then
 put(9, mover=BUILD)
-r = _wt_update.stackshot_update(item_id="a9", sender=BUILD, post_wake_mover=MAIN)
-check("update: post_wake_mover=<front agent> by another session becomes the builder", fixed(r, MAIN, "post_wake_mover"), r)
-r = _wt_create.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, post_wake_mover=MAIN, next=f"{BUILD}: wait")
-check("create: post_wake_mover=<front agent> by another session becomes the builder", r.startswith("created") and fixed(r, MAIN, "post_wake_mover"), r)
-r = refusal(lambda: _wt_update.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
-check("update: a front agent naming itself as post_wake_mover is not refused here", "no hand-off notice" not in r, r)
+r = _wt_update.stackshot_update(item_id="a9", sender=BUILD, mover=MAIN)
+check("update: mover=<front agent> by another session becomes the builder", fixed(r, MAIN, "mover"), r)
+r = _wt_create.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: wait")
+check("create: mover=<front agent> by another session becomes the builder", r.startswith("created") and fixed(r, MAIN, "mover"), r)
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a9", sender=MAIN, mover=MAIN))
+check("update: a front agent naming itself as mover is not refused here", "no hand-off notice" not in r, r)
 
 # ---- a project with no builder: the refusal says so once, names the rule and the path to the peer, without a placeholder (the sender is a session no page lists: a session some page lists hands it through, see builderless_handover)
 STRANGER = "home-stranger"
@@ -235,15 +235,15 @@ snap_s = json.dumps(snap)
 check("tool text: the mover and then parameters of create and update carry the fix (snapshot)", snap_s.count("from another session that sets mover=<front agent> gets the project's builder instead") >= 2
       and snap_s.count("from another session that sets then=<front agent> gets the project's builder instead") >= 2, snap_s[:300])
 
-check("tool text: post_wake_mover is named as the old name of mover, and mover carries the front-agent rule", "post_wake_mover, the old name of mover, is still read as mover" in form and "a front agent (a session" in form, form[:200])
-check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover or then (or post_wake_mover, the old name of mover) to a front agent gets the project's builder instead" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
+check("tool text: the old name post_wake_mover is gone, and mover carries the front-agent rule", "post_wake_mover" not in form and "a front agent (a session" in form, form[:200])
+check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover or then to a front agent gets the project's builder instead" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
 
-check("tool text: the post_wake_mover parameter of create and update carries the fix (snapshot)",
-      json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> gets the project's builder instead") >= 2)
+check("tool text: the snapshot of create and update has no post_wake_mover parameter",
+      "post_wake_mover" not in json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))))
 
 _cdecl = _wt_create._CREATE_DESC
-check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
-      "a create from another session that sets mover or then (or post_wake_mover, the old name of mover) to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
+check("tool text: create's own description says another session's front-agent mover or then gets the builder",
+      "a create from another session that sets mover or then to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
 
 # ---- a front agent hands an item to a sibling front agent of its project on the owner's words (said, checked as the wake cap checks it)
 import datetime as _dt
@@ -280,14 +280,14 @@ check("sibling: the sibling is told by the hand-off notice, which names who hand
 check("sibling: the reply says the sibling has been told, and the hand-off record keeps his words", f"{SIDE} has been told" in r and QUOTE in str((m50.get("handoff") or {}).get("words")), (r, m50.get("handoff")))
 check("sibling: his words are stored on the item as a checked said entry", any(e.get("tag") == "Acked-by" and e.get("checked") for e in (m50.get("said") or [])), m50.get("said"))
 
-# then and post_wake_mover: kept as sent; the answer or the wake hands the item over and tells it (as for a front-only project)
+# then: kept as sent; the answer or the wake hands the item over and tells it (as for a front-only project)
 put(51, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=REVIEW, state="your-call")
 told.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a51", sender=MAIN, then=SIDE, said=SAID))
 check("sibling: then=<sibling front> with the owner's words stays as sent", kept(r, "then", SIDE) and rd(51)["metadata"].get("then") == SIDE, (r, rd(51)["metadata"].get("then")))
 put(52, mover=BUILD)
-r = call(lambda: _wt_update.stackshot_update(item_id="a52", sender=MAIN, post_wake_mover=SIDE, said=SAID))
-check("sibling: post_wake_mover=<sibling front> with the owner's words stays as sent", kept(r, "post_wake_mover", SIDE), r)
+r = call(lambda: _wt_update.stackshot_update(item_id="a52", sender=MAIN, mover=SIDE, said=SAID))
+check("sibling: mover=<sibling front> with the owner's words stays as sent", kept(r, "mover", SIDE), r)
 
 # agent= (the older form: the session named in needs)
 put(53, mover=MAIN, needs=[MAIN])
@@ -313,7 +313,7 @@ told.clear()
 r = call(lambda: _wt_create.stackshot_create(subject="[home] handed to the desk, no words", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it"))
 check("sibling: a create with no words gets the builder and the create's pointer", telling.holder(rd(r.split()[1])) == BUILD and "send the create again with said=[Acked-by …]" in r and not to(SIDE), (r, told))
 
-# no words: today's swap, with the one clause; the clause is there for mover, then and post_wake_mover alike
+# no words: today's swap, with the one clause; the clause is there for mover and then alike
 put(56, mover=BUILD)
 told.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a56", sender=MAIN, mover=SIDE, next=f"{BUILD}: check it"))
@@ -323,8 +323,8 @@ put(57, mover=OWNER, needs=["decision"], ask="Decide: a or b - Recommend: a - St
 r = call(lambda: _wt_update.stackshot_update(item_id="a57", sender=MAIN, then=SIDE))
 check("sibling, no said: then goes to the builder as before, with the pointer", fixed(r, SIDE, "then") and rd(57)["metadata"].get("then") == BUILD and POINTER in r, r)
 put(58, mover=BUILD)
-r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=MAIN, post_wake_mover=SIDE))
-check("sibling, no said: post_wake_mover goes to the builder as before, with the pointer", fixed(r, SIDE, "post_wake_mover") and POINTER in r, r)
+r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=MAIN, mover=SIDE))
+check("sibling, no said: mover goes to the builder again, with the pointer", fixed(r, SIDE, "mover") and POINTER in r, r)
 # said the check refuses: as no said (the swap note carries the pointer; the write's own said check then refuses the write as a whole)
 put(59, mover=BUILD)
 was = (T / "store/a/59.json").read_bytes()
@@ -436,12 +436,12 @@ r = call(lambda: _wt_update.stackshot_update(item_id="a194", sender=BUILD, then=
 check("then=<the front agent> whose step comes after the builder's: swapped to the builder", fixed(r, MAIN, "then") and rd(194)["metadata"].get("then") == BUILD, (r, rd(194)["metadata"]))
 put(195, mover=BUILD, next=f"{MAIN}: {STEPF}")
 it = dict(rd(195), gid="a195")
-v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, BUILD, "projects/delta", "", it["metadata"], item=it)
-check("fix_front_mover: post_wake_mover to the holder of the open step, by the builder, with the stored item: kept as sent", v == MAIN and not fx, (v, note, fx))
-v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, REVIEW, "projects/delta", "", it["metadata"], item=it)
-check("fix_front_mover: post_wake_mover from a third session is swapped", v == BUILD and len(fx) == 1, (v, note, fx))
-v, note, fx = _gates.fix_front_mover("post_wake_mover", MAIN, BUILD, "projects/delta", "", {"project": "projects/delta", "next": f"{MAIN}: {STEPF}"})
-check("fix_front_mover: with no stored item handed (a create) post_wake_mover is swapped too", v == BUILD and len(fx) == 1, (v, note, fx))
+v, note, fx = _gates.fix_front_mover("mover", MAIN, BUILD, "projects/delta", "", it["metadata"], item=it)
+check("fix_front_mover: mover to the holder of the open step, by the builder, with the stored item: kept as sent", v == MAIN and not fx, (v, note, fx))
+v, note, fx = _gates.fix_front_mover("mover", MAIN, REVIEW, "projects/delta", "", it["metadata"], item=it)
+check("fix_front_mover: mover from a third session is swapped", v == BUILD and len(fx) == 1, (v, note, fx))
+v, note, fx = _gates.fix_front_mover("mover", MAIN, BUILD, "projects/delta", "", {"project": "projects/delta", "next": f"{MAIN}: {STEPF}"})
+check("fix_front_mover: with no stored item handed (a create) mover is swapped too", v == BUILD and len(fx) == 1, (v, note, fx))
 
 # the hand-back's guards beyond the sender: a front agent that moves the item hands it to a sibling only on the owner's words; the holder is a front agent of the item's project; the write leaves the holder's step open
 put(200, mover=MAIN, next=f"{SIDE}: {STEPF}")
@@ -564,7 +564,7 @@ check("…and the flag is cleared after that refusal", not getattr(telling.HO_ST
 telling.HO_STATE.handback = set()
 it_h = dict(rd(226), gid="a226")
 m_h = it_h["metadata"]
-for fld in ("then", "post_wake_mover"):
+for fld in ("then",):
     telling.HO_STATE.handback = set()
     v_, n_, fx_ = _gates.fix_front_mover(fld, MAIN, BUILD, "projects/delta", "", m_h, item=it_h)
     check(f"fix_front_mover unit: {fld} kept as a hand-back sets no flag (the answer or the wake tells it)", v_ == MAIN and not telling.HO_STATE.handback, (v_, telling.HO_STATE.handback))

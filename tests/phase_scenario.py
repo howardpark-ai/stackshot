@@ -193,7 +193,7 @@ out = _wt_create._create(subject="[home] phase create decision", description=DES
 gid_d = created(out)
 check("3 a create that asks the owner stores phase alive", _service_store._load(gid_d)["metadata"].get("phase") == "alive", _service_store._load(gid_d)["metadata"])
 out = _wt_create._create(subject="[home] phase create relay", description=DESC, project="projects/alpha", owner="home-front", next="team-back: wait for the reply", needs=[BACK],
-                     wait_kind="relay", wait_event="Acme's reply", ask_by=day(6), post_wake_mover=BACK)
+                     wait_kind="relay", wait_event="Acme's reply", ask_by=day(6), mover=BACK)
 gid_r = created(out)
 m = _service_store._load(gid_r)["metadata"]
 check("3 a create with a wait_kind stores phase waiting and a waits_on equal to the wait_kind it was given", m.get("phase") == "waiting" and m.get("wait_kind") == "relay" and m.get("waits_on") == "relay", m)

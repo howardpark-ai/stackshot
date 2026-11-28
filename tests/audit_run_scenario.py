@@ -856,11 +856,11 @@ def parked(i, nxt, **kw): return parked_at(i, nxt, WAKE, **kw)
 PAST = (dt.datetime.now(ZONE) - dt.timedelta(days=2)).strftime("%Y-%m-%d")                 # a wake that has come: the wait is over, the post-wake mover is to take the item
 def outside(i, nxt, **kw): return item(i, wrote=now - H, state="outside", needs=["external"], party="Acme legal", chase=WAKE, next=nxt, **kw)
 f24 = build(parked(24, "alpha-builder: after the wake, check the build"),                                  # post-wake mover not named (defaults to home-agent): the step names the session that takes it
-            parked(22, "home-agent: after the wake, check the build", post_wake_mover="home-agent"),             # the step is the named post-wake session's
+            parked(22, "home-agent: after the wake, check the build", mover="home-agent"),             # the step is the named post-wake session's
             outside(71, "ops-other: chase Acme and tell Oliver"),                                         # a relay wait: a session's chase step, post-wake not named
             outside(91, "Oliver: pass on Acme's reply to the builder"),                                      # a relay wait is a wait on Oliver
-            parked_at(53, "Oliver: review the tab", PAST, post_wake_mover="home-agent"),                      # a Oliver step on a wait that is not on him, its wake come
-            parked_at(30, "ops-other: do the second part", PAST, post_wake_mover="home-agent"),             # a session's step beside a post-wake mover the writer named, its wake come
+            parked_at(53, "Oliver: review the tab", PAST, mover="home-agent"),                      # a Oliver step on a wait that is not on him, its wake come
+            parked_at(30, "ops-other: do the second part", PAST, mover="home-agent"),             # a session's step beside a post-wake mover the writer named, its wake come
             parked_at(73, "Oliver: review the tab", PAST),                                                  # …the same, with the post-wake mover defaulted (home-agent)
             doing(13, 1, nxt="ops-other: do the first part", expected_by=local(now + 30 * H), expected_reason="the build"))   # alive: unchanged
 rec = fil(f24)
@@ -870,7 +870,7 @@ check("a true mismatch still is once the wake has come: Oliver's step on a wait 
 check("…and an alive item keeps its rule (the opener must be its mover)", "ops-other" in next(f["detail"] for f in rec["findings"] if f["id"] == f"board#{BID_03}" and f["category"] == "stuck-elsewhere"), rec["findings"])
 
 # Oliver is the post-wake mover, named: a session chases and then he acts, so neither his step nor a session's step is a finding
-f24h = build(parked(58, "ops-other: chase the answer and tell Oliver", post_wake_mover="Oliver"), parked(59, "Oliver: decide after the wake", post_wake_mover="Oliver"))
+f24h = build(parked(58, "ops-other: chase the answer and tell Oliver", mover="Oliver"), parked(59, "Oliver: decide after the wake", mover="Oliver"))
 rec = fil(f24h)
 check("Oliver the named post-wake mover: a session's step and his own step are no finding", ids(rec, "stuck-elsewhere") == [], rec["findings"])
 # a model that cannot read the item must not end the run: the old path (the opener against the mover) runs
@@ -925,10 +925,10 @@ rec_clear()
 # ---- 25b. stuck-elsewhere is no finding on a deliberate wait that is still on, and on the owner's step dated after the wake
 ROLES["beta-main"] = {"role": "front", "project": "projects/beta"}
 LATER = (dt.datetime.now(ZONE) + dt.timedelta(days=25)).strftime("%Y-%m-%d")                                # a day well after WAKE
-f25p = build(parked(32, "Oliver: review the tab", post_wake_mover="beta-main"),                                         # parked, wake ahead, the owner's step, the post-wake mover a front agent of another project
-             parked(70, "ops-other: do the second part", post_wake_mover="home-agent"),                                  # parked, wake ahead, a session's step beside a named post-wake mover
+f25p = build(parked(32, "Oliver: review the tab", mover="beta-main"),                                         # parked, wake ahead, the owner's step, the post-wake mover a front agent of another project
+             parked(70, "ops-other: do the second part", mover="home-agent"),                                  # parked, wake ahead, a session's step beside a named post-wake mover
              item(17, wrote=now - H, state="parked", needs=["home-agent"], hold=True, next="Oliver: review the tab"),      # on hold with no wake at all
-             parked_at(49, "Oliver: review the tab", PAST, post_wake_mover="home-agent"),                                # control: the wake has come, the same step is a finding
+             parked_at(49, "Oliver: review the tab", PAST, mover="home-agent"),                                # control: the wake has come, the same step is a finding
              doing(18, 1, nxt=f"Oliver: sign off after {LATER}", wake=WAKE),                                              # alive, a backstop wake ahead, his step dated for after it
              doing(10, 1, nxt="Oliver: sign off", wake=WAKE))                                                           # control: the same step with no date is a finding
 rec = fil(f25p)

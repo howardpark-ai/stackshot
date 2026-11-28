@@ -195,7 +195,7 @@ check("wait: an awaited item's expected-by is never read: the default is 14 days
 updt(73, until=day(5))
 check("wait: a day the caller sends is the caller's own: the mark goes", "until_server" not in mt(73) and (mt(73).get("ask_by") or mt(73).get("until")) == day(5), mt(73))
 
-item(74, needs=[BACK], subject="[home] relay no end", wait_kind="relay", wait_event="the vendor's reply", post_wake_mover="team-back")
+item(74, needs=[BACK], subject="[home] relay no end", wait_kind="relay", wait_event="the vendor's reply", mover="team-back")
 out, fx = with_fixes(lambda: upd(74, wait_event="the vendor replies"))
 check("wait: a stored relay wait with no end gets the default day when another field is edited", (mt(74).get("ask_by") or mt(74).get("until")) == EXP14 and mt(74).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(74), fx))
 
@@ -262,15 +262,15 @@ cm = json.loads(next(T.glob(f"store/*/{cid.group(1)}.json")).read_text())["metad
 check("create: a create with after and no end stores the default as until, kind item stamped, marked", cm.get("until") == EXP14 and cm.get("wait_kind") == "item" and cm.get("until_server") == EXP14, (cm, r))
 
 # the other kinds: a stored wait with no end gets the day, each kind
-item(83, needs=[BACK], subject="[home] anchor no end", wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", post_wake_mover=BACK)
+item(83, needs=[BACK], subject="[home] anchor no end", wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", mover=BACK)
 out, fx = with_fixes(lambda: upd(83, wait_event="merged for real"))
 check("wait: a stored anchor wait with no end gets the default day, marked and told", (mt(83).get("until") or mt(83).get("ask_by")) == EXP14 and mt(83).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(83), fx))
-item(84, needs=[BACK], subject="[home] event no end", wait_kind="event", wait_event="pr_merged acme/repo#5", post_wake_mover=BACK)
+item(84, needs=[BACK], subject="[home] event no end", wait_kind="event", wait_event="pr_merged acme/repo#5", mover=BACK)
 out, fx = with_fixes(lambda: upd(84, wait_event="pr_merged acme/repo#6"))
 check("wait: a stored event wait with no end gets the default day, marked and told", (mt(84).get("until") or mt(84).get("ask_by")) == EXP14 and mt(84).get("until_server") == EXP14 and [k for k, _ in fx] == ["wait-end-defaulted"], (mt(84), fx))
 
 # the strict gate (the migration pass) never defaults: it refuses
-def anchor_item(): return {"status": "open", "subject": "[home] anchor", "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "wait_kind": "anchor", "wait_anchor": "https://example.org/pull/8", "wait_event": "merged", "needs": [BACK], "mover": BACK, "post_wake_mover": BACK}}
+def anchor_item(): return {"status": "open", "subject": "[home] anchor", "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "wait_kind": "anchor", "wait_anchor": "https://example.org/pull/8", "wait_event": "merged", "needs": [BACK], "mover": BACK}}
 sa = anchor_item()
 try:
     _gates_svc.gate_model(sa, None, "a99", creating=True, strict=True); strict_refused = False
@@ -388,7 +388,7 @@ from stackshot.waits import watchers as _watchers_mod
 check("release: the mark is in the wait group every clear of a wait drops (close, release, clear_wait)", _model_mod.SERVER_END_KEY in _model_mod.WAIT_GROUP and _model_mod.SERVER_END_KEY in _watchers_mod.LIVE_DROP and _model_mod.SERVER_END_KEY in _model_mod.DROP_ON_CLOSE, None)
 
 # an anchor wait that lacks its anchor but has an end is refused for the anchor: the end is not touched and nothing is marked as the server's
-sk = {"status": "open", "subject": "[home] anchor", "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "wait_kind": "anchor", "wait_event": "merged", "until": day(3), "needs": [BACK], "mover": BACK, "post_wake_mover": BACK}}
+sk = {"status": "open", "subject": "[home] anchor", "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "home-front: wait", "wait_kind": "anchor", "wait_event": "merged", "until": day(3), "needs": [BACK], "mover": BACK}}
 try:
     _gates_svc.gate_model(sk, None, "a99", creating=True); sk_err = ""
 except Exception as e:
@@ -616,7 +616,7 @@ check("rule A: an argument the write gains later is outside the list", _update_s
 check("rule A: blank, False, 0 and None are not passed; an empty list is (it clears)", _update_svc.close_extra_args({"next": "  ", "hold": False, "rank": 0, "after": None, "needs": [], "wake": "none"}) == ["needs", "wake"], None)
 OPTS = [{"label": "Ship", "line": "Ship it now.", "recommended": True}, {"label": "Wait", "line": "Wait a week.", "recommended": False}]
 SAMPLE = {"after": ["a70"], "agent": BACK, "next": "home-front: a new step", "needs": [BACK], "ask": ASK, "options": OPTS, "work": {"text": "finished", "state": "done"},
-          "check": "item_closed a70", "mover": BACK, "then": BACK, "post_wake_mover": BACK, "until": day(5), "wake": day(5), "ask_by": day(5), "due": day(5), "expected_by": day(5),
+          "check": "item_closed a70", "mover": BACK, "then": BACK, "until": day(5), "wake": day(5), "ask_by": day(5), "due": day(5), "expected_by": day(5),
           "observers": [BACK], "tell_him": "home-front", "reword": {"1": "step one renamed"}, "waits": [{"after": "a70"}], "wait_mode": "any", "subject": "[home] renamed",
           "project": "projects/alpha", "priority": "high", "anchors": ["https://example.org/pull/7"], "wait_kind": "time", "wait_anchor": "https://example.org/pull/7", "wait_event": "merged",
           "wait_basis": f"the soak ends {day(5)}", "goal": "A new goal", "step": "pick it", "supplies": "the file", "draft": "a draft", "contact": "someone", "watch_reason": "x",
@@ -649,7 +649,7 @@ oq = _gates_svc.owner_waiting
 HIS_OPEN = [{"text": f"{OWN}: pick the vendor", "status": "open", "by": "", "at": 0}]
 OQ_YES = {"decision": {"needs": ["decision"]}, "decision beside a session": {"needs": ["decision", BACK]}, "an ask": {"ask": ASK, "needs": [BACK]}, "options": {"options": OPTS},
           "your-call": {"state": "your-call", "needs": [BACK]}, "your-step": {"state": "your-step", "needs": [BACK]}, "him as mover": {"needs": [BACK], "mover": OWN},
-          "him as the mover after a wake": {"needs": [BACK], _model_mod.LEGACY_PICKER_KEY: OWN}, "him in needs": {"needs": [OWN]}, "an open step of his": {"needs": [BACK], "steps": HIS_OPEN, "next": HIS_OPEN[0]["text"]},
+          "him in needs": {"needs": [OWN]}, "an open step of his": {"needs": [BACK], "steps": HIS_OPEN, "next": HIS_OPEN[0]["text"]},
           "an open step for you:": {"needs": [BACK], "steps": [{"text": "you: pick the vendor", "status": "open", "by": "", "at": 0}], "next": "you: pick the vendor"},
           "options, no answers": {"options": OPTS, "answers": []}, "options, an answer that is no record": {"options": OPTS, "answers": ["not a record"]},
           "options, a comment (low)": {"options": OPTS, "answers": [{"kind": "comment", "text": "looks fine"}]}, "options, words with no kind": {"options": OPTS, "answers": [{"text": "ship it"}]},
@@ -695,7 +695,7 @@ for n_, kw in ((305, dict(state="doing", ask=ASK)), (307, dict(state="doing", op
 item(310, needs=[BACK], ask=ASK); was = raw(310)
 refused("rule B: a wait after another item with no end, on an item with an ask, is refused for its end as before", lambda: updt(310, after=["a70"]), "has no end")
 check("rule B (310): ...nothing is stored", raw(310) == was, mt(310))
-item(312, needs=[BACK], ask=ASK, wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK); was = raw(312)
+item(312, needs=[BACK], ask=ASK, wait_kind="relay", wait_event="the vendor's reply", mover=BACK); was = raw(312)
 refused("rule B: a stored relay wait with no end, on an item with an ask, is refused for its end when another field is edited", lambda: updt(312, wait_event="the vendor replies"), "has no end")
 check("rule B (312): ...nothing is stored", raw(312) == was, mt(312))
 item(313, needs=["decision"], ask=ASK, options=OPTS)
@@ -786,7 +786,7 @@ as_main("F1: a bare hold on an item with his open step gets no server day", 600,
 item(601, needs=[BACK], state="your-step", next="home-front: step 1", steps=[S("step 1", "done")])
 plain_refusal("F1: a bare complete on a your-step item with no open step line of his", 601, lambda: comp(601))
 as_main("F1: a bare hold on a your-step item gets no server day", 601, lambda: updt(601, hold=True))
-for n_, kw, what in ((602, dict(mover=OWN), "him as mover"), (603, dict(needs=[OWN]), "him in needs"), (604, dict(post_wake_mover=OWN), "him as the picker after a wake")):
+for n_, kw, what in ((602, dict(mover=OWN), "him as mover"), (603, dict(needs=[OWN]), "him in needs")):
     done_item(n_, "done", "done", **({"needs": [BACK]} | kw))
     plain_refusal(f"F1: a bare complete with every step done and {what}", n_, lambda: comp(n_))
 done_item(605, "done", "done", needs=[BACK], options=OPTS, answers=[{"ts": now0 - DAY, "kind": "comment", "text": "looks fine to me", "via": "board"}])
@@ -829,7 +829,7 @@ for n_, kind, kw in ((620, "relay", dict(wait_event="the vendor replies", mover=
 item(624, needs=[BACK], state="doing")
 accepted("F3: hold=true with wait_kind=item and its after link is accepted as on main: its own date, unmarked", 624, lambda: updt(624, hold=True, wait_kind="item", after=["a70"]))
 check("F3 (item): ...the kind's own date stands", bool(_WT.stored_until(mt(624))) and mt(624).get("wait_kind") == "item", mt(624))
-for n_, st in ((625, dict(hold=True, ask_by=day(4))), (626, dict(wait_kind="relay", wait_event="the vendor's reply", until=day(6), post_wake_mover=BACK))):
+for n_, st in ((625, dict(hold=True, ask_by=day(4))), (626, dict(wait_kind="relay", wait_event="the vendor's reply", until=day(6), mover=BACK))):
     item(n_, needs=[BACK], **st)       # a date held in the other working field: the new kind moves it to its own field, so main refuses this park and no default is made
     as_main(f"F3: hold=true with wait_kind=time on {'an old hold with an ask_by' if n_ == 625 else 'a relay wait with its date'} is refused as on main, the park refusal alone", n_, lambda: updt(n_, hold=True, wait_kind="time"), PARK_REF)
     try:
@@ -891,8 +891,8 @@ H1_STATES = {
     "a time park": dict(needs=[BACK], until=day(5), wait_kind="time", wait_basis=f"the soak ends {day(5)}"),
     "an item wait": dict(needs=[BACK], after=["a70"], wait_kind="item", until=day(6)),
     "an item wait stored the old way": dict(needs=[BACK], after=["a70"], wake=day(6)),
-    "an anchor wait": dict(needs=[BACK], wait_kind="anchor", wait_anchor=ANC7, wait_event="merged", until=day(6), post_wake_mover=BACK),
-    "an anchor wait stored the old way": dict(needs=[BACK], wait_kind="anchor", wait_anchor=ANC7, wait_event="merged", wake=day(6), post_wake_mover=BACK),
+    "an anchor wait": dict(needs=[BACK], wait_kind="anchor", wait_anchor=ANC7, wait_event="merged", until=day(6), mover=BACK),
+    "an anchor wait stored the old way": dict(needs=[BACK], wait_kind="anchor", wait_anchor=ANC7, wait_event="merged", wake=day(6), mover=BACK),
     "a relay wait": dict(needs=["external"], wait_kind="relay", wait_event="the vendor's reply", until=day(6)),
     "a server-dated park": dict(needs=[BACK], hold=True, until=day(3), until_server=day(3)),
     "an old ask_by": dict(needs=["external"], wait_event="the vendor's reply", ask_by=day(3)),

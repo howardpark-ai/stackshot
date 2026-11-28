@@ -415,7 +415,7 @@ g(60, needs=[BACK], state="doing", wake=wk(24), next=f"team-back: {prose(2)} aft
 g(61, needs=[BACK], state="doing", wake=wk(24), hold=True, next=NX)                                            # on hold: not a doing item to relabel
 v = {n: view_of(n) for n in (50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60)}
 check("dated wait: a doing item with a wake tomorrow and only dated steps reads as waiting, on a time until the wake, the mover kept for after it",
-      v[50].state == _model.WAITING and v[50].wait.kind == "time" and v[50].wait.until == wk(24) and v[50].wait.post_wake_mover == "team-back", v[50])
+      v[50].state == _model.WAITING and v[50].wait.kind == "time" and v[50].wait.until == wk(24) and v[50].wait.mover == "team-back", v[50])
 check("dated wait: …the same item with one undated open step stays doing", v[51].state == _model.ALIVE, v[51])
 check("dated wait: …a wake 30 minutes out stays doing", v[52].state == _model.ALIVE, v[52])
 check("dated wait: …an ISO date and a prose date both count, and the item is listed as waiting", v[53].state == _model.WAITING and lst(53) == "waiting" and lst(51) == "agents" and lst(52) == "agents", (v[53], lst(53), lst(51)))
@@ -484,7 +484,7 @@ g(96, needs=[BACK], wake=wk(24 * 12), next=f"team-back: land the PR by {md(12)}"
 g(97, needs=[BACK], wake=wk(24 * 12), after=["g3"], next=f"team-back: after the {md(12)} launch, check each job")                  # an open after link reads as blocked, never as a dated doing wait
 w90 = view_of(90)
 check("dated wait: an item with no stored state (a mover and a wake read as doing) whose only step says 'after the <Mon day> launch' reads as waiting on a time until the wake",
-      w90.state == _model.WAITING and w90.wait.kind == "time" and w90.wait.until == wk(24 * 12) and w90.wait.post_wake_mover == "team-back" and w90.today == "doing" and "state" not in mt(90, "g"), w90)
+      w90.state == _model.WAITING and w90.wait.kind == "time" and w90.wait.until == wk(24 * 12) and w90.wait.mover == "team-back" and w90.today == "doing" and "state" not in mt(90, "g"), w90)
 check("dated wait: …the named day already past, no date in the step, one undated open step, or a step with no month and day stays alive",
       all(view_of(n).state == _model.ALIVE for n in (91, 92, 93, 95)), [view_of(n).state for n in (91, 92, 93, 95)])
 check("dated wait: …the month spelled out ('after <Month> <day>') counts, a deadline ('by <Mon day>') does not, an open after link is no dated wait",
@@ -501,7 +501,7 @@ g(106, needs=["external"], state="doing", hold=True, wake=wk(24), next="team-bac
 g(107, needs=[BACK], state="parked", hold=True, wake=wk(24), wait_basis={"text": f"visit {day(1)}", "wake": wk(24), "by": "x", "at": now0})    # a stored state of another kind beside the hold
 w_a = view_of(100)
 check("held wait: a stored doing item on hold with a wake tomorrow reads as waiting on a time until the wake, whatever its undated step says",
-      w_a.state == _model.WAITING and w_a.wait.kind == "time" and w_a.wait.until == wk(24) and w_a.wait.post_wake_mover == "team-back" and lst(100) == "waiting" and w_a.wait.basis == "parked until its wake", (w_a, lst(100)))
+      w_a.state == _model.WAITING and w_a.wait.kind == "time" and w_a.wait.until == wk(24) and w_a.wait.mover == "team-back" and lst(100) == "waiting" and w_a.wait.basis == "parked until its wake", (w_a, lst(100)))
 check("held wait: …a hold with no wake, a wake already past, or a wake within the hour is unchanged (alive)", all(view_of(n).state == _model.ALIVE for n in (101, 102, 103)), [view_of(n).state for n in (101, 102, 103)])
 check("held wait: …a stored expected_by within the hour beside the wake is not read: the far wake on hold is a held wait all the same", view_of(105).state == _model.WAITING and _dw.held_wait(dict(rd(105, "g"), gid="g105"), now_) is not None, view_of(105))
 check("held wait: …a mover that is not a session (external) gets no held wait", W.mover_of(rd(106, "g")["metadata"])["kind"] != "session" and _dw.held_wait(dict(rd(106, "g"), gid="g106"), now_) is None, W.mover_of(rd(106, "g")["metadata"]))

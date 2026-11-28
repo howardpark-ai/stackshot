@@ -149,7 +149,7 @@ def part_refusal_report():
         f"Refused: closing {BID(7)} needs outcome, reason; accepted form: complete(item_id=\"{BID(7)}\")": "a close with a part missing",
         "Refused: the reason is 130 characters and the limit is 120.": "a close reason over its limit",
         "Refused: work: state 'blocked' is not one of defined, assigned, in progress, done": "a status state the work line does not have",
-        "Refused: clear_wait drops wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover; it does not go with a new wait_kind": "clear_wait sent beside a new wait",
+        "Refused: clear_wait drops wait_kind, wait_anchor, wait_event, ask_by; it does not go with a new wait_kind": "clear_wait sent beside a new wait",
         "Refused: a park that waits on a notice from the anchor scoped to it still carries a backstop date, at most 7 days out": "an anchor park with no backstop date",
         "Refused: wait_anchor https://example.com/pull/3 is not on projects/demo's anchors list, so nothing watches it": "a wait_anchor that is not on the anchors list",
         "Refused: wait_kind is one of time | anchor | item | relay | event (got 'external')": "a wait_kind that is none of the kinds",

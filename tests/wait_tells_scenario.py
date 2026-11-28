@@ -287,12 +287,12 @@ now = NOW
 def mod_of(**meta):
     it = {"status": "open", "gid": "a9", "subject": "x", "metadata": {"project": PROJECT, "mover": BACK, "needs": [BACK], **meta}}
     return _model.derive(it, now, after_open=lambda i: ["a8"])
-line = _model.words(mod_of(wait_kind="item", after=["a8"], until=BACKSTOP, post_wake_mover=BACK), derived=False, shown=lambda g: "item-" + g[1:])
+line = _model.words(mod_of(wait_kind="item", after=["a8"], until=BACKSTOP, mover=BACK), derived=False, shown=lambda g: "item-" + g[1:])
 check("3 words: an after wait with a backstop prints only the item it waits on", line == f"model: waiting on the close of item-8 · mover {BACK}", line)
-check("3 words: a wait on a date alone still prints its date", BACKSTOP in _model.words(mod_of(hold=True, until=BACKSTOP, wait_kind="time", post_wake_mover=BACK), derived=False), _model.words(mod_of(hold=True, until=BACKSTOP, wait_kind="time", post_wake_mover=BACK), derived=False))
-check("3 words: an anchor wait keeps its backstop", BACKSTOP in _model.words(mod_of(wait_kind="anchor", wait_anchor="https://example.org/pull/1", wait_event="PR merged", until=BACKSTOP, post_wake_mover=BACK), derived=False),
-      _model.words(mod_of(wait_kind="anchor", wait_anchor="https://example.org/pull/1", wait_event="PR merged", until=BACKSTOP, post_wake_mover=BACK), derived=False))
-empty = _model.words(mod_of(wait_kind="item", after=[], until=BACKSTOP, post_wake_mover=BACK), derived=False)
+check("3 words: a wait on a date alone still prints its date", BACKSTOP in _model.words(mod_of(hold=True, until=BACKSTOP, wait_kind="time", mover=BACK), derived=False), _model.words(mod_of(hold=True, until=BACKSTOP, wait_kind="time", mover=BACK), derived=False))
+check("3 words: an anchor wait keeps its backstop", BACKSTOP in _model.words(mod_of(wait_kind="anchor", wait_anchor="https://example.org/pull/1", wait_event="PR merged", until=BACKSTOP, mover=BACK), derived=False),
+      _model.words(mod_of(wait_kind="anchor", wait_anchor="https://example.org/pull/1", wait_event="PR merged", until=BACKSTOP, mover=BACK), derived=False))
+empty = _model.words(mod_of(wait_kind="item", after=[], until=BACKSTOP, mover=BACK), derived=False)
 check("3 words: an item wait with no item stored keeps the old date line, never a bare close of no item", BACKSTOP in empty, empty)
 got = update(1, after=["a3"], until=NEAR)
 shown = _wt_get.stackshot_get("a1")

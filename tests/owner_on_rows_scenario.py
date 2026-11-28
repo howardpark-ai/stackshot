@@ -59,7 +59,7 @@ def item(i, subject, status="open", age=3 * H, project="projects/alpha", **meta)
 item(1, "[home] a decision for the owner", needs=["decision"], ask="Decide: ship it? · Recommend: yes · Stakes: low · By: Fri", next="Oliver: answer the ask", contact=LIVE)          # owner with a live pane
 item(2, "[home] an item on an agent", contact=GONE)                                                                                                                            # owner with no pane
 item(3, "[home] an item with no owner")                                                                                                                                        # no contact
-item(4, "[home] a wait", hold=True, wake=(NOW + datetime.timedelta(days=3)).strftime("%Y-%m-%d"), post_wake_mover="team-back", contact=LIVE)                                      # Waiting
+item(4, "[home] a wait", hold=True, wake=(NOW + datetime.timedelta(days=3)).strftime("%Y-%m-%d"), mover="team-back", contact=LIVE)                                      # Waiting
 item(5, "[home] stored contact is not the owner", contact=OTHER)                                                                                                               # the resolver names LIVE
 item(6, "[home] closed by an agent", status="completed", age=2 * H, outcome="done", reason="shipped", contact=LIVE)                                                              # New and Last 14 days
 item(7, "[home] closed earlier", status="completed", age=3 * D, outcome="done", reason="shipped", contact=GONE)                                                                  # Last 14 days only

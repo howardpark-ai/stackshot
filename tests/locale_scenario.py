@@ -544,21 +544,21 @@ ic(205, {"mover": "alpha-main", "needs": ["alpha-main"], "next": "alpha-main: th
 ic(205, {"mover": "alpha-helper", "needs": ["alpha-helper"], "next": "alpha-helper: fourth part"}, written_by="alpha-main", updated=now0 - 9 * HR)
 ic(205, {"needs": []}, written_by="alpha-main", updated=now0 - 8 * HR)
 # waits of each kind, a chase, his words, the recycle badge, an observer, a stale confirm, an after
-ix(210, "Time wait", wait_kind="time", wake="2099-01-01", post_wake_mover="alpha-helper", next="alpha-helper: check the date", wait_basis={"text": "the shop's holiday", "wake": "2099-01-01"},
+ix(210, "Time wait", wait_kind="time", wake="2099-01-01", mover="alpha-helper", next="alpha-helper: check the date", wait_basis={"text": "the shop's holiday", "wake": "2099-01-01"},
    cap_ok={"wake": "2099-01-01", "quote": "wait until the new year", "source": "chat", "by": OWN}, recycle=True, observers=["alpha-helper"], due="2099-01-05", confirmed=now0 - 90 * DY, su=now0 - 90 * DY)
-ix(211, "Item wait", wait_kind="item", after=["a201", "a210"], post_wake_mover="alpha-helper", next="alpha-helper: go on")
-ix(212, "Item wait, no ids", wait_kind="item", after=[], post_wake_mover="alpha-helper", next="alpha-helper: go on")
-ix(262, "Item wait, end by the server", wait_kind="item", after=["a201", "a210"], post_wake_mover="alpha-helper", until="2099-03-01", until_server="2099-03-01", next="alpha-helper: go on")      # the end day the server stored when the call gave none
-ix(213, "Anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", post_wake_mover="alpha-helper", wake="2099-02-01",
+ix(211, "Item wait", wait_kind="item", after=["a201", "a210"], mover="alpha-helper", next="alpha-helper: go on")
+ix(212, "Item wait, no ids", wait_kind="item", after=[], mover="alpha-helper", next="alpha-helper: go on")
+ix(262, "Item wait, end by the server", wait_kind="item", after=["a201", "a210"], mover="alpha-helper", until="2099-03-01", until_server="2099-03-01", next="alpha-helper: go on")      # the end day the server stored when the call gave none
+ix(213, "Anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", mover="alpha-helper", wake="2099-02-01",
    chases=[{"at": now0 - 2 * HR, "by": "alpha-main", "note": "asked in the thread"}, {"at": now0 - HR, "by": "alpha-main", "note": "pinged the reviewer"}], next="alpha-main: wait for it")
-ix(214, "Anchor wait, no event", wait_kind="anchor", wait_anchor="", post_wake_mover="alpha-helper", next="alpha-main: wait for it")
-ix(215, "Relay wait", wait_kind="relay", wait_event="the contract", party="Acme", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
-ix(216, "Relay wait, no event", wait_kind="relay", party="Acme", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
-ix(217, "Relay wait, nobody", wait_kind="relay", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
-ix(218, "Event wait", wait_kind="event", wait_event="a box comes up", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
-ix(219, "Event wait, plain", wait_kind="event", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
-ix(220, "Anchor wait, plain", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
-ix(221, "Time wait, no words", wait_kind="time", wake="2099-01-01", post_wake_mover="alpha-helper", next="alpha-helper: check the date")
+ix(214, "Anchor wait, no event", wait_kind="anchor", wait_anchor="", mover="alpha-helper", next="alpha-main: wait for it")
+ix(215, "Relay wait", wait_kind="relay", wait_event="the contract", party="Acme", ask_by="2099-03-01", mover="alpha-helper", next="alpha-helper: read it")
+ix(216, "Relay wait, no event", wait_kind="relay", party="Acme", ask_by="2099-03-01", mover="alpha-helper", next="alpha-helper: read it")
+ix(217, "Relay wait, nobody", wait_kind="relay", ask_by="2099-03-01", mover="alpha-helper", next="alpha-helper: read it")
+ix(218, "Event wait", wait_kind="event", wait_event="a box comes up", mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(219, "Event wait, plain", wait_kind="event", mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(220, "Anchor wait, plain", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(221, "Time wait, no words", wait_kind="time", wake="2099-01-01", mover="alpha-helper", next="alpha-helper: check the date")
 # links, a closed one, a reminder, a long checklist with decided rows
 # a coding-session link, put together from parts so that no literal of this file has the shape of one
 SESSLINK = "/".join(["https:", "", "claude" + ".ai", "code", "_".join(["sess" + "ion", "abc"])])
@@ -586,7 +586,7 @@ ix(245, "No creator", written_by="", owner="", mover="alpha-main", next="alpha-m
 ic(245, {"owner": A}, updated=now0 - 2 * HR)
 ix(246, "Broken options", mover=OWN, needs=["decision"], ask=ASKX, options=[{"bogus": 1}], next=f"{OWN}: decide")
 ix(247, "A then", mover=OWN, then="alpha-helper", needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide\nalpha-helper: after")
-ix(248, "Wait after a closed one", wait_kind="item", after=["a232", "a201"], post_wake_mover="alpha-helper", next="alpha-helper: go on")
+ix(248, "Wait after a closed one", wait_kind="item", after=["a232", "a201"], mover="alpha-helper", next="alpha-helper: go on")
 ix(249, "All steps done", mover="alpha-main", next="", steps=[ST("alpha-main: one", "done", "alpha-main", now0 - 3 * HR), ST("alpha-main: two", "done", "alpha-main", now0 - 3 * HR), ST("alpha-main: three", "done", "alpha-main", now0 - 3 * HR)])
 ix(250, "Project, hold and handover", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 250")
 ic(250, {"project": ""}, updated=now0 - 9 * HR)
@@ -599,8 +599,8 @@ ic(250, {"needs": [], "ask": ""}, updated=now0 - int(4.6 * HR))                 
 ic(250, {"state": "your-step"}, updated=now0 - int(4.4 * HR))
 ic(250, {"needs": ["decision"], "ask": ASKX}, updated=now0 - int(4.2 * HR))          # his call while the state is a step of his: "gave_step"
 ix(253, "Handovers from and to a wait", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 253")
-ic(253, {"wait_kind": "time", "wake": "2099-01-01", "post_wake_mover": "alpha-helper", "next": "alpha-helper: later", "handover": {"step": "eeeeeeeeeeee", "kind": "moved", "to": "alpha-helper", "at": now0 - 4 * HR}}, updated=now0 - 4 * HR)
-ic(253, {"mover": "alpha-main", "next": "alpha-main: again", "handover": {"step": "ffffffffffff", "kind": "moved", "to": "alpha-main", "at": now0 - 3 * HR}}, drop=("wait_kind", "wake", "post_wake_mover"), updated=now0 - 3 * HR)
+ic(253, {"wait_kind": "time", "wake": "2099-01-01", "mover": "alpha-helper", "next": "alpha-helper: later", "handover": {"step": "eeeeeeeeeeee", "kind": "moved", "to": "alpha-helper", "at": now0 - 4 * HR}}, updated=now0 - 4 * HR)
+ic(253, {"mover": "alpha-main", "next": "alpha-main: again", "handover": {"step": "ffffffffffff", "kind": "moved", "to": "alpha-main", "at": now0 - 3 * HR}}, drop=("wait_kind", "wake"), updated=now0 - 3 * HR)
 ic(253, {"mover": "no one", "handover": {"step": "gggggggggggg", "kind": "fallback", "to": "alpha-gone", "at": now0 - 2 * HR}}, updated=now0 - 2 * HR)
 ix(254, "Born on hold", mover="alpha-main", hold=True, wake="2099-02-01", next="alpha-main: x")
 ix(255, "No description, no steps", mover="alpha-main")
@@ -618,10 +618,10 @@ ic(259, {"next": ""}, updated=now0 - int(3.5 * HR))
 ic(259, {"outcome": "done"}, status="completed", updated=now0 - 3 * HR, written_by=ESC_BY)
 ic(259, {"answers": [{"ts": now0 - 2 * HR, "kind": "comment", "text": ESC_GH, "via": "github", "url": "https://github.com/o/r/issues/5#issuecomment-8", "comment_id": 8}]}, written_by=ESC_BY, updated=now0 - 2 * HR)
 # 260: a wait on a list of waits (every kind of line, one already arrived), so the list's own words show on a page
-ix(260, "A list of waits", hold=True, wait_kind="list", wait_mode="all", until="2099-01-05", post_wake_mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
+ix(260, "A list of waits", hold=True, wait_kind="list", wait_mode="all", until="2099-01-05", mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
    waits=[{"kind": "time", "until": "2099-01-03", "arrived": {"at": now0 - HR, "what": "its date came"}}, {"kind": "anchor", "anchor": "https://github.com/o/r/pull/9", "event": "PR merged"}, {"kind": "item", "after": "a201"},
           {"kind": "relay", "event": "the lease"}, {"kind": "event", "event": "the box restarts"}])
-ix(261, "A list of waits, either", hold=True, wait_kind="list", wait_mode="any", until="2099-01-05", post_wake_mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
+ix(261, "A list of waits, either", hold=True, wait_kind="list", wait_mode="any", until="2099-01-05", mover="alpha-main", next="alpha-main: go on", watch={"set_at": now0 - 2 * HR},
    waits=[{"kind": "relay", "event": "the lease"}, {"kind": "anchor", "anchor": "https://github.com/o/r/pull/9", "event": "PR merged", "arrived": {"at": now0 - HR, "what": "PR merged"}}])
 ix(251, "A long History", mover="alpha-main", next="alpha-main: x", priority="p2"); git("add", "-A"); git("commit", "-q", "-m", "ipx 251")
 for n_ in range(56): ic(251, {"priority": "p1" if n_ % 2 == 0 else "p3"}, updated=now0 - (100 - n_) * 60)

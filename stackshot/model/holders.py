@@ -50,7 +50,7 @@ def _role_of(name: str, nm: dict[str, str] | None = None) -> tuple[dict[str, Any
 
 
 def _front_handover_ok(sender: str, key: str, project: str) -> bool:
-    """May `sender` name the front agent `key` in mover, then or post_wake_mover of an item of `project` (builderless.handover_allowed): the project the item is filed under is front-only (anchors.front_only), `key` is a live front agent of it, and `sender` is any live session some project page lists (of this project or another). A project with no agents map has no front agent to name."""
+    """May `sender` name the front agent `key` in mover or then of an item of `project` (builderless.handover_allowed): the project the item is filed under is front-only (anchors.front_only), `key` is a live front agent of it, and `sender` is any live session some project page lists (of this project or another). A project with no agents map has no front agent to name."""
     try:
         s = str(sender or "").strip()
         if not s:

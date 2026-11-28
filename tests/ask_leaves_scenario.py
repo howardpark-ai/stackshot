@@ -620,7 +620,7 @@ for j, p in enumerate(TP):
     if not stood(k) or "took the ask off" in r: bad_t.append(p)
 print(f"real update, text parameters accepted as sent: {acc}; refused as sent: {ref}")
 check("through the real update, the sentence in the description plus a new value of any one of the %d text parameters leaves the ask standing" % len(TP), not bad_t, bad_t)
-check("... wait_anchor, post_wake_mover and then, which store a free string as written, are among the text parameters", {"wait_anchor", "post_wake_mover", "then"} <= set(TP), None)
+check("... wait_anchor and then, which store a free string as written, are among the text parameters", {"wait_anchor", "then"} <= set(TP), None)
 
 # (round 12, L1) from the records of lines only the `text` is held: status words ("open", "done", "dropped") are not the item's text
 item(980, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK}, wait_basis={"text": "waiting for the vendor", "wake": "2026-11-20", "by": "home-agent", "at": now},

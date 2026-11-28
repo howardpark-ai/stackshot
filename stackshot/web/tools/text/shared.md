@@ -193,8 +193,7 @@ wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor a
 on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused;
 wait_event=<what you expect there (an anchor wait), or the party or event {{OWNER}} relays (a relay wait), or the
 fleet event an event wait watches: {{EVENT_FORMS}}>; until=YYYY-MM-DD (a relay wait's end day; an event, item or
-anchor wait's backstop day); post_wake_mover, the old name of mover, is still read as mover for a while
-(the reply says so; on an item that waits on nothing it is dropped, and a different mover beside it is refused). An event wait is how an item whose mover waits in the background for something the fleet does
+anchor wait's backstop day). An event wait is how an item whose mover waits in the background for something the fleet does
 says so: update(wait_kind="event", wait_event="pr_released <n>" (this repository's pull request number), until=<the
 day it comes back anyway; left out, the server takes tomorrow or the day the item's words give, and says so; it is not the 14-day backstop>, mover=<who takes it then>). Live for now: pr_released, pr_merged,
 box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day.
@@ -357,8 +356,8 @@ mover (no front agent) or the project's builder that names a live front agent of
 write and left open by it, hands it back: kept as sent at once, and a mover is told as a turn;
 with no builder it is refused, except from a listed session to a front agent of the item's own project: mover= tells it,
 the others leave it to the answer or the date). A front agent of the item's project may
-hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then,
-post_wake_mover or agent as sent, and mover and agent tell it. On an update that sets no needs, the
+hand it to a sibling front agent on {{OWNER}}'s words: said=[Acked-by …] keeps the sibling in mover, then
+or agent as sent, and mover and agent tell it. On an update that sets no needs, the
 session needs names for the mover it replaces is swapped for the new one.
 
 ## param THEN
@@ -367,13 +366,6 @@ project's background agent. It stands only while he is the mover: on an item a s
 on a session, a then is dropped and the reply says so; to hand an item on, set mover=<session>. A front agent only by
 itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as
 for mover.
-
-## param POST_WAKE
-The old name of mover, read as mover for a while (the reply says so). On an item that waits it is who takes the item
-when the wait ends, as mover=<who> is; "none" clears that pick-up. On an item that waits on nothing it is dropped
-with a line in the reply: pass mover=<who> to hand the item over now. Beside a mover that differs it is refused.
-A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets
-the project's builder instead, as for mover.
 
 ## param CONTACT
 The item's contact: the front agent (a user-facing agent) that {{OWNER}} talks to about it, by its name. Leave it out

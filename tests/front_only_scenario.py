@@ -43,7 +43,7 @@ tool returns (accepted, or the exact refusal and the path it names) and, for con
   1  `mover=` hand-over (update and create): a peer, a front agent or a background agent of another project hands an item to a live front agent of the project; the target is told by a hand-off notice and the reply
      says so; the refusals (a session no page lists, another project's front agent as target) name the half that failed and `message(to=<page key>)` with the first line `For <peer>,`. With a builder: the builder is
      substituted
-  2  `then=` and `post_wake_mover=` take the same exception, tell nobody (the owner's answer or the wake moves the item), refuse the same way; with a builder both are substituted
+  2  `then=` and `mover=` take the same exception, tell nobody (the owner's answer or the wake moves the item), refuse the same way; with a builder both are substituted
   3  a step may open with a live peer: accepted on an item another session moves when an open step comes before it; refused as the first open step (with the ways out), for another project's front agent, and in a
      project with a builder; marking the step before it done hands the item to the peer, told once
   4  messages: an unmarked message from a front agent to a peer is refused and names `For <peer>,` to the page key; that form is accepted; a message that says nothing is needed from the owner stays refused
@@ -700,7 +700,7 @@ def part_project():
     check("1.10 a sub-page with a front map of its own under a builder's hub takes the builder's path: the front agent is replaced by the builder", f"mover={BB}, the project's builder, was used instead" in r and held(7) == BB, r)
     close(1, 2, 3, 4, 5, 6, 7, gid)
 
-    # ---- 2. then= and post_wake_mover= take the same exception
+    # ---- 2. then= and mover= take the same exception
     put(10, mover=OWN, needs=["decision"], ask=ASK, then=FM, state="your-call")
     drain(); pn = len(pushes())
     r = call(lambda: upd(10, BB, then=FD)); drain()
@@ -710,20 +710,20 @@ def part_project():
     r = call(lambda: upd(11, LONER, then=FD))
     check("2.2 …from a session no page lists it is refused as mover= is, naming the half and the `For <peer>,` path; then is unchanged", r.startswith("Refused:") and NOBUILD in r and "this call was refused because home-loner is not a session any project page lists." in r
           and f"To ask {FD} for a check or an answer, {FOR(FD, 'projects/fo')}." in r and mt(11).get("then") == FM, r)
-    put(12, mover=FM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", post_wake_mover=FM, next=f"{OWN}: run it")
+    put(12, mover=FM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", next=f"{OWN}: run it")
     drain(); pn = len(pushes())
-    r = call(lambda: upd(12, BB, post_wake_mover=FD, wait_basis=f"the vendor's reply is due {WAKE}")); drain()
-    check("2.3 post_wake_mover=<front agent> is accepted the same way (stored as the mover that picks it up when the wait ends), with no hand-off notice", "Refused" not in r and mt(12).get("mover") == FD and f"post_wake_mover={FD} is not replaced by one" in r
+    r = call(lambda: upd(12, BB, mover=FD, wait_basis=f"the vendor's reply is due {WAKE}")); drain()
+    check("2.3 mover=<front agent> on a waiting item is accepted the same way (stored as the mover that picks it up when the wait ends), with no hand-off notice", "Refused" not in r and mt(12).get("mover") == FD and f"mover={FD} is not replaced by one" in r
           and not HANDOFF(FD, "a12") and len(pushes()) == pn, (r, mt(12).get("mover"), pushes()[pn:]))
-    put(13, mover=FM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", post_wake_mover=FM, next=f"{OWN}: run it")
-    r = call(lambda: upd(13, LONER, post_wake_mover=FD, wait_basis=f"the vendor's reply is due {WAKE}"))
-    check("2.4 …and refused from a session no page lists, as mover= is, the item untouched", r.startswith("Refused:") and "post_wake_mover=" + FD in r and "this call was refused because home-loner is not a session any project page lists." in r and mt(13).get("post_wake_mover") == FM, r)
+    put(13, mover=FM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", next=f"{OWN}: run it")
+    r = call(lambda: upd(13, LONER, mover=FD, wait_basis=f"the vendor's reply is due {WAKE}"))
+    check("2.4 …and refused from a session no page lists, as mover= is, the item untouched", r.startswith("Refused:") and "mover=" + FD in r and "this call was refused because home-loner is not a session any project page lists." in r and mt(13).get("mover") == FM, r)
     put(14, project="projects/bd", mover=OWN, needs=["decision"], ask=ASK, then=BB, state="your-call")
     r = call(lambda: upd(14, BM, then=BD))
     check("2.5 contrast, a project with a builder: then=<front agent> is replaced by the builder", f"then={BB}, the project's builder, was used instead" in r and mt(14).get("then") == BB, r)
-    put(15, project="projects/bd", mover=BM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", post_wake_mover=BM, next=f"{OWN}: run it")
-    r = call(lambda: upd(15, BM, post_wake_mover=BD, wait_basis=f"the vendor's reply is due {WAKE}"))
-    check("2.6 …and post_wake_mover=<front agent> likewise", f"post_wake_mover={BB}, the project's builder, was used instead" in r and mt(15).get("mover") == BB, (r, mt(15).get("mover")))
+    put(15, project="projects/bd", mover=BM, state="your-step", step="run it", hold=True, wake=WAKE, wait_kind="time", next=f"{OWN}: run it")
+    r = call(lambda: upd(15, BM, mover=BD, wait_basis=f"the vendor's reply is due {WAKE}"))
+    check("2.6 …and mover=<front agent> on a waiting item likewise", f"mover={BB}, the project's builder, was used instead" in r and mt(15).get("mover") == BB, (r, mt(15).get("mover")))
     close(10, 11, 12, 13, 14, 15)
 
     # ---- 3. a step may open with a live peer

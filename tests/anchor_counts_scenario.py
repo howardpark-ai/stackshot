@@ -108,7 +108,7 @@ check("get lists the anchors that count for the item, naming the page of one hel
 def anchor_wait(gid, project):
     return {"gid": gid, "id": gid, "subject": f"[home] item {gid}", "description": "- A thing, finished when it works", "status": "open",
             "metadata": {"project": project, "state": "outside", "needs": ["external"], "wait_kind": "anchor", "wait_event": "the review lands", "party": "Acme",
-                         "wake": "2099-01-01", "post_wake_mover": "home-agent", "next": "home-agent: read the thread when it moves"}}
+                         "wake": "2099-01-01", "mover": "home-agent", "next": "home-agent: read the thread when it moves"}}
 flagged = lambda anchors: any("b2" in ids for ids in MG.report({"b2": anchor_wait("b2", A)}, anchors=anchors).ids.values())
 check("model_guards.report: an anchor wait whose anchor is held by another page names its anchor; with no anchor anywhere it is flagged", flagged({}) and not flagged(store), (flagged({}), flagged(store)))
 from stackshot.model import migration as MIG
@@ -188,8 +188,8 @@ check("...an anchor no page holds is still the warning, saying how to add it", "
 
 # _watch_anchor_notice: an item of another project whose stored wait is on an anchor a keeperless page holds is turned by that page's notice, even if the item's own page has a keeper
 told = []; watching_svc.watch_tell = lambda sid, rows: told.append((sid, [r[0] for r in rows]))
-item2(40, A, wait_kind="anchor", wait_anchor=URL_B, wait_event="a reply", ask_by="2099-01-01", post_wake_mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
-item2(41, A, wait_kind="anchor", wait_anchor="https://example.invalid/not-held-anywhere", wait_event="a reply", ask_by="2099-01-01", post_wake_mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
+item2(40, A, wait_kind="anchor", wait_anchor=URL_B, wait_event="a reply", ask_by="2099-01-01", mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
+item2(41, A, wait_kind="anchor", wait_anchor="https://example.invalid/not-held-anywhere", wait_event="a reply", ask_by="2099-01-01", mover="mv-alpha", needs=[], next="mv-alpha: read it", watch={"set_at": 1.0})
 n_w = {"id": "w1", "ts": time.time(), "kind": "anchor", "label": "Slack", "who": "hub", "text": "Kim answered", "to": "x", "target": "", "anchor": URL_B}
 rel = wakes_svc.anchor_release(B, n_w)
 m40 = json.loads((T / "store/a/40.json").read_text())["metadata"]

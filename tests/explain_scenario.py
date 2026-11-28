@@ -52,7 +52,7 @@ def item(i, subject, status="open", **meta):
 item(1, "[work] item one")
 DAY = lambda n: (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
 LINES = [{"kind": "time", "until": DAY(3)}, {"kind": "relay", "event": "the lease"}]
-def waiting(i, **meta): item(i, f"[work] item {i}", hold=True, needs=[], post_wake_mover="alpha-main", **meta)
+def waiting(i, **meta): item(i, f"[work] item {i}", hold=True, needs=[], mover="alpha-main", **meta)
 for i, mode in ((2, "all"), (3, "any")): waiting(i, wait_kind="list", wait_mode=mode, until=DAY(5), waits=LINES, watch={"set_at": now0 - 3600})
 waiting(4, wait_kind="relay", ask_by=DAY(5), wait_event="the lease", party="the landlord", chases=[{"at": now0 - 600, "by": "alpha-main", "note": "asked again"}])
 (T / "store/next-id").write_text("100"); (T / "store/anchors.json").write_text("{}")

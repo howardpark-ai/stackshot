@@ -19,7 +19,6 @@ optional and all in the item's metadata:
   ask_by            YYYY-MM-DD, the day a relay wait turns into a question to the owner
   until             YYYY-MM-DD or YYYY-MM-DDTHH:MM, the one date a wait ends on (read as a wake is read): an open item that stores one is waiting, wait_kind or not (no kind = a wait on the date
                     alone, kind time); with a kind it is the date the wait comes back anyway (the backstop), for a relay the day it turns into a question. Read first, the legacy wake and ask_by after
-  post_wake_mover   the old name of a waiting item's `mover`; while it is stored it wins over a stored `mover` when read, and a write that sets a different `mover` on a waiting item drops it. As a parameter it is an alias of `mover` while [model] post_wake_alias_until is open (fold_picker_alias)
   (the wait's other inputs are fields an item already had: wake for a time, after for an item; for an anchor or an item wait a wake is its backstop)
   phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (stamp._phase_stamp, the one place) and kept true as the clock moves by the
                     minute set's phase sweep (stamp._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
@@ -48,10 +47,8 @@ DEAD, ALIVE, WAITING = "dead", "alive", "waiting"
 PHASES = (ALIVE, WAITING)       # what an open item stores as `phase` (a closed item is dead and stores none)
 SINGLE_KINDS = ("time", "anchor", "item", "relay", "event")      # the kinds of a single wait, and of a line of a list (waits/wait_list.py)
 WAIT_KINDS = (*SINGLE_KINDS, "list")                             # …and the sixth, a wait on a list of waits: wait_kind=list, the lines in `waits`, the mode in `wait_mode`, the backstop day in `until`
-LEGACY_PICKER_KEY = "post_wake_mover"      # the old stored name of a waiting item's `mover` (who picks it up when the wait ends); read only through stored_picker
-PICKER_ALIAS_UNTIL = "2026-11-29"          # the last day the parameter post_wake_mover is accepted as an alias of `mover` (14 days after the release that opens the window): [model] post_wake_alias_until moves it without a release
 SERVER_END_KEY = "until_server"      # metadata: the day the server stored as a wait's end when the call gave none (a wait on an item, anchor, relay or event); it reads as set by the server only while the stored `until` is still that day
-WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "until", "waits", "wait_mode", "until_server")      # what a clear of the wait drops (the wake and after have flags of their own); the old picker key goes with it too (LEGACY_PICKER_KEY), but it is no field of the wait a session names any more
+WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "until", "waits", "wait_mode", "until_server")      # what a clear of the wait drops (the wake and after have flags of their own)
 
 
 def server_end(m: dict[str, Any]) -> str:
@@ -69,8 +66,8 @@ def server_outcome(m: dict[str, Any]) -> list[str]:
     """The close fields the server wrote (OUTCOME_SERVER_KEY), those of outcome, reason and outcome_text the item still stores; [] when it wrote none."""
     v = m.get(OUTCOME_SERVER_KEY)
     return [k for k in (v if isinstance(v, list) else []) if k in ("outcome", "reason", "outcome_text") and clean(m.get(k))]
-MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)
-DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)            # a closed item has no mover and waits on nothing; its goal stays as the record
+MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP)
+DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP)            # a closed item has no mover and waits on nothing; its goal stays as the record
 LINE_MAX = 300
 ALIVE_STATES = ("doing", "your-call", "your-step")                  # today's states that read as alive (design section 2)
 WAITING_STATES = ("outside", "blocked", "parked", "verifying")                # …and as waiting
@@ -158,72 +155,17 @@ def pick_who(who: Any) -> str:
 
 
 def stored_picker(meta: dict[str, Any]) -> str:
-    """A waiting item's picker as stored, read in one place: the legacy key first (while it is stored it wins, as it always did), else the stored `mover`, where the literal word none names
-    nobody. "" when neither is stored (the default picker is the caller's)."""
-    return norm_who((meta or {}).get(LEGACY_PICKER_KEY)) or pick_who((meta or {}).get("mover"))
+    """A waiting item's picker as stored, read in one place: the stored `mover`, where the literal word none names nobody. "" when none is stored (the default picker is the caller's)."""
+    return pick_who((meta or {}).get("mover"))
 
 
-def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: bool = False, waits_now: bool | None = None, same: Callable[[str, str], bool] | None = None) -> None:
-    """The one save rule for the picker's two stored keys, run on `meta` after a write has applied its sets and drops (`setv`: the fields it set, `drop`: the fields it dropped; `was_waiting`: the item
-    waited before the write; `waits_now`: it waits as the write leaves it, read from `meta` when not given; `same`: whether two references name the same session, which a caller with the fleet's names passes so an id and a name count as one, else the same name in any letter case). A write that names the legacy key itself is left as written (the old parameter keeps working as it did).
-      a write that sets `mover` on an item that waits → the stored legacy key goes (the new mover wins, never the old key), unless the new `mover` names the same session as the old key (a restated picker changes nothing)
-      clear_mover (`mover` dropped) → the legacy key goes with it, so it cannot become the picker once the mover is gone
-      clear_wait (every field of WAIT_GROUP dropped) → the legacy key goes with the wait (gates.gate_model_args drops it with the group), and a stored `mover` that is the owner goes with it, when the item waited and the write set no mover
-        (he picked the item up when the wait ended: no wait, no pick-up); an agent's stored `mover` stays as the live mover."""
-    if LEGACY_PICKER_KEY in setv:
-        return
-    if "mover" in drop:
-        meta.pop(LEGACY_PICKER_KEY, None)
-    if "mover" in setv and (waits_stored(meta) if waits_now is None else waits_now) and not _restates_legacy(meta, same):
-        meta.pop(LEGACY_PICKER_KEY, None)
+def settle_picker_keys(meta: dict[str, Any], setv: Any, drop: Any, was_waiting: bool = False) -> None:
+    """The one save rule for a waiting item's stored `mover`, run on `meta` after a write has applied its sets and drops (`setv`: the fields it set, `drop`: the fields it dropped; `was_waiting`: the item
+    waited before the write).
+      clear_wait (every field of WAIT_GROUP dropped) → a stored `mover` that is the owner goes with it, when the item waited and the write set no mover (he picked the item up when the wait ended:
+        no wait, no pick-up); an agent's stored `mover` stays as the live mover."""
     if set(WAIT_GROUP) <= set(drop) and was_waiting and "mover" not in setv and is_owner(norm_who(meta.get("mover"))):
         meta.pop("mover", None)
-
-
-def keep_picker(meta: dict[str, Any], picker_was: str, setv: Any, drop: Any) -> None:
-    """After a write that ended an item's wait or hold (clear_wait, clear_hold): the picker the item read as before the write stays the live mover, stored as `mover` with the old key popped, whatever the
-    shape (a wait that still stands, an old plain hold, an agent `mover` beside the old key). A wait or a hold never changes who moves the item; only a `mover` write or a hand-over does. `picker_was` is
-    `stored_picker` of the item as it stood before the write (the one reader's answer, read before the wait's fields went: the old key goes with the wait). The owner is not kept: he picks the item up when
-    the wait ends, and settle_picker_keys has dropped that mover. A write that names the mover (or the old key) itself is left as written. The caller runs it only when the item waited before the write: an alive item's `mover` is its live mover, and a stale old key beside it never beats it."""
-    who = norm_who(picker_was)
-    if not who or is_owner(who) or who.lower() == "none" or "mover" in setv or "mover" in drop or LEGACY_PICKER_KEY in setv:
-        return
-    if norm_who(meta.get("mover")).lower() != who.lower():      # an agent or the owner stored beside the old key loses to the picker the reader answered first
-        meta["mover"] = who
-    meta.pop(LEGACY_PICKER_KEY, None)
-
-
-def fold_picker_alias(setv: dict[str, str], drop: set[str], given: str, waits_after: bool, ends: dt.date) -> str:
-    """The parameter `post_wake_mover` is an alias of `mover` while its window is open ([model] post_wake_alias_until, `ends` its last day). Run on a write's `setv` and `drop` (the fields it sets and drops, as
-    gates.gate_model_args returned them) before they are applied; `given` is what the caller passed: "" when nothing, "none" for the word that clears, else the value (already normalized); `waits_after`: the item
-    waits as this write leaves it (a wait kind, an `until`, `after` or a hold with a date, from this write or stored). It changes `setv` and `drop` in place and returns the reply line, "" when nothing was passed:
-      an item that waits  → the value is stored as `mover` (the picker) and a stored legacy key goes; "none" drops `mover` (the picker is cleared) and the legacy key
-      an item that waits on nothing → the value is dropped, never stored and never a conflict, and a stale legacy key goes; the line says how to hand the item over now
-      `mover` given beside it with the same value → one value, no line (a different one is refused earlier, gates.gate_model_args); `mover=none` beside it (the old way to say "no live mover") leaves the old name as the picker"""
-    if not given:
-        return ""
-    setv.pop(LEGACY_PICKER_KEY, None)
-    if "mover" in setv or ("mover" in drop and given.lower() == "none"):
-        return ""
-    drop.add(LEGACY_PICKER_KEY)
-    if not waits_after:
-        if given.lower() == "none":
-            return "\n(post_wake_mover dropped: it names who picks up a wait, and this item waits on nothing; there is no picker to clear)"
-        return f"\n(post_wake_mover dropped: it names who picks up a wait, and this item waits on nothing; to hand it over now, mover={given})"
-    if given.lower() == "none":
-        drop.add("mover")
-        return f"\n(post_wake_mover is mover now: none clears the picker, so nothing is stored as mover; accepted until {ends:%Y-%m-%d})"
-    else:
-        setv["mover"] = given
-        drop.discard("mover")      # mover=none beside it was the old way to say "no live mover": the picker is the one mover this write stores
-    return f"\n(post_wake_mover is mover now: stored as mover={given}; accepted until {ends:%Y-%m-%d})"
-
-
-def _restates_legacy(meta: dict[str, Any], same: Callable[[str, str], bool] | None = None) -> bool:
-    """Does the stored `mover` name the very session the stored legacy key names? A write that sets a `mover` equal to the old key restates what the item already says, so it changes nothing (the old key stays).
-    The same name in any letter case is the same session; `same` (the caller's, with the fleet's names) also equates a session's id with its name."""
-    old, new = norm_who(meta.get(LEGACY_PICKER_KEY)), norm_who(meta.get("mover"))
-    return bool(old) and bool(new) and (old.lower() == new.lower() or bool(same and same(old, new)))
 
 
 def waits_stored(meta: dict[str, Any]) -> bool:
@@ -246,18 +188,13 @@ class Wait:
     anchor: str = ""
     event: str = ""
     after: tuple[str, ...] = ()
-    mover: str = ""            # who picks the item up when the wait ends (Model.picker): the stored post_wake_mover (the old name) if any, else the stored mover, else the default
+    mover: str = ""            # who picks the item up when the wait ends (Model.picker): the stored mover, else the default
     mover_explicit: bool = False
     by_until: bool = False     # the date above is the item's stored `until` (not a wake or an ask_by)
     due: bool = False
     basis: str = ""            # a time wait's reason: a real outside date (wait_basis text) …
     owner_words: bool = False  # … or the owner's recorded words (cap_ok)
     queued: bool = False       # an item wait that is no stored wait: the mover is busy on the item in `after` and this one stands in line behind it (model/queued.py, derived and never stored)
-
-    @property
-    def post_wake_mover(self) -> str:
-        """The old name of `mover` (who picks the item up when the wait ends); readers move to `mover`."""
-        return self.mover
 
     @property
     def post_explicit(self) -> bool:
@@ -307,7 +244,7 @@ class Model:
 
     @property
     def picker(self) -> str:
-        """Who takes the item after this step: on a waiting item the one who picks it up when the wait ends (stored_picker: the stored post_wake_mover, else the stored mover, else the default),
+        """Who takes the item after this step: on a waiting item the one who picks it up when the wait ends (stored_picker: the stored mover, else the default),
         `then` while the owner moves an alive one, else the mover itself. `mover` stays empty while an item waits: it is who moves it NOW."""
         if self.state == WAITING and self.wait:
             return self.wait.mover
@@ -362,7 +299,7 @@ def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[di
     {"mover", "then"}, {"mover"} or {"then"}.
       in his state (your-call, your-step, needs decision), an agent stored as mover  → he is the mover; `then` stays if stored (an agent), else the agent that was mover
       the wait on him is over (alive in an agent's state), he stored as mover → an agent in `then` is the mover again and `then` goes, as _answer's Done does it; else only the mover goes
-      a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes) when no post_wake_mover is stored; with one stored, or no agent in `then`, only the mover goes;
+      a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes); with no agent in `then`, only the mover goes;
         this last rule runs only for `waiting=True`, which the update path passes (a write that did not name a mover): a stored mover = him on a waiting item is where "he picks it up when the wait ends" is written, so the on-save
         backstop and the start repair (the default) leave it alone and return None for a waiting item
     The way back only happens for an item that stood in his state (`was_his`: the caller knows it from the version before the write, or, for the migration, from his hand-off record or
@@ -405,9 +342,9 @@ def _settle_mover(item: dict[str, Any], was_his: bool, after_open: Callable[[dic
         return {"mover": ""}                           # no agent in then: only the mover goes, a stored then is left as it is
     if not waiting:
         return None
-    if then_s and not is_owner(then_s) and not norm_who(m.get(LEGACY_PICKER_KEY)):
-        return {"mover": then_s, "then": ""}           # a wait replaces his state: the agent he named to take it picks it up when the wait ends (when no post_wake_mover is stored to say otherwise)
-    return {"mover": ""}                               # only the stale live mover goes; a stored post_wake_mover or then stays exactly as stored
+    if then_s and not is_owner(then_s):
+        return {"mover": then_s, "then": ""}           # a wait replaces his state: the agent he named to take it picks it up when the wait ends
+    return {"mover": ""}                               # only the stale live mover goes; a stored then stays exactly as stored
 
 
 def stood_his(item: dict[str, Any] | None, after_open: Callable[[dict[str, Any]], Any] | None = None) -> bool:
@@ -461,7 +398,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
             whose = f"{owner_display(m)}'s" if h_state else "an agent's"
             conflicts.append(f"mover={mover_s} on an item whose state is {today}, which is {whose} move")
         then = (then_s or then_d) if is_owner(mover) else ""         # `then` stands only while the owner is the mover; beside an agent mover a stored one is not read
-        stray = [k for k in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover") if _first(m, k)]
+        stray = [k for k in ("wait_anchor", "wait_event", "ask_by") if _first(m, k)]
         if stray:
             conflicts.append(f"{', '.join(stray)} stored on an alive item, which waits on nothing")
         return Model(ALIVE, today, derived, mover, bool(mover_s), then, bool(then_s) and bool(then), clean(m.get("wake")), None, tuple(conflicts))
@@ -503,10 +440,7 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         if kind == "item":
             due = not (after_open(item) if after_open else _wt.after_of(m)) and bool(_wt.after_of(m))
     mv_d, _ = _defaults(m, today)
-    mover_s, post_s = pick_who(m.get("mover")), norm_who(m.get(LEGACY_PICKER_KEY))
-    if mover_s and post_s and mover_s != post_s:
-        conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, as an item stored under the old key, which is being retired. Setting a different mover (update mover=) drops the old key; clear_mover or clear_wait drops it too")
-    picker_s = stored_picker(m)        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
+    picker_s = stored_picker(m)        # the stored mover is the picker
     post_d = owner_display(m) if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
     picker = picker_s or post_d
     then_s = norm_who(m.get("then")) if is_owner(picker) else ""         # `then` stands only while he is the one who picks the item up
@@ -695,7 +629,7 @@ def check_fields(values: dict[str, Any]) -> list[str]:
     """What is wrong with the model fields a write passes ({field: value}, only the ones given): one phrase each, [] when all are fine. Format only: the guards that
     judge a write as a whole (an alive item names a mover, a wait names its post-wake mover and input) come with the write guards."""
     out: list[str] = []
-    for k in ("goal", "mover", "then", "post_wake_mover", "wait_anchor", "wait_event"):
+    for k in ("goal", "mover", "then", "wait_anchor", "wait_event"):
         v = clean(values.get(k))
         if v and len(v) > LINE_MAX:
             out.append(f"{k} is one line of at most {LINE_MAX} characters (got {len(v)})")

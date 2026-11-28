@@ -83,7 +83,7 @@ put(9, subject="[home] the newest of his", age=0.5, mover=OWNER)
 put(10, subject="[home] a step of his with a stale ask", age=2, mover=OWNER, ask=ASK)                         # an ask that is no open question (no decision in its needs): the row carries none
 # not his
 put(20, subject="[home] a session moves it", age=3, mover="alpha-builder")
-put(21, subject="[home] waits on a date", age=3, wait_kind="time", wake=D(6), post_wake_mover="alpha-builder", mover=OWNER)
+put(21, subject="[home] waits on a date", age=3, wait_kind="time", wake=D(6), mover="alpha-builder")
 put(22, subject="[home] waits on an open item", age=3, mover=OWNER, after=["a9"])
 put(23, subject="[home] held", age=3, hold=True, mover="alpha-builder")
 put(24, subject="[home] closed", status="completed", age=2, mover=OWNER, outcome="done")

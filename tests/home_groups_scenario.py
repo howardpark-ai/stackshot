@@ -43,7 +43,7 @@ for k in PAGES: (T / "brain" / (k + ".md")).parent.mkdir(parents=True, exist_ok=
 (T / "store/next-id").write_text("900")
 def item(i, subject, project, age, owner=S2, **meta):
     meta = {"owner": owner, "next": "team-back: do the thing", **meta}
-    if meta.get("hold") and not meta.get("needs"): meta.setdefault("post_wake_mover", owner)
+    if meta.get("hold") and not meta.get("needs"): meta.setdefault("mover", owner)
     if project: meta["project"] = project
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": subject, "description": "A fixture item.", "status": "open", "updated": now - age, "state_updated": now - age,
                                                     "confirmed": now - age, "metadata": meta}))

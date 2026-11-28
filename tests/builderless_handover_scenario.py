@@ -1,15 +1,15 @@
 """Scenario test for a project with no builder: an answered step of the owner goes to the session the item's next open step names, and any session some project page lists may hand an item of
 that project to one of its front agents — fixture data (English stand-in text), no live store, no network.
 
-Covers: (1) the incident: in a project whose page lists only front agents (a general -main agent and a second front agent), an item on hold with a wake, whose post_wake_mover is the -main agent,
+Covers: (1) the incident: in a project whose page lists only front agents (a general -main agent and a second front agent), an item on hold with a wake, whose mover is the -main agent,
 whose contact and next open step are the second front agent's, waits on the owner's step; once he answers it the item lands on the second front agent (the step's owner line), not on -main; with no
 such step the item's stored contact takes it; with neither, -main keeps it as before; a project that has a builder still hands the answer to its builder; a stored `then` still wins.
 (2) one front agent's `mover=` to another front agent of the same builderless project is accepted, with a note, and the target is told by a notice; the refusal stays for a session no page lists,
 for a target that is not a front agent of the item's own project, and (as a substitution by the builder) for a project that has one.
 (3) the sender need not belong to the project: a front agent or a background agent of another project hands an item of the builderless project to its front agent through `mover=`, the target
 is told, and the reply says so; a project with a builder still substitutes it; a target that is another project's front agent, a session no page lists as the sender, a retired sender or target,
-and a project with a builder substitutes it for `then` / `post_wake_mover` as before.
-(4) `then=` and `post_wake_mover=` take the same exception as `mover=`: a listed session names a front agent of a front-only project in them, nothing tells the target by a hand-off notice (the owner's answer or the wake
+and a project with a builder substitutes it for `then` / `mover` as before.
+(4) `then=` and a waiting item's `mover=` take the same exception as `mover=`: a listed session names a front agent of a front-only project in them, nothing tells the target by a hand-off notice (the owner's answer or the wake
 moves the item), and the refusals (an unlisted sender, another project's front agent) are the same as for `mover=`.
 (5) one predicate: a project is front-only exactly when it has no builder, so a project whose only background agent does not build, and a sub-page with a map of its own under a hub that has a builder, take the
 same path as the project they belong to; the refusals of a front-only project name the working path (the page key with `For <peer>,` on the first line; mover= for a hand-over), and the needs refusal says what to do instead.
@@ -92,8 +92,8 @@ def refusal(fn):
 def held(i):
     return telling.holder(rd(i))
 def put_step(i, project="projects/sigma", next_text=None, post=SMAIN, **meta):
-    """the incident: on hold with a wake, post_wake_mover = the general -main agent, waiting on the owner's step"""
-    put(i, project=project, state="your-step", step=STEP, hold=True, wake=WAKE, wait_kind="time", post_wake_mover=post,
+    """the incident: on hold with a wake, mover = the general -main agent, waiting on the owner's step"""
+    put(i, project=project, state="your-step", step=STEP, hold=True, wake=WAKE, wait_kind="time", mover=post,
         next=next_text if next_text is not None else f"{OWNER}: {STEP}\n{SDESK}: check the result and carry on", **meta)
 
 # ---- 1. the answer to the owner's step
@@ -116,7 +116,7 @@ put_step(4, contact=SDESK, next_text=f"{OWNER}: {STEP}\n{LONER}: unknown session
 res = answer_svc._answer("a4", "", "", "send")
 check("1.6 a next step that names no usable session falls to the contact", res == "done" and held(4) == SDESK, (res, held(4)))
 
-put_step(5, then=SDESK, next_text=f"{OWNER}: {STEP}\n{SMAIN}: carry on", contact=SMAIN)
+put_step(5, post=OWNER, then=SDESK, next_text=f"{OWNER}: {STEP}\n{SMAIN}: carry on", contact=SMAIN)
 res = answer_svc._answer("a5", "", "", "send")
 check("1.7 a stored `then` still wins over the step and the contact", res == "done" and held(5) == SDESK, (res, held(5)))
 
@@ -244,7 +244,7 @@ put(47, mover=SMAIN)
 msg = refusal(lambda: _wt_update.stackshot_update(item_id="a47", sender=OWNER, mover=SDESK, next=f"{SDESK}: take it"))
 check("3.11 the owner's own name as sender is no session a page lists: refused", msg.startswith("Refused:") and held(47) == SMAIN, (msg, held(47)))
 ASK = "Decide: a or b - Recommend: a - Stakes: none - By: no date"
-# ---- 4. then= and post_wake_mover= take the same exception as mover=
+# ---- 4. then= and a waiting item's mover= take the same exception as mover=
 put(48, mover=OWNER, needs=["decision"], ask=ASK, then=SMAIN, state="your-call")
 told.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a48", sender=DBUILD, then=SDESK))
@@ -263,15 +263,12 @@ msg = refusal(lambda: _wt_update.stackshot_update(item_id="a53", sender=DBUILD, 
 check("4.5 then=<another project's front agent> is refused, as mover= is", msg.startswith("Refused:") and "this call was refused because home-echo-main is not a live front agent of projects/sigma." in msg and rd(53)["metadata"].get("then") == SMAIN, (msg, rd(53)["metadata"].get("then")))
 put_step(54)
 told.clear()
-r = call(lambda: _wt_update.stackshot_update(item_id="a54", sender=DBUILD, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
-check("4.6 post_wake_mover=<front agent> (the old name of mover) on a waiting item is accepted the same way and stored as the picker, with no hand-off notice", "Refused" not in r and "post_wake_mover=home-sigma-desk is not replaced by one" in r and "stays as sent" not in r
+r = call(lambda: _wt_update.stackshot_update(item_id="a54", sender=DBUILD, mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.6 mover=<front agent> (the old name of mover) on a waiting item is accepted the same way and stored as the picker, with no hand-off notice", "Refused" not in r and "mover=home-sigma-desk is not replaced by one" in r and "stays as sent" not in r
       and rd(54)["metadata"].get("mover") == SDESK and not any(t[3] == "handoff" for t in told), (r, rd(54)["metadata"].get("mover"), told))
 put_step(55)
-msg = refusal(lambda: _wt_update.stackshot_update(item_id="a55", sender=LONER, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
-check("4.7 …and refused from a session no page lists, as mover= is", msg.startswith("Refused:") and "this call was refused because home-loner is not a session any project page lists." in msg and rd(55)["metadata"].get("post_wake_mover") == SMAIN, (msg, rd(55)["metadata"]))
-put_step(56)
-r = call(lambda: _wt_update.stackshot_update(item_id="a56", sender=DBUILD, mover=SDESK, post_wake_mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
-check("4.8 mover= and post_wake_mover= naming the same front agent together behave as mover= alone: one hand-over", "Refused" not in r and rd(56)["metadata"].get("mover") == SDESK, (r, rd(56)["metadata"].get("mover")))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a55", sender=LONER, mover=SDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.7 …and refused from a session no page lists, as mover= is", msg.startswith("Refused:") and "this call was refused because home-loner is not a session any project page lists." in msg and rd(55)["metadata"].get("mover") == SMAIN, (msg, rd(55)["metadata"]))
 put(57, mover=SMAIN)
 told.clear()
 r = call(lambda: _wt_create.stackshot_create(subject="[home] then names the other front agent", description=DESC, project="projects/sigma", sender=DBUILD, mover=DBUILD, then=SDESK, next=f"{DBUILD}: take it"))
@@ -283,8 +280,8 @@ put(58, project="projects/delta", mover=OWNER, needs=["decision"], ask=ASK, then
 r = call(lambda: _wt_update.stackshot_update(item_id="a58", sender=SMAIN, then=DDESK))
 check("4.10 in a project that has a builder then=<front agent> is replaced by the builder, as before", f"then={DBUILD}, the project's builder, was used instead" in r and rd(58)["metadata"].get("then") == DBUILD, (r, rd(58)["metadata"].get("then")))
 put_step(59, project="projects/delta", post=DMAIN)
-r = call(lambda: _wt_update.stackshot_update(item_id="a59", sender=SMAIN, post_wake_mover=DDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
-check("4.11 …and so is post_wake_mover=<front agent>", f"post_wake_mover={DBUILD}, the project's builder, was used instead" in r and rd(59)["metadata"].get("mover") == DBUILD, (r, rd(59)["metadata"].get("mover")))
+r = call(lambda: _wt_update.stackshot_update(item_id="a59", sender=SMAIN, mover=DDESK, wait_basis=f"the vendor's reply is due {WAKE}"))
+check("4.11 …and so is mover=<front agent> on a waiting item", f"mover={DBUILD}, the project's builder, was used instead" in r and rd(59)["metadata"].get("mover") == DBUILD, (r, rd(59)["metadata"].get("mover")))
 
 # ---- 5. one predicate: front-only = no builder
 put(60, project="projects/quiet", mover=QMAIN)

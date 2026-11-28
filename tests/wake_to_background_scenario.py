@@ -100,12 +100,12 @@ check("setup: the project's builder is the one the hand-off machinery names (a b
       _anc.builder_of("projects/delta") == [B_A] and _anc.builder_of("projects/foxtrot") == [] and _anc.builder_of("projects/echo") == [] and _anc.background_agent("projects/foxtrot") == B_C, None)
 
 # ================================================================ 1. a time wait ends on a front agent, the project has a background agent
-item(1, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], subject="[home] time wait")
+item(1, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], subject="[home] time wait")
 reset()
 woke = wakes_svc.wake_pass()
 m = mt(1)
 check("1 the wake turns the item alive, with the background agent as its mover and the only one in needs", "a1" in woke and m.get("mover") == B_A and m.get("needs") == [B_A]
-      and "wait_kind" not in m and "wake" not in m and "hold" not in m and "post_wake_mover" not in m, m)
+      and "wait_kind" not in m and "wake" not in m and "hold" not in m, m)
 check("1 …the arrival on record names the background agent", m.get("woke", {}).get("to") == B_A and m["woke"].get("what") == f"its wake {day(-1)} came", m.get("woke"))
 mod = model.derive({**rd(1), "gid": "a1"}) if hasattr(model, "derive") else None
 check("1 …the model reads it as alive with that mover", mod is None or (mod.state == "alive" and mod.mover == B_A), mod)
@@ -121,7 +121,7 @@ reset(); wakes_svc.wake_pass()
 check("1 a second pass tells nobody and moves nothing", not SENT and mt(1).get("mover") == B_A, SENT)
 
 # ================================================================ 2. an item wait ends the same way, in another kind of wait
-item(2, wait_kind="item", after=["a3"], post_wake_mover=F_A, ask_by=day(9), needs=[], subject="[home] item wait")
+item(2, wait_kind="item", after=["a3"], mover=F_A, ask_by=day(9), needs=[], subject="[home] item wait")
 item(3, subject="[home] the blocker")
 it = rd(3); it["status"] = "completed"; it["metadata"].update(outcome="done", reason="r"); (T / "store/a/3.json").write_text(json.dumps(it))
 reset(); wakes_svc.release_after("a3", "done", "", SOLO)
@@ -130,8 +130,8 @@ check("2 an item wait whose last `after` item closed passes to the background ag
 check("2 …told once, unmarked; the front agent not at all", len([x for x in SENT if "a2" in x[0]]) == 1 and to(U[B_A]) and not to(U[F_A]) and not any(x[2].startswith(MARK) for x in SENT), SENT)
 
 # ================================================================ 3. one pass, several items for the front agent: one message to the background agent
-item(4, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], subject="[home] batch four")
-item(5, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], subject="[home] batch five")
+item(4, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], subject="[home] batch four")
+item(5, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], subject="[home] batch five")
 reset(); wakes_svc.wake_pass()
 check("3 two items woken in one pass for a front agent reach the background agent as one message, no mark, and nothing goes to the front agent",
       len(SENT) == 1 and SENT[0][1] == U[B_A] and "2 items are yours now" in SENT[0][2] and "a4:" in SENT[0][2] and "a5:" in SENT[0][2] and not SENT[0][2].startswith(MARK), SENT)
@@ -163,19 +163,19 @@ check("4 …its siblings: no stored mover keeps `external` and writes no mover; 
 check("4 …`external` beside the front agent in needs keeps `external` too, the builder is the mover and the front agent is not told", "external" in mt(33).get("needs") and mt(33).get("mover") == B_A and not to(U[F_A]) and any(x[1] == U[B_A] and "a33" in x[0] for x in SENT), (mt(33), SENT))
 
 # ================================================================ 5. the project has no background agent: today's path, without the mark
-item(7, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], project="projects/echo", subject="[home] front only")
+item(7, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], project="projects/echo", subject="[home] front only")
 reset(); woke = wakes_svc.wake_pass()
 m = mt(7)
 check("5 no background agent: the front agent keeps the item as its mover", "a7" in woke and m.get("mover") == F_B and m.get("needs") == [F_B] and m.get("woke", {}).get("to") == F_B, m)
 check("5 …it is told once, in the watchers' line, and the line carries no mark for him", len(SENT) == 1 and SENT[0][1] == U[F_B] and SENT[0][3] == "watch" and "is yours now" in SENT[0][2]
       and not SENT[0][2].startswith(MARK) and MARK not in SENT[0][2], SENT)
 check("5 …and the History line is the plain one", notes_of("a7") == [f"woke: its wake {day(-1)} came → {F_B}"], notes_of("a7"))
-item(8, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], project="projects/echo", subject="[home] front only two")
-item(9, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], project="projects/echo", subject="[home] front only three")
+item(8, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], project="projects/echo", subject="[home] front only two")
+item(9, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], project="projects/echo", subject="[home] front only three")
 reset(); wakes_svc.wake_pass()
 check("5 several items for the front agent of a project with no background agent are one message, unmarked", len(SENT) == 1 and SENT[0][1] == U[F_B] and "2 items are yours now" in SENT[0][2] and not SENT[0][2].startswith(MARK), SENT)
 
-item(15, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_C, needs=[], project="projects/foxtrot", subject="[home] a background agent that is no builder")
+item(15, wait_kind="time", hold=True, wake=day(-1), mover=F_C, needs=[], project="projects/foxtrot", subject="[home] a background agent that is no builder")
 item(16, until=day(-1), needs=[F_C], project="projects/foxtrot", subject="[home] date alone, no builder")
 reset(); wakes_svc.wake_pass()
 check("5 a project whose only background agent is no builder (its mandate is another) has no builder: the front agent keeps a time wait's item, told, unmarked",
@@ -185,8 +185,8 @@ check("5 …and a wait on a date alone there stays as stored (needs the front ag
       and not mt(16).get("mover") and not to(U[B_C]) and "until" not in mt(16), mt(16))
 
 # ================================================================ 6. unchanged: a background agent or a session no page lists as the post-wake mover
-item(10, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=B_A, needs=[], subject="[home] builder mover")
-item(11, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=SOLO, needs=[], subject="[home] loner mover")
+item(10, wait_kind="time", hold=True, wake=day(-1), mover=B_A, needs=[], subject="[home] builder mover")
+item(11, wait_kind="time", hold=True, wake=day(-1), mover=SOLO, needs=[], subject="[home] loner mover")
 reset(); wakes_svc.wake_pass()
 check("6 a background agent as the post-wake mover is told as before: mover as set, no mark, the plain line and History",
       mt(10).get("mover") == B_A and [x for x in SENT if "a10" in x[0]] and all("front agent" not in x[2] and not x[2].startswith(MARK) for x in SENT) and notes_of("a10") == [f"woke: its wake {day(-1)} came → {B_A}"], (SENT, notes_of("a10")))
@@ -194,7 +194,7 @@ check("6 a session no page lists is not a front agent: it keeps the item", mt(11
 check("6 …so the background agent was told of its own item only", not to(U[F_A]), SENT)
 
 # ================================================================ 7. unchanged: the person himself as the post-wake mover (a ready question, nobody told)
-item(12, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=model.owner_display(), needs=[], subject="[home] his item")
+item(12, wait_kind="time", hold=True, wake=day(-1), mover=model.owner_display(), needs=[], subject="[home] his item")
 reset(); wakes_svc.wake_pass()
 m = mt(12)
 check("7 the person as the post-wake mover: the item asks him, no session is told", m.get("needs") == ["decision"] and not m.get("mover") and not SENT, (m, SENT))
@@ -214,7 +214,7 @@ check("8 a wait whose end is his decision is his, as before: the item asks him, 
       "a13" in woke and mt(13).get("needs") == ["decision"] and not mt(13).get("mover") and not SENT, (mt(13), SENT))
 
 # ================================================================ 9. a step only the front agent can take keeps the item with it
-item(17, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"{F_A}: ask him which one to keep", subject="[home] its own step")
+item(17, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"{F_A}: ask him which one to keep", subject="[home] its own step")
 reset(); wakes_svc.wake_pass()
 m = mt(17)
 check("9 an open step that opens with the front agent's name keeps the item with it, told", m.get("mover") == F_A and m.get("needs") == [F_A] and len(SENT) == 1 and SENT[0][1] == U[F_A] and not to(U[B_A]), (m, SENT))
@@ -222,21 +222,21 @@ check("9 …unmarked (the move is its own, the person has nothing to do), and th
 item(18, until=day(-1), needs=[F_A], next=f"{F_A}: ask him which one to keep", subject="[home] its own step, date alone")
 reset(); wakes_svc.wake_pass()
 check("9 …also a wait on a date alone: nothing passes, needs and mover stay as stored", mt(18).get("needs") == [F_A] and not mt(18).get("mover") and len(SENT) == 1 and SENT[0][1] == U[F_A] and not SENT[0][2].startswith(MARK) and not to(U[B_A]), (mt(18), SENT))
-item(19, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], ask=f"{F_A}: which one do you keep?", subject="[home] its own ask")
+item(19, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], ask=f"{F_A}: which one do you keep?", subject="[home] its own ask")
 reset(); wakes_svc.wake_pass()
 check("9 …an ask that opens with the front agent's name does the same", mt(19).get("mover") == F_A and len(SENT) == 1 and SENT[0][1] == U[F_A] and not to(U[B_A]), (mt(19), SENT))
-item(20, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"{B_A}: do the thing\n{F_A}: then review it", subject="[home] its later step")
+item(20, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"{B_A}: do the thing\n{F_A}: then review it", subject="[home] its later step")
 reset(); wakes_svc.wake_pass()
 check("9 …but a step of the front agent that comes after the builder's is not the one the wake leads to: the item passes", mt(20).get("mover") == B_A and to(U[B_A]) and not to(U[F_A]), (mt(20), SENT))
-item(21, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next="- a sub step\n- another", subject="[home] bare steps")
+item(21, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next="- a sub step\n- another", subject="[home] bare steps")
 reset(); wakes_svc.wake_pass()
 check("9 …and steps that name nobody are nobody's: the item passes", mt(21).get("mover") == B_A and to(U[B_A]) and not to(U[F_A]), (mt(21), SENT))
 
-item(34, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"- a sub step\n{F_A}: ask him which one to keep", subject="[home] bare first")
-item(35, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"check the CI\n{F_A}: review it", subject="[home] plain line first")
-item(36, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"{B_A}: do the thing", steps=[{"text": f"{F_A}: an old one", "status": "done", "by": B_A, "at": now0 - DAY}], subject="[home] a done step of its own")
-item(37, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=U[F_A], needs=[], next=f"{F_A}: ask him which one to keep", subject="[home] its id, the step by name")
-item(38, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_A, needs=[], next=f"{F_A.upper()}: ask him which one to keep", subject="[home] its name in capitals")
+item(34, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"- a sub step\n{F_A}: ask him which one to keep", subject="[home] bare first")
+item(35, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"check the CI\n{F_A}: review it", subject="[home] plain line first")
+item(36, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"{B_A}: do the thing", steps=[{"text": f"{F_A}: an old one", "status": "done", "by": B_A, "at": now0 - DAY}], subject="[home] a done step of its own")
+item(37, wait_kind="time", hold=True, wake=day(-1), mover=U[F_A], needs=[], next=f"{F_A}: ask him which one to keep", subject="[home] its id, the step by name")
+item(38, wait_kind="time", hold=True, wake=day(-1), mover=F_A, needs=[], next=f"{F_A.upper()}: ask him which one to keep", subject="[home] its name in capitals")
 reset(); wakes_svc.wake_pass()
 check("9 …a bare line before the front agent's step is skipped, and so is a line with no `<name>:` opener: the front agent's step is the first that names someone, the item stays",
       mt(34).get("mover") == F_A and mt(35).get("mover") == F_A and told("a34") == [U[F_A]] and told("a35") == [U[F_A]], (mt(34), mt(35), SENT))
@@ -245,18 +245,18 @@ check("9 …the front agent held by its id and named by its name in the step is 
 check("9 …a name in another letter case is the same session: the item stays", mt(38).get("mover") == F_A and told("a38") == [U[F_A]], (mt(38), SENT))
 
 # ================================================================ 10. the keeper of the item's own project is no front agent for it: it keeps the item, told as before (no pass, no mark)
-item(22, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/golf", subject="[home] the keeper's own")
+item(22, wait_kind="time", hold=True, wake=day(-1), mover=F_G, needs=[], project="projects/golf", subject="[home] the keeper's own")
 reset(); wakes_svc.wake_pass()
 check("10 the keeper of the item's own project keeps it although the project has a builder: mover and needs the keeper, told once, unmarked, the builder not told",
       mt(22).get("mover") == F_G and mt(22).get("needs") == [F_G] and len(SENT) == 1 and SENT[0][1] == U[F_G] and not SENT[0][2].startswith(MARK) and not to(U[B_G]) and notes_of("a22") == [f"woke: its wake {day(-1)} came → {F_G}"], (mt(22), SENT, notes_of("a22")))
-item(23, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/delta", subject="[home] the same agent, another project's item")
+item(23, wait_kind="time", hold=True, wake=day(-1), mover=F_G, needs=[], project="projects/delta", subject="[home] the same agent, another project's item")
 reset(); wakes_svc.wake_pass()
 check("10 …but the same agent on another project's item is a front agent there: the item passes to that project's builder", mt(23).get("mover") == B_A and to(U[B_A]) and not to(U[F_G]), (mt(23), SENT))
 
 # ================================================================ 11. every cause that ends a wait ends the same way (anchor, event, list, relay line, the backstops)
 AURL = "https://github.com/o/r/pull/5"
 def fire(i, cause, detail=None, **kw):
-    item(i, post_wake_mover=F_A, needs=[], subject=f"[home] {cause} {i}", **kw)
+    item(i, mover=F_A, needs=[], subject=f"[home] {cause} {i}", **kw)
     out: dict = {}; reset()
     ok = watching_svc.watch_fire(f"a{i}", cause, now0, out, detail)
     return ok, out
@@ -285,8 +285,8 @@ check("12 …a step of the agent's own on another project's item is its move, no
 check("12 …a batch of the keeper's own item alone is not marked", watching_svc.watch_text(U[F_G], [golf_row(60), golf_row(62)])[1] == "", None)
 for first, second, ids in (("golf", "delta", (39, 40)), ("delta", "golf", (41, 42))):
     for i, which in zip(ids, (first, second)):
-        if which == "golf": item(i, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/golf", subject=f"[home] the keeper's own {i}")
-        else: item(i, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_G, needs=[], project="projects/delta", next=f"{F_G}: ask him which one to keep", subject=f"[home] another project's, its own step {i}")
+        if which == "golf": item(i, wait_kind="time", hold=True, wake=day(-1), mover=F_G, needs=[], project="projects/golf", subject=f"[home] the keeper's own {i}")
+        else: item(i, wait_kind="time", hold=True, wake=day(-1), mover=F_G, needs=[], project="projects/delta", next=f"{F_G}: ask him which one to keep", subject=f"[home] another project's, its own step {i}")
     reset(); wakes_svc.wake_pass()
     msgs = to(U[F_G])
     check(f"12 end to end, the {first} item then the {second} item: one message to the recipient, naming both, and it carries no mark, in either order (each is the agent's own move)",
@@ -295,7 +295,7 @@ for first, second, ids in (("golf", "delta", (39, 40)), ("delta", "golf", (41, 4
 # ================================================================ 13. a standalone relay wait: the person's later answer hands the item on the same way a wake does
 from stackshot.service import answer as answer_svc
 def relay(i, **kw):
-    item(i, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=F_A, needs=[], subject=f"[home] relay {i}", **kw)
+    item(i, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), mover=F_A, needs=[], subject=f"[home] relay {i}", **kw)
     reset(); wakes_svc.wake_pass()
 for i, how in ((43, "arrived"), (44, "words")):
     relay(i)

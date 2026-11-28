@@ -633,7 +633,7 @@ def part_client():
     (T / "fleet/a/sessions.json").write_text(json.dumps({U: {"name": "sparrow", "machine": "a"}, V: {"name": "home-other", "machine": "a"}, X: {"name": "home-lister", "machine": "a"}}))
     item(21, X, meta={"needs": "decision", "then": X, "next": "home-lister: carry on"})                    # Oliver moves it: Your move
     item(22, X)                                                                                           # an agent (X) moves it: Agents at work
-    item(23, X, meta={"wait_kind": "time", "wake": "2030-01-01", "then": X, "post_wake_mover": X})       # waiting on a time, X takes it after: Waiting
+    item(23, X, meta={"wait_kind": "time", "wake": "2030-01-01", "then": X, "mover": X})       # waiting on a time, X takes it after: Waiting
     rows = {i["gid"]: i for i in json.loads(client_reads_svc._client_get("items", {"key": X})[2])["items"]}
     check("items: list is your-move for an item Oliver moves, agents for one an agent moves, waiting for a wait",
           (rows.get("a21") or {}).get("list") == "your-move" and (rows.get("a22") or {}).get("list") == "agents" and (rows.get("a23") or {}).get("list") == "waiting",
