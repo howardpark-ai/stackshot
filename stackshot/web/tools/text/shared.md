@@ -61,7 +61,7 @@ when Y"), a statement ("X is live"), a "should" or "must" sentence, a question (
 settings"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); a longer bullet is
-split for you at a sentence end or a space (the reply says so) while the description stays within that many lines; prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
+split for you at a sentence end or a space (the reply says so) while the description stays within that many lines; numbered items run together on one bullet line (`1) … 2) …`) are put on lines of their own and a doubled `- - ` mark is made one, the reply says so; prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
 opens `Goal:` (`goal:` or a bold label is put right) with the finished outcome that work reaches, in a sentence; a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or

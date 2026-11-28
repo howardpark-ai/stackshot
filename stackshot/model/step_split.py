@@ -48,9 +48,9 @@ _TRIM = " .;"                      # what ends a clause and is no part of the ac
 SUB = "  - "                       # how a sub-line stands under its action in a line of next: indented, so the line above keeps it (nextlines.split), a bullet, so the board draws a list
 
 
-def _inline_list(text: str) -> tuple[str, list[str]]:
-    """(the words before the list, the items) when `text` holds two or more inline numbered items in a row from 1 (`Do: 1) a 2) b`), the first one at the start of the text or after the end of a sentence or a colon (a
-    number in a sentence, `Pick plan 1) basic or 2) pro`, is no list): the words before the first item ("" when there are none), then each item, its number off, the last one with whatever follows it. Else (text, [])."""
+def inline_run(text: str, paren_only: bool = False) -> list[Any]:
+    """The matches of the numbered items in a row from 1 that `text` writes inline (`Do: 1) a 2) b`), two or more, else []: the first one at the start of the text, after the end of a sentence or a colon, or after a lone
+    dash (`- 1) a 2) b`); a number in a sentence, `Pick plan 1) basic or 2) pro`, is no list, and none inside a link, a URL or a code span is one. `paren_only`: only the `1)` form counts, not `1.` or `(1)`."""
     starts, ends = _bt._merged(_bt._spans(text) + [m.span() for m in _bt._RX_CODE_SPAN.finditer(text)])
     seq: list[Any] = []
     for m in _RX_INLINE_NUM.finditer(text):
@@ -59,14 +59,24 @@ def _inline_list(text: str) -> tuple[str, list[str]]:
             continue
         if int(m.group(1)) != len(seq) + 1:
             continue
+        if paren_only and (m.group(0).startswith("(") or m.group(0).strip()[-1] != ")"):
+            continue
         before = text[:m.start()].rstrip()
-        if not seq and before and before[-1] not in _LIST_OPENERS:
+        if not seq and before and before[-1] not in _LIST_OPENERS and before.strip("-") != "":
             continue
         seq.append(m)
-    if len(seq) < 2:
+    return seq if len(seq) >= 2 else []
+
+
+def _inline_list(text: str) -> tuple[str, list[str]]:
+    """(the words before the list, the items) when `text` holds two or more inline numbered items in a row from 1 (`inline_run`): the words before the first item ("" when there are none), then each item, its number off,
+    the last one with whatever follows it. Else (text, [])."""
+    seq = inline_run(text)
+    if not seq:
         return text, []
     items = [text[m.end():seq[k + 1].start() if k + 1 < len(seq) else len(text)].strip() for k, m in enumerate(seq)]
-    return text[:seq[0].start()].strip(), [x for x in items if x]
+    lead = text[:seq[0].start()].strip()
+    return ("" if lead.strip("-") == "" else lead), [x for x in items if x]
 
 
 def _clause_list(part: str) -> list[str]:
@@ -142,7 +152,9 @@ def _entries(t: str) -> list[Entry]:
 def _plan(text: Any, line_max: int) -> tuple[list[Entry], str]:
     """(the actions with their sub-lines, why none): the actions of `actions`, or [] with the reason when the text is left as written for its size (a sentence for a person: `skipped`); "" when it is short, structured or one action."""
     t = _steps.clean(text)
-    if len(t) <= SPLIT_OVER or _sc.structured(str(text or "")) or line_max < 20:
+    raw = str(text or "")
+    one_line_run = "\n" not in raw.strip() and bool(inline_run(t))      # `1) a 2) b 3) c` on one line is no numbered list of lines: it is the run to cut at its items
+    if len(t) <= SPLIT_OVER or (_sc.structured(raw) and not one_line_run) or line_max < 20:
         return [], ""
     if len(t) > SPLIT_MAX:
         return [], f"the server splits a step into lines only up to {SPLIT_MAX} characters, and this one runs {len(t)}"

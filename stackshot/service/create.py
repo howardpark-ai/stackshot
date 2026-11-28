@@ -230,6 +230,7 @@ def create_item(
     goal_judged = _writes.session_next() and not by      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
     if goal_judged:
         description = _fg.fix_goal_label(description)       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
+    description, list_note = _fg.fix_list_shape(description)       # a numbered run on one line is put on lines of its own and a doubled bullet mark made one (a pure form fix; the reply says so, and History)
     description, split_note = _fg.fix_long_bullets(description)       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
     form_f = _fg.description_faults(description)
     for f_ in form_f:
@@ -372,6 +373,8 @@ def create_item(
         fc.call_depending(*_faults.MOVER_HANDOFF, fc.marked(_faults.MOVER), _gates.gate_handoff, "", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
     fc.raise_now()                         # every gate has run: what was found is refused together, nothing is stored
     h.record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
+    if list_note:
+        _stall.note(meta, time.time(), list_note)
     if split_note:
         _stall.note(meta, time.time(), split_note)          # the server split long description bullets: a History line says the stored text is not as sent
     item = {
