@@ -668,6 +668,8 @@ handback_hold_seconds = 180                          # the one line a front agen
 [canvas]                                            # canvases: pages an agent shares with the board's owner, kept in <paths.state>/canvas/ and read at /canvas/<number>; see docs/canvas.md
 import = false                                      # true: POST /client/canvas-import (a machine token) puts a page of another store into the board's, under its own number and version ids, and
                                                     # replaces a page with newer content; false (the default): it answers 403 to everyone. The operator turns it on to move pages in and off after. Live
+write = false                                       # true: the `canvas` tool saves pages (add, update, undo) under numbers of the board's own; false (the default): it refuses them, and history and list still answer. It stays off
+                                                    # until the import has moved the pages in, since two stores would give out the same numbers. Live
 
 [ui]                                                # the board's pages (stackshot/web/i18n.py; docs/board-ui.md)
 # locale_dir = "~/.config/stackshot/locales"        # a folder that holds a second language for the pages: `<code>.json` (e.g. ko.json), an object of string table key -> text, the keys of

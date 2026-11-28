@@ -2,7 +2,7 @@
 
     /canvas/<n>                       the shell on the current page
     /canvas/<n>/versions/<id>         the shell on one version
-    …/raw after either                the page itself, the stored bytes and nothing else: what the shell's frame loads
+    …/raw after either                the page itself, what the shell's frame loads: the stored bytes, with a default link color and the shared tooltip added where the page needs them (service/canvas_page.py)
 
 All behind the board's sign-in. The shell sends a browser to sign in, as every page does; the page's own address answers a signed-out request with a plain 401, never a redirect, because it is read inside a
 frame. GET and HEAD only: creating and editing a canvas through the board is refused (405) until the board takes over from the store the pages come from. What keeps a page apart from the board is the headers
@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, Response
 
 from stackshot.service import canvas as _canvas
+from stackshot.service import canvas_page as _canvas_page
 from stackshot.web.auth.signin import _ui_guard
 from stackshot.web.ui import canvas as _ui_canvas
 
@@ -41,6 +42,16 @@ def _found(request: Request) -> tuple[dict[str, Any], str | None, dict[str, Any]
     return None if entry is None else (rec, version, entry)
 
 
+def _with_defaults(data: bytes) -> bytes:
+    """The page as it is served: the stored bytes, and where the page needs them a default link color and the shared tooltip (service/canvas_page.py); the same bytes for a page that needs neither."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    out = _canvas_page.served(text)
+    return data if out == text else out.encode("utf-8")
+
+
 def _not_found() -> Response:
     return PlainTextResponse("not found", status_code=404)
 
@@ -60,7 +71,7 @@ async def canvas_shell(request: Request):
 
 
 async def canvas_raw(request: Request):
-    """The page itself, byte for byte. No media_type is set on the response, so no pass over the board's own pages (the panel, the language, the standby's banner) touches it."""
+    """The page itself: the stored bytes, plus a default link color and the shared tooltip where the page needs them (_with_defaults). No media_type is set on the response, so no pass over the board's own pages (the panel, the language, the standby's banner) touches it."""
     no = _refused(request)
     if no is not None:
         return no
@@ -70,7 +81,7 @@ async def canvas_raw(request: Request):
     data = None if got is None else _canvas.page(got[0]["number"], got[2])
     if data is None:
         return _not_found()
-    return Response(data, headers={"Content-Type": "text/html; charset=utf-8"})
+    return Response(_with_defaults(data), headers={"Content-Type": "text/html; charset=utf-8"})
 
 
 def register(mcp) -> None:

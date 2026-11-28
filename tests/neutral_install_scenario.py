@@ -119,7 +119,7 @@ print(json.dumps({"instructions": server.mcp.instructions, "tools": tools, "reso
 port = free_port()
 inst = build("alex", OWNER, port)
 rc, out, err = py(inst, TOOLS)
-check("the MCP tool list renders on the neutral config (12 tools, instructions, resources)", rc == 0 and len(json.loads(out or "{}").get("tools", {})) == 12, (rc, out[:200], err[-500:]))
+check("the MCP tool list renders on the neutral config (13 tools, instructions, resources)", rc == 0 and len(json.loads(out or "{}").get("tools", {})) == 13, (rc, out[:200], err[-500:]))
 text_alex = out
 check("the MCP tool list names none of the owner's names and no fleet tool", not leaks(text_alex), leaks(text_alex))
 check("the MCP tool list names the owner of the config", f"{OWNER}'s task board" in text_alex or f"{OWNER}" in text_alex, text_alex[:200])
