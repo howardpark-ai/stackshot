@@ -210,10 +210,31 @@ rc, ctext, _ = render(on, CADDYUNIT, home=H1)
 code = [l.strip() for l in ctext.splitlines() if l.strip() and not l.strip().startswith("#")]
 for want in ("admin off", "auto_https off", "persist_config off", "bind 127.0.0.1", "http://:18020 {", "trusted_proxies static 127.0.0.1/32 ::1/128", "request_header -x-forwarded-user", "request_header -X-Forwarded-User", "request_header -X-Verified-User",
              "request_header -X-Stackshot-Identity", "request_header -X-Stackshot-Verify", "@token_check path /frontdoor /frontdoor/*", "respond @token_check 404", "@mcp path /mcp /mcp/*",
-             "forward_auth @mcp 127.0.0.1:18031 {", "uri /verify", "copy_headers X-Verified-User>x-forwarded-user", "reverse_proxy @mcp 127.0.0.1:18030", "reverse_proxy 127.0.0.1:18010"):
+             "forward_auth @mcp 127.0.0.1:18031 {", "uri /verify", "copy_headers X-Verified-User>x-forwarded-user", "reverse_proxy @mcp 127.0.0.1:18030", "@client path /client /client/*", "reverse_proxy @client 127.0.0.1:18010", "reverse_proxy 127.0.0.1:18010 {"):
     check(f"Caddyfile: has the line `{want}`", want in code, code)
 check("Caddyfile: no placeholder is left, and the identity headers are removed before the check", not re.search(r"@[A-Z0-9_]+@", "\n".join(code))
-      and code.index("request_header -x-forwarded-user") < code.index("forward_auth @mcp 127.0.0.1:18031 {") and code.index("respond @token_check 404") < code.index("reverse_proxy 127.0.0.1:18010"), code)
+      and code.index("request_header -x-forwarded-user") < code.index("forward_auth @mcp 127.0.0.1:18031 {") and code.index("respond @token_check 404") < code.index("reverse_proxy 127.0.0.1:18010 {"), code)
+def proxy_blocks(lines_):
+    """each reverse_proxy of the rendered Caddyfile: (its matcher or None, its upstream, the lines inside its braces)"""
+    out = []
+    for n, l in enumerate(lines_):
+        m = re.match(r"reverse_proxy (@\S+ )?(\S+)( \{)?$", l)
+        if not m: continue
+        body = []
+        if m.group(3):
+            for inner in lines_[n + 1:]:
+                if inner == "}": break
+                body.append(inner)
+        out.append((m.group(1).strip() if m.group(1) else None, m.group(2), body))
+    return out
+proxies = proxy_blocks(code)
+retry = {(m, up): body for m, up, body in proxies}
+check("Caddyfile: the board's pages retry a refused connection for 15 s, every 250 ms (a restart of the board shows no connect error)",
+      retry.get((None, "127.0.0.1:18010")) == ["lb_try_duration 15s", "lb_try_interval 250ms"], proxies)
+check("Caddyfile: the retry is on exactly one proxy; the machines' /client/* calls (the held poll, the hooks) and the MCP path to the front door have none",
+      len(proxies) == 3 and [m for m, up, body in proxies if any("lb_try" in b for b in body)] == [None] and retry.get(("@client", "127.0.0.1:18010")) == [] and retry.get(("@mcp", "127.0.0.1:18030")) == []
+      and code.index("reverse_proxy @client 127.0.0.1:18010") < code.index("reverse_proxy 127.0.0.1:18010 {"), proxies)
+check("Caddyfile: no health check and no websocket setting was added", not [l for l in code if re.match(r"(health_|lb_policy|transport|header_up Upgrade)", l)], code)
 named = re.search(r'(?m)^VERIFY_HEADER = "([a-z0-9-]+)"', pathlib.Path(STACK, "stackshot/core/behind_door.py").read_text(encoding="utf-8"))      # a rename there has to reach the Caddyfile
 check("Caddyfile: removes the header the board's token check is signed with, by the board's own name for it",
       named is not None and f"request_header -{named.group(1)}" in [l.lower() for l in code], named and named.group(1))
