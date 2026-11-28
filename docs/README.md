@@ -20,7 +20,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 
 - [The front door](front-door.md): One MCP endpoint over several boards and a brain behind a sign-in proxy: the identity header, the members file, the one tool set with its `board` argument, the refusals, the backends' credentials and how to run it.
 - [The board, the publisher and the connector](board-and-connector.md): The server and the publisher, the MCP connector, and every tool the connector offers.
-- [The board pages](board-ui.md): How the board pages are drawn: search, the item page, the home lists, rows, cards, buttons, the side panel and the CI runners page.
+- [The board pages](board-ui.md): How the board pages are drawn: search, the item page, the item brief, the home lists, rows, cards, buttons, the side panel and the CI runners page.
 - [The color tool](color-tool.md): The Colors button that tries a whole dark color combination, and the saved color combinations.
 - [Asks and answers on the board](asks-and-answers.md): The board sign-in, how a wrong ask leaves the owner, how the owner answers from an item page, the answer box and the History after a decision.
 - [Canvases](canvas.md): Pages an agent shares with the board's owner: their addresses, the shell and the sandboxed page, the headers that keep a page apart from the board, the store, the `canvas` tool that saves and revises them (off until the import has moved the pages in), and the import that is off by default.

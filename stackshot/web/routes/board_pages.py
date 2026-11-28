@@ -107,6 +107,12 @@ def _details_key(path: str) -> str:
     return key if re.fullmatch(_cfg.page_dirs_re() + r"/[\w./-]+", key) and ".." not in key else ""
 
 
+def _answer_box(request: Request, email: str | None, gid: str) -> dict[str, Any] | None:
+    """What a page needs to draw one item's answer box for this viewer: the form's address and token, the notice code and the member. None for a viewer who is not signed in."""
+    return {"action": f"/items/{_gh.href_id(gid)}/answer", "token": _answer_token(email, gid),
+            "sent": str(request.query_params.get("sent") or ""), "member": _viewer()} if email else None
+
+
 def _item_page(request: Request, gid: str):
     """An item's own page at /items/<gid>: its fields, scoped anchors and its history from the store's
     git, rendered on request so it is always current. Behind the board's sign-in; an id the store does not hold is 404.
@@ -116,8 +122,7 @@ def _item_page(request: Request, gid: str):
         return g
     email = _signin._ui_email(request)
     rmod = _ui_mods()[0]
-    box = {"action": f"/items/{_gh.href_id(gid)}/answer", "token": _answer_token(email, gid),
-           "sent": str(request.query_params.get("sent") or ""), "member": _viewer()} if email else None
+    box = _answer_box(request, email, gid)
     try:
         try:
             watch = _watch_box(email, gid, _load(gid))

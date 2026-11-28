@@ -120,6 +120,28 @@ def page(number: int, entry: dict[str, Any]) -> bytes | None:
     return _file(root() / str(int(number)) / f"{entry['sha256']}.html", MAX_BYTES)
 
 
+def for_item(gid: str) -> dict[str, Any] | None:
+    """The record of the canvas the item `gid` (a store id) is shown with: the highest-numbered canvas that has a current page and names the item, None when there is none. A record that cannot be
+    read, or whose item is not an id, is skipped. Reads every record's small file: a board holds a few hundred canvases at most."""
+    try:
+        names = [int(p.name) for p in root().iterdir() if re.fullmatch(NUMBER, p.name) and p.is_dir()]
+    except OSError:
+        return None
+    for n in sorted(names, reverse=True):
+        try:
+            rec = read(n)
+        except (Unreadable, OSError):
+            continue
+        if rec is None or rec["current"] is None or not rec["item"]:
+            continue
+        try:
+            if _norm_id(rec["item"]) == gid:
+                return rec
+        except ToolError:      # an item that names no id
+            continue
+    return None
+
+
 def counter() -> int:
     """The highest number the store says was ever given, 0 for none."""
     raw = _file(root() / "counter", 64)
