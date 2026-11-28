@@ -184,7 +184,7 @@ CLOSE_TEXT_DEFAULT = "- every step is done (set by the server)"
 CLOSE_REASON_DROPPED = "closed with every step done or dropped (set by the server)"      # the same words when a step was dropped
 CLOSE_TEXT_DROPPED = "- every step is done or dropped (set by the server)"
 CLOSE_DEFAULT_ARGS = frozenset({"item_id", "sender", "status", "outcome", "reason", "outcome_text", "description", "superseded_by", "said", "done", "dropped"})      # the allow list of the server's default close: the close's own fields (description is the old name of outcome_text in a close), the owner's recorded words and the step marks. A close that passes any other argument, today's or one added later, gets no default: it is judged as it was before the default existed, so nothing a writer sent is ever thrown away
-SERVER_ARGS = frozenset({"fixes", "until_wait", "busy_note"})      # the arguments of update_unlocked the tool layer computes itself, never a caller's (every other one is a parameter of the update tool)
+SERVER_ARGS = frozenset({"fixes", "until_wait", "busy_note", "route_record"})      # the arguments of update_unlocked the tool layer or the server computes itself, never a caller's (route_record: a script route's step write, item_sync.py, which never closes; every other one is a parameter of the update tool)
 
 
 def _arg_passed(v: Any) -> bool:
