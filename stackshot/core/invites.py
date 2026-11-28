@@ -359,6 +359,15 @@ def session_holds(email: str, sub: str) -> bool:
 
 # ------------------------------------------------------------------------------------------------ registering and removing
 
+def has_former(address: str, s: Settings) -> bool:
+    """Whether the entry of `address` lists earlier accounts in `former_subs` (they are refused on this registration). False when the file cannot be read."""
+    try:
+        path = s.members_file
+        return any(_former(v) for v in _invitations(_document(path), address.strip().lower()))
+    except _files.FileError:
+        return False
+
+
 def register(address: str, by: str, s: Settings) -> tuple[bool, bool]:
     """Register `address` (as `address_of` gives it) on this board, by the admin `by`. (whether the file changed, whether an account has joined with it already)."""
     def add(doc: _Object) -> tuple[tuple[bool, bool], bool]:

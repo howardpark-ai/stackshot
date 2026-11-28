@@ -528,6 +528,11 @@ def part_direct():
         invites.remove("new@example.com", S)
         claims.clear(); claims.update(email="new@example.com", sub="111", email_verified="true")
         check("direct: a removed address is refused at its next call", "is not allowed on this board" in str(raised(_oauth._who)))
+        claims.clear(); claims.update(email="alice@example.com", sub="900", email_verified="true")
+        out = _tool.stackshot_invite("new@example.com")
+        check("direct: a registration that keeps an earlier account says so and names the way to let it in again", out.startswith("Registered new@example.com on board main.\nNote: an earlier Google account of new@example.com was kept")
+              and "is refused on this registration" in out and 'remove this registration (invite(address="new@example.com", remove=true)) and then invite again' in out, out)
+        check("direct: a registration with no earlier account carries no such note", "earlier Google account" not in _tool.stackshot_invite("fresh@example.com"))
     finally:
         _cfg.CFG["behind_frontdoor"], deps.get_access_token = saved, saved_get
 
