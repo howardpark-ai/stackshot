@@ -69,10 +69,11 @@ def _pages_on() -> bool:    # only a TOML true turns it on (a string "false" is 
     return _cfg.get("publish", "pages", default=False) is True
 
 
-def _git(*args: str, check: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _git(*args: str, check: bool = False, env: dict[str, str] | None = None, new_session: bool = False) -> subprocess.CompletedProcess:
     """git in the store clone (`env`: the whole environment of that one call, else this process's). Its output is read as UTF-8, and a byte that is not (a
-    hook's message, a remote's refusal) is read as U+FFFD, never raised on."""
-    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, encoding="utf-8", errors="replace", check=check, env=env)
+    hook's message, a remote's refusal) is read as U+FFFD, never raised on. `new_session`: git runs in a process group of its own, so a terminal's Ctrl-C
+    (sent to this process's group) does not reach it or its hooks."""
+    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, encoding="utf-8", errors="replace", check=check, env=env, start_new_session=new_session)
 
 
 _NOTED: dict[str, float] = {}      # kind of note -> when it was last printed (time.monotonic)
@@ -323,7 +324,7 @@ class CommitFailed(RuntimeError):
 _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f<>]|[\ud800-\udfff]")     # control characters (NUL, line breaks, DEL, the C1 set), angle brackets, lone surrogates
 _CRUD = " .,:;<>\"\\'"                                               # what git strips from both ends of an identity's name and address (ident.c, crud())
 _NAME_LIMIT = 300                                                    # long enough that no real name is cut, short enough that nothing absurd reaches git's argv
-_BAD_PATH = re.compile(r"[\x00-\x1f\x7f]|[\ud800-\udfff]")           # in a page path: control characters, and a lone surrogate (a file name that is not UTF-8)
+_BAD_PATH = re.compile(r"[\x00-\x1f\x7f-\x9f]|[\ud800-\udfff]")      # in a page path: control characters (the C1 set too), and a lone surrogate (a file name that is not UTF-8)
 _LIT = "--literal-pathspecs"                                         # every page path is a file name, never a pattern: `a[1].md`, `q?.md`, `*` name themselves
 _PATHS_MAX = 1000                                                    # page paths one call takes, and their length in all: every git call's argument list
 _PATHS_BYTES = 64 * 1024                                             # stays far below what the system takes
@@ -537,12 +538,15 @@ def _commit_pages(rels: tuple[str, ...], adds: list[str], drops: list[str], fold
     every one is as HEAD has it. Refused before the commit (CommitFailed, nothing committed, the store clone's index untouched): an entry that is not named
     and would go with them (a file and a folder that swapped places with one side named, a submodule in a folder that is a named file now: `git diff-index`
     is told to show submodules, whatever the config says), and an entry a session staged in the store clone's index that bringing it to the commit would
-    drop (`_dropped`). The commit is `git commit --only` of the named files on that index: hooks and signing as for any commit, HEAD as it is at the commit,
+    drop (`_dropped`). The commit is `git commit --only` of the named files on that index: hooks and signing as for any commit that needs no terminal (a tty-based gpg pinentry, or a hook that prompts on /dev/tty, finds none: the commit runs in a session of its own), HEAD as it is at the commit,
     and no automatic maintenance (a gc started from it would read this index, not the store clone's, and could prune a blob only a session's staged entry
     holds). After it the store clone's index is brought to it for the named files (`_bring_index`); where that fails, the commit stays made and stderr says
     what is left and how to clear it."""
     named = set(rels)
-    work = Path(tempfile.mkdtemp(prefix="stackshot-pages-"))
+    try:
+        work = Path(tempfile.mkdtemp(prefix="stackshot-pages-"))
+    except OSError as e:                                                        # no room for the call's own folder
+        raise CommitFailed(f"{type(e).__name__}: {e}: nothing staged or committed") from e
     own = {**os.environ, "GIT_INDEX_FILE": str(work / "index")}
     try:
         try:
@@ -572,9 +576,14 @@ def _commit_pages(rels: tuple[str, ...], adds: list[str], drops: list[str], fold
             if (lost := _dropped(t.stdout.strip(), only, named, work)):
                 raise CommitFailed(f"{_shown(lost)}, staged in the store clone's index and not named, would be dropped from it with {_shown(rels)} (a file and a "
                                    "folder that swap places): commit, unstage or name them first: nothing committed")
-            r = _git(_LIT, "-c", "maintenance.auto=false", "commit", "--quiet", "--only", "--author", who, "-m", _page_msg(changed), "--", *only, env=own)
+            r = _git(_LIT, "-c", "maintenance.auto=false", "commit", "--quiet", "--only", "--author", who, "-m", _page_msg(changed), "--", *only, env=own, new_session=True)
             if r.returncode != 0:
-                raise CommitFailed(f"git commit failed: {_last_line(r)}: nothing committed")
+                try:                                                            # git stopped after the ref moved (a hook ran on, or git was killed): the commit is ours only if
+                    now = _git("rev-parse", "-q", "HEAD^{tree}", "HEAD^1")      # HEAD holds this call's own tree on top of `head`, not another session's commit
+                except Exception as e:                                          # the re-read itself could not start: the ref may have moved
+                    raise CommitFailed(f"git commit failed: {_last_line(r)}, and HEAD could not be re-read ({type(e).__name__}: {e}): whether a commit was made is unknown") from e
+                if now.returncode != 0 or now.stdout.split() != [t.stdout.strip(), head]:
+                    raise CommitFailed(f"git commit failed: {_last_line(r)}: nothing committed")
         except CommitFailed:
             raise
         except Exception as e:                                                  # an OSError (git could not be started), or any other
@@ -644,15 +653,17 @@ def publish_pages(paths, author: str, email: str = "") -> bool:
             print(line, file=sys.stderr)
             raise KeyboardInterrupt(line)
         if made:
-            mine = _git("rev-parse", "HEAD").stdout.strip()
             try:
+                mine = _git("rev-parse", "HEAD").stdout.strip()
                 _gitsync("", committed=True)
+                if mine and _git("merge-base", "--is-ancestor", mine, "origin/main").returncode != 0:
+                    on = _git("symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+                    where = (f"; the clone is on {on or 'no branch'}, and the push is of main only, so it goes out once main holds it"
+                             if on != "main" else "")
+                    _note("pages-unpushed", "publish: a page commit is made and is not on the mirror yet (the push or the fetch before it failed or was refused, "
+                                            f"or the mirror conflicts){where}; the next publish that pushes takes it")
             except Exception as e:  # noqa: BLE001 — the commit is made and stays True; its push is the next publish's
                 _note("pages-sync", f"publish: a page commit is made, and the push step after it failed ({type(e).__name__}: {e}); the next publish that pushes takes it")
-            else:
-                if mine and _git("merge-base", "--is-ancestor", mine, "origin/main").returncode != 0:
-                    _note("pages-unpushed", "publish: a page commit is made and is not on the mirror yet (the push or the fetch before it failed or was refused, "
-                                            "or the mirror conflicts); the next publish that pushes takes it")
         return made
 
 
