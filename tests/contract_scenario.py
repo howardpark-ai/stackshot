@@ -830,6 +830,22 @@ with TestClient(app) as c:
     _signin._ui_exchange = lambda code, verifier: ("stranger@example.com", "", "")
     r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
     check("sign-in end: an address that is not allowed gets no session", r.status_code == 403 and "set-cookie" not in {k for k, _ in r.headers.multi_items() if _.startswith("stackshot_ui=")}, (r.status_code, r.text))
+    _signin._ui_exchange = lambda code, verifier: ("", "", "")
+    r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
+    check("sign-in end: an exchange that gave no address (a restart cut the sign-in in two) is told so, 400, with the way back and no 'not allowed'",
+          r.status_code == 400 and "sign-in was interrupted (the board restarted)" in r.text and "/ui/login" in r.text and "not allowed" not in r.text and "set-cookie" not in r.headers, (r.status_code, r.text))
+    _signin._ui_exchange = lambda code, verifier: ("you@example.com", "", "unverified")
+    r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
+    check("sign-in end: a member the registration refuses is still 403 'is not let in', with the reason", r.status_code == 403 and r.text.startswith("you@example.com is not let in. Google does not report"), (r.status_code, r.text))
+    _signin._ui_exchange = lambda code, verifier: ("stranger@example.com", "", "")
+    r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
+    check("sign-in end: a real non-member is still 403 'stranger@example.com is not allowed on this board'", r.status_code == 403 and r.text == "stranger@example.com is not allowed on this board", (r.status_code, r.text))
+    first_cid = q["client_id"][0]
+    _signin._UI_CLIENT.clear()
+    check("sign-in start after a restart: the board finds the client it registered before", _signin._ui_client_id() == first_cid, first_cid)
+    _signin._UI_CLIENT.clear(); (T / "state/ui-client-id").write_text("no-such-client")
+    again = _signin._ui_client_id()
+    check("…and a saved id this server does not know is registered anew and saved", again != "no-such-client" and again and (T / "state/ui-client-id").read_text() == again, again)
     r = c.get("/ui/callback?code=abc&state=wrong", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False); r2 = c.get(f"/ui/callback?code=abc&state={state}", follow_redirects=False)
     check("sign-in end: a callback that does not belong to a sign-in started here is refused", r.status_code == 400 and r2.status_code == 400)
     seen_args = []

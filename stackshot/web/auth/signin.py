@@ -187,13 +187,27 @@ def _ui_redirect_uri() -> str:
 
 
 def _ui_client_id() -> str:
-    """The board's own OAuth client at this server (dynamic registration, once per run)."""
+    """The board's own OAuth client at this server (dynamic registration, once, then kept in <state>/ui-client-id: this server keeps its registered clients and its codes on disk, so a sign-in that a restart
+    cut in two still finds its client; a saved id this server no longer knows is registered anew)."""
     if not _UI_CLIENT.get("id"):
+        import asyncio
+        try:
+            saved = _cfg.state("ui-client-id").read_text().strip()
+            if saved and asyncio.run(_SERVER["mcp"].auth.get_client(saved)) is not None:
+                _UI_CLIENT["id"] = saved
+                return saved
+        except Exception:  # noqa: BLE001  — no saved id, or none that can be checked: register again
+            pass
         status, d = _ui_http("POST", "/register", {"client_name": f"{NAME} board", "redirect_uris": [_ui_redirect_uri()], "grant_types": ["authorization_code", "refresh_token"],
                                                     "response_types": ["code"], "token_endpoint_auth_method": "none"})
         if status not in (200, 201) or not d.get("client_id"):
             raise RuntimeError(f"the board could not register with its own sign-in service [{status}]: {str(d)[:160]}")
         _UI_CLIENT["id"] = str(d["client_id"])
+        try:
+            p = _cfg.state("ui-client-id"); p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_UI_CLIENT["id"])
+        except OSError:
+            pass                                                            # not kept: the next run registers again, as before
     return _UI_CLIENT["id"]
 
 
@@ -260,8 +274,10 @@ async def ui_callback(request: Request):
     if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
         return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
     email, sub, why = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
+    if not email:       # the exchange gave no address (this server answered the code with a refusal, as it does for a code a restart cut off): nobody was refused
+        return PlainTextResponse("sign-in was interrupted (the board restarted): open the board again to sign in: /ui/login", status_code=400, headers={"Cache-Control": "no-store"})
     if not _members.person_of_email(email):
-        return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
+        return PlainTextResponse(f"{email} is not allowed on this board", status_code=403)
     if why:
         return PlainTextResponse(f"{email} is not let in. {_ident.REFUSALS[why]}", status_code=403)
     r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)

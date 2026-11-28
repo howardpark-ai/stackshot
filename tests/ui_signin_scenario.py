@@ -172,7 +172,7 @@ with TestClient(app) as c:
           and not _signin._ui_is_board_client("", "https://stackshot.test/ui/callback"))
 
     # ============================================================= 4. a lapsed tab does not retry
-    _signin._UI_CLIENT.clear()
+    _signin._UI_CLIENT.clear(); _cfg.state("ui-client-id").unlink(missing_ok=True)       # a first run: no client registered yet
     regs = []
     _signin._ui_http = lambda *a, **k: (regs.append(a), ui_http(*a, **k))[1]
     r = c.get("/render-stamp", headers=FETCH, follow_redirects=False)
