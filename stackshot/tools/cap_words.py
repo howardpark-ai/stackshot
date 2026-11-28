@@ -44,6 +44,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.core import members as _members  # noqa: E402
 from stackshot.model import member_gates as _mgates  # noqa: E402
 from stackshot.waits import waiting as _wt  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402
 
 A_ITEMS: tuple[int, ...] = ()      # the items --a-item names (the owner's own park)
 B_ITEMS: tuple[int, ...] = ()      # the items --b-item names (an agent's park to a real-world date)
@@ -117,7 +118,7 @@ def plan_a(n: int, use: str, now: float) -> dict[str, Any]:
     m = item.get("metadata") or {}
     out = {"n": n, "kind": "A", "found": False, "body": None, "lines": []}
     L = out["lines"]
-    L.append(f"board#{n} · {item.get('subject')}")
+    L.append(f"board#{n} · {_tl.bare(item.get('subject'))}")
     L.append(f"  state: {item.get('status')}; wake {m.get('wake') or 'none'}; hold {bool(m.get('hold'))}; needs {m.get('needs') or 'none'}")
     if item.get("status") == "open":
         L.append("  now: " + status_line(gid, item, now))
@@ -176,7 +177,7 @@ def plan_b(n: int, basis_override: str, now: float) -> dict[str, Any]:
     m = item.get("metadata") or {}
     out = {"n": n, "kind": "B", "found": False, "body": None, "lines": []}
     L = out["lines"]
-    L.append(f"board#{n} · {item.get('subject')}")
+    L.append(f"board#{n} · {_tl.bare(item.get('subject'))}")
     L.append(f"  state: {item.get('status')}; wake {m.get('wake') or 'none'}; due {m.get('due') or 'none'}; hold {bool(m.get('hold'))}")
     if item.get("status") == "open":
         L.append("  now: " + status_line(gid, item, now))

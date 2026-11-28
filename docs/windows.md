@@ -43,7 +43,7 @@ private as your user profile. `stackshot/fleet/client.py` looks for the address 
 When the box has no config yet (no `%USERPROFILE%\.config\stackshot\stackshot.toml` and no `STACKSHOT_CONFIG`),
 `client install` also writes one: the shipped example with the instance's non-secret settings filled in, read from the
 server's `config` read with the new token (instance name, title, owner, timezone and board URL, the page flavor and
-directories, `paths.brain` as text, the subject prefixes, `[page_gate]`, `[board_check]`, the mirror URL, the connector path). So the
+directories, `paths.brain` as text, the subject tags, `[page_gate]`, `[board_check]`, the mirror URL, the connector path). So the
 nag on this box prints its times in the instance's timezone (`UTC` unless configured) and words its advice in the
 instance's page flavor. A config that is already there is never overwritten. If the server cannot be reached at that
 moment, the example's defaults apply (UTC, plain pages) until `client install` runs again.

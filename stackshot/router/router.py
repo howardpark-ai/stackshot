@@ -487,14 +487,21 @@ def board_actor(n: dict[str, Any], cx: Context, t: dict[str, Any] | None = None)
     """The session whose write a `[board]` owner notice reports, "" when the notice is not one. Read only when the notice comes from
     stackshot itself (the instance name, [instance] name) and the writer is a known session. With the item, the exact prefix
     `[board] <shown id> <subject>: ` is stripped first, so that colons in the subject cannot move the parse; without it the first
-    `<name> set next:` after any colon is read, which the known-session check then has to vouch for."""
+    `<name> set next:` after any colon is read, which the known-session check then has to vouch for. The exact prefix is read
+    against notice_title(t) as it reads *now*: a notice queued before this instance started hiding a title's tag or grouping it
+    still carries the old, raw subject, and an item moved to another project since the notice was sent carries another group
+    now than the one the text was written with — either way the exact prefix no longer matches the live item, so the generic
+    `_BOARD_ACTOR` match (which needs no subject at all) is tried next rather than giving up and returning "" (a "" here can
+    send the notice back to its own writer, as though someone else had sent it)."""
     if str(n.get("who") or "").strip().lower() != str(_cfg.get("instance", "name") or "stackshot").strip().lower():
         return ""
     text = str(n.get("text") or "").lstrip()
+    m = None
     if t is not None:
-        prefix = f"[board] {cx.shown(t['gid'])} {t.get('subject') or ''}: "
-        m = re.match(_BOARD_WRITE, text[len(prefix):]) if text.startswith(prefix) else None
-    else:
+        prefix = f"[board] {cx.shown(t['gid'])} {_anc.notice_title(t)}: "
+        if text.startswith(prefix):
+            m = re.match(_BOARD_WRITE, text[len(prefix):])
+    if m is None:
         m = _BOARD_ACTOR.match(text)
     return m.group(1) if m and is_session(m.group(1), cx) else ""
 
@@ -1650,7 +1657,7 @@ def open_items_block(root: str, cx: Context) -> list[str]:
         party = _neutral(_clean((t.get("metadata") or {}).get("party") or (t.get("metadata") or {}).get("wait_event"), 30))      # titles are data too: no angle bracket reaches the call; the wait_event stands in for a party the retire pass took out (retire_fields.py)
         who = f"mover {_neutral(_clean(mover, 80))}" if mover else "no agent of this project moves it"
         lines.append(f"- {cx.shown(t['gid'])} · {who}" + (f" · work by {_neutral(_clean(doer, 80))}" if doer and doer != mover else "") + (f" · party {party}" if party else "")
-                     + f" · {_neutral(_clean(t.get('subject'), ITEM_TITLE_CHARS))}")
+                     + f" · {_neutral(_clean(_anc.notice_title(t), ITEM_TITLE_CHARS))}")
     if len(mine) > OPEN_ITEMS_SHOWN:
         lines.append(f"- … and {len(mine) - OPEN_ITEMS_SHOWN} more open items, older, not listed")
     return lines if mine else []

@@ -207,7 +207,7 @@ check("an item wait names the item and whether it is open", 'href="/items/a2"' i
 # ---- 6. the sidebar
 sd1 = side(p1)
 labels = lambda h: [re.sub(r"<[^>]+>", "", x).strip() for x in re.findall(r"<dt>(.*?)</dt>", h)]      # every row's label, tags dropped (Owner and Creator carry a hover span, Anchors a count)
-check("the sidebar's fields in order: mover, creator (no contact), project, then, priority, wake, anchors, then the More details fold with the rest",
+check("the sidebar's fields in order: mover, creator (no contact), project, then, priority, wake, anchors, then the More details fold with the rest (Group is left out: a single-scope instance has nothing to tell one group from another, same rule as the Project row's own label)",
       labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Anchors 1", "Confirmed"], labels(sd1))
 check("then: the session that takes the item after the owner's move, a sidebar row (the line under the title no longer says it)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1 and " then " not in istate(p1), sd1[:600])
 check("priority is a tag, the anchor scoped to the item is listed", '<span class="tag t-p1">P1</span>' in sd1 and "slack.com" in sd1 and '<dt>Anchors <span class="count">1</span></dt>' in sd1)
@@ -251,8 +251,8 @@ h8 = page("a8")
 hist = lambda h: re.findall(r'<li class="ev ev-[a-z]+">.*?</li>', h[h.find('id="history"'):h.find('id="comments"')], re.S)
 lines = [html.unescape(re.sub(r"<[^>]+>", "", x.replace("</div>", "\n"))).strip().split("\n") for x in hist(h8)]
 check("one entry per revision, newest first: a header line with the author and the time, then one bullet per change",
-      len(lines) == 3 and re.fullmatch(r"Oliver · \w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d", lines[0][0]) and lines[0][1:] == ["subject edited (was “[home] history item”)"]
-      and lines[1][0].startswith("home-other · ") and lines[1][1:] == ["priority: p2 → p1"] and lines[2][0].startswith("home-other · ") and lines[2][1:] == ["created as “[home] history item” · On agent · mover home-other · created by home-here"], lines)
+      len(lines) == 3 and re.fullmatch(r"Oliver · \w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d", lines[0][0]) and lines[0][1:] == ["subject edited (was “history item”)"]
+      and lines[1][0].startswith("home-other · ") and lines[1][1:] == ["priority: p2 → p1"] and lines[2][0].startswith("home-other · ") and lines[2][1:] == ["created as “history item” · On agent · mover home-other · created by home-here"], lines)
 h41 = page("a41")
 lines41 = [html.unescape(re.sub(r"<[^>]+>", "", x.replace("</div>", "\n"))).strip().split("\n") for x in hist(h41)]
 check("History writes a mover change as `mover: A → B`, and no line for a change of the stored creator, never `owner:`",
@@ -262,7 +262,7 @@ lines43 = [html.unescape(re.sub(r"<[^>]+>", "", x.replace("</div>", "\n"))).stri
 check("History: a step handed to the next session shows the plain mover change and its own `step hand-over:` line", lines42[0][1:] == ["needs: home-here", "mover: home-other → home-here", "step hand-over: item moved from home-other to home-here"], lines42)
 check("History: a hand-over that could not be made says the session isn't running and who keeps the item (and no mover change)", lines43[0][1:] == ["step hand-over: the next step is home-gone's but that session isn't running; it stays with home-other"], lines43)
 check("History: in the two hand-over fixtures (moved, fallback) the line sits once on the revision that made it and the creation revision has none", [sum(x.startswith("step hand-over:") for x in l) for l in lines42] == [1, 0] and [sum(x.startswith("step hand-over:") for x in l) for l in lines43] == [1, 0], (lines42, lines43))
-check("…the creation line names the mover",  any(l[1:] == ["created as “[home] mover history” · On agent · mover home-other · created by home-here"] for l in lines41), lines41)
+check("…the creation line names the mover",  any(l[1:] == ["created as “mover history” · On agent · mover home-other · created by home-here"] for l in lines41), lines41)
 check("…the author in bold and the time in the board's zone share the header line, as on GitHub",
       all(re.match(r'<li class="ev ev-[a-z]+"><div class="eh"><b>[^<]+</b> · <span class="t">\w{3} \w{3} \d+\w\w(?: \d{4})? \d\d:\d\d</span></div><div class="w"><div class="eb">', x) for x in hist(h8)), hist(h8)[:2])
 check("the count on the History fold is the number of lines", '<h2>History <span class="count">3</span></h2>' in h8, h8[h8.find('id="history"'):][:200])
@@ -313,7 +313,7 @@ p15 = page("a15", answer=BOX)
 check("item data is escaped everywhere: the goal, subject, next, sub step and author carry no live tag",
       "<script>alert" not in p15 and "<script>x<" not in p15 and "<img src=x" not in p15 and "<u>" not in p15 and "<i>sub" not in p15 and "<b>bold" not in p15 and "&lt;script&gt;" in p15 and "&lt;img src=x onerror=alert(1)&gt; &amp; more" in p15
       and "Goal &lt;b&gt;bold&lt;/b&gt; &amp; &lt;script&gt;x&lt;/script&gt;" in p15.split('<div class="ilayout">')[0] and "&lt;i&gt;sub&lt;/i&gt;" in p15, re.findall(r"<h1>.*?</h1>", p15))
-check("…and a revision's author is escaped on the History line", "<b>&lt;u&gt;who&lt;/u&gt;</b> · <span class=\"t\">" in p15 and "created as “[home] &lt;script&gt;" in p15, p15[p15.find('id="history"'):][:400])
+check("…and a revision's author is escaped on the History line", "<b>&lt;u&gt;who&lt;/u&gt;</b> · <span class=\"t\">" in p15 and "created as “&lt;script&gt;" in p15, p15[p15.find('id="history"'):][:400])
 
 cm = itempage.clip_md
 CM = "see [the long link text that is here](https://example.com/some/long/address/that/goes/on) and then `some code here` and **bold words** after"

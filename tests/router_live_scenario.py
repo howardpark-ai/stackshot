@@ -782,10 +782,10 @@ fy_rows = lambda g, kind="closed": [r for r in fy.rows() if r.get("gid") == g an
 out20 = cl(20); settle()
 new13 = routing.read("projects/alpha")[n13:]; c20 = [n for n in new13 if n.get("label") == "close a20"]
 check("close, Oliver's `said` entry on it, owner a front agent, router live: a row on his For you list; nothing is recorded for the router; the owner is pushed its own one line at once, with no owner mark; the reply says both",
-      len(fy_rows("a20")) == 1 and not c20 and [x[1] for x in pushes()[p13:] if x[0] == A or "a20" in x[1] and "closed" in x[1]] == ["[stackshot] a20 [home] item 20: closed by work-osprey-x: done (PR 33 is live) \u2192 https://stackshot.example.com/items/a20"]
+      len(fy_rows("a20")) == 1 and not c20 and [x[1] for x in pushes()[p13:] if x[0] == A or "a20" in x[1] and "closed" in x[1]] == ["[stackshot] a20 work · item 20: closed by work-osprey-x: done (PR 33 is live) \u2192 https://stackshot.example.com/items/a20"]
       and "is a row on his For you list" in out20 and "not a message to" not in out20 and "told at once that it was closed" in out20 and "not told" not in out20, (fy.rows(), c20, pushes()[p13:], out20))
-check("…the row: who closed it, the outcome, the subject, the reason (the item id is shown beside it, not inside), and the link",
-      fy_rows("a20")[0]["what"] == "closed by work-osprey-x (done): [home] item 20 — PR 33 is live" and fy_rows("a20")[0]["url"].endswith("/items/a20") and "\n" not in fy_rows("a20")[0]["what"], fy_rows("a20"))
+check("…the row: who closed it, the outcome, the item's group and its title with no tag, the reason (the item id is shown beside it, not inside), and the link",
+      fy_rows("a20")[0]["what"] == "closed by work-osprey-x (done): work · item 20 — PR 33 is live" and fy_rows("a20")[0]["url"].endswith("/items/a20") and "\n" not in fy_rows("a20")[0]["what"], fy_rows("a20"))
 cw = [x for x in new13]
 for _n in cw: routing.rule(_n["id"], "dropped", by="test")      # the page-update notices of the close: settled by hand, this section is about the owner's
 fake("good", "[]"); calls0 = len(calls()); t13 = live.tick(); p13b = [x for x in pushes()[p13:] if x[0] == "work-osprey-main"]
@@ -812,7 +812,7 @@ cfg(live=False)
 item(28, "projects/alpha", A, said=SAID); item(29, "projects/alpha", A); p13d = len(pushes())
 out28 = cl(28); settle(); to_main28 = [x for x in pushes()[p13d:] if x[0] == A and "a28" in x[1]]       # a notice the server pushes itself names its session by id
 check("[router] live = false is no longer read: the same close is a row too, and the front agent owner is pushed its one line (no owner mark), the same as before",
-      len(to_main28) == 1 and to_main28[0][1].startswith("[stackshot] a28 [home] item 28: closed by work-osprey-x: done (PR 33 is live)") and len(fy_rows("a28")) == 1
+      len(to_main28) == 1 and to_main28[0][1].startswith("[stackshot] a28 work · item 28: closed by work-osprey-x: done (PR 33 is live)") and len(fy_rows("a28")) == 1
       and "is a row on his For you list" in out28 and "not a message to" not in out28 and "told at once that it was closed" in out28, (to_main28, out28, fy.rows()))
 out29 = cl(29); settle()
 check("[router] live = false is no longer read, no words of his: the owner is told by its one marked line, no keeper is told in its place", len([x for x in pushes()[p13d:] if x[0] == A and "a29" in x[1]]) == 1 and "has been told instead" not in out29
@@ -859,7 +859,7 @@ item(70, "projects/alpha", A, then=A, needs=[DC]); p70 = len(pushes()); n70 = le
 held.take(BK); h70 = held.count(BK)
 out70 = hb(70, sender=DC); settle(); d70 = hb_pushes(70, p70, X, BK); t70 = held.take(BK)
 check("hand-back by another background agent (an earlier review): the project's builder is passed the hand-back line for its next turn (held: it asks the builder nothing), not woken by a turn of its own; the line is reworded to say it is back with the front agent and that it is told to the builder, not to the front agent; the owner is told nothing and nothing is recorded for the router",
-      not d70 and h70 == 0 and t70.count("a70 is back with") == 1 and "[stackshot] a70 is back with work-osprey-main, a front agent, alone (handed back by work-osprey-docs): [home] item 70; next: Oliver: Review the PR and merge it \u2192 " in t70
+      not d70 and h70 == 0 and t70.count("a70 is back with") == 1 and "[stackshot] a70 is back with work-osprey-main, a front agent, alone (handed back by work-osprey-docs): work · item 70; next: Oliver: Review the PR and merge it \u2192 " in t70
       and "told to you, not to work-osprey-main" in t70 and "[for Oliver]" not in t70
       and not hb_pushes(70, p70) and not hb_notes(70, n70) and "its builder work-osprey-x is passed a note that it is back with them alone, not them (a note for its next turn, not a wake-up)" in out70, (d70, t70, hb_notes(70, n70), pushes()[p70:], out70[-300:]))
 cfg(live=False)
@@ -887,7 +887,7 @@ check("(c) the last other session leaves needs, the owner alone: the owner is to
 item(68, "projects/alpha", A, mover=A, needs=[X, "work-osprey-docs"]); p68 = len(pushes())
 out68 = _wt_complete.stackshot_complete("a68", outcome="done", reason="finished", description=NEWD, sender=BK); settle(); d68 = [x for x in hb_pushes(68, p68) if x[0] in (A, "work-osprey-main")]
 check("(d) another session closes the item while a second session is still named: the owner's close line still reaches it, unmarked",
-      len(d68) == 1 and d68[0][1].startswith("[stackshot] a68 [home] item 68: closed by work-osprey-x: done (finished) \u2192 ") and "told at once that it was closed" in out68, (pushes()[p68:], out68[-300:]))
+      len(d68) == 1 and d68[0][1].startswith("[stackshot] a68 work · item 68: closed by work-osprey-x: done (finished) \u2192 ") and "told at once that it was closed" in out68, (pushes()[p68:], out68[-300:]))
 item(53, "projects/alpha", A, then=A, needs=[A, X]); p53 = len(pushes()); out53 = hb(53, [A]); settle(); d53 = hb_pushes(53, p53)
 check("the owner named beside the builder, the builder taken out: that leaves the owner alone, and nobody is told, since the builder wrote it", not d53 and "nobody is told" in out53, (d53, out53[-200:]))
 item(54, "projects/alpha", A, then=A, needs=[X]); p54 = len(pushes()); n54 = len(routing.read("projects/alpha")); out54 = hb(54, [A], sender="work-osprey-main"); settle()

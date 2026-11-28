@@ -59,7 +59,6 @@ from stackshot.service import answer_handover as _ah
 from stackshot.service import create as _create_svc
 from stackshot.service import item_read as _item_read
 from stackshot.service import store as _svcstore
-from stackshot.service import terminal_prompt as _tp
 from stackshot.service import update as _update_svc
 from stackshot.service import writes as _writes
 
@@ -272,7 +271,7 @@ def _raise_item(fp: str, entry: dict[str, Any]) -> str:
                     f"Approve on this item, or run `stackshot client keys approve {short}` on the server box; Reject drops the key",
                     "Until you answer, the key is trusted for nothing",
                 ]), max_lines, line_max)
-                subject = _tp._terminal_subject_prefix(str(rec.get("scope") or "")) + f"decide whether to trust the caller key {short}"
+                subject = f"decide whether to trust the caller key {short}"
                 ask = _ask_line(short, str(entry.get("sender", "")))
                 options = [{"label": APPROVE, "line": "Trust this key for its sender label", "recommended": False},
                            {"label": REJECT, "line": "Drop the key; nothing changes", "recommended": True}]

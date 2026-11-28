@@ -121,7 +121,7 @@ def stall_lines(m: dict[str, Any], now: float) -> list[str]:
 
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · parked' if _item_read._is_parked(item) else ''}] {item.get('subject')}"]
+    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · parked' if _item_read._is_parked(item) else ''}] {_anc.notice_title(item)}"]
     if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
         out.extend(_notes._mover_lines(item))
     if item.get("description"):

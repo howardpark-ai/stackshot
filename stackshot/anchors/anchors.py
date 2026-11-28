@@ -468,6 +468,63 @@ def item_scope(meta: Any, reg: dict[str, dict[str, Any]] | None = None, ids: dic
     return _prj.scope_of(k, entry if isinstance(entry, dict) else {}, reg, ids, marks_)
 
 
+def _pending_registry(marks_: dict | None = None) -> dict[str, dict[str, Any]]:
+    """The page registry with with_pending(made=True) applied, the one build session_roles, file_roles, scope_ctx and background_ranked all want. Inside a pass (core/passmemo.py) it is worked out
+    once for the pass, by the same files session_roles reads (the page registry and the project record), and shared by every caller that asks for it in the same pass — so a loop over many items
+    (a stall pass, the for-you rows it writes) does not rebuild it once per item. Outside a pass it is built fresh on every call, as before. `marks_` is `with_made`'s own read of the marks (scope_ctx's,
+    which wants a copy of them itself): None has it read there."""
+    from stackshot.projects import projects as _prj  # noqa: PLC0415
+    build = lambda: _prj.with_pending(registry(), made=True, marks_=marks_)
+    return _pm.once("reg_with_pending", build, _roles_stamp) if _pm.active() else build()
+
+
+def scope_ctx() -> tuple[dict, dict, dict]:
+    """(the page registry as the home page holds it (the record laid over the pages, then the agents only the record holds: with_pending), key -> id, the marks by id) that an item's group is read from, taken once for a read or a view.
+    Reads the same pass-shared registry build (_pending_registry) session_roles reads, so a loop over many items in one pass asks for it once, not per item; the marks are read once here and handed to
+    with_made too, so a read of this costs one id-file parse, not two."""
+    from stackshot.projects import projects as _prj  # noqa: PLC0415
+    try:
+        ids = _prj.ids_by_key()
+    except ValueError:
+        ids = {}                                   # a damaged id file: the registry's own copy of the id answers
+    mk = _prj.marks()
+    return _pending_registry(mk), ids, mk
+
+
+def item_group(it: dict[str, Any], sc: tuple[dict, dict, dict] | None = None) -> str:
+    """An item's group alone, from its project (item_scope); "" for an item with no group to show, and "" on a single-scope instance too (projects.scopes() < 2: there is nothing to tell one
+    group from another, the same rule projects.label_scope and web/ui/render.py's item_group use for their own surfaces). `sc` is scope_ctx(), read once by a caller that lists many items.
+    group_title puts this beside the title; a caller that shows its own line about the item (not the bare title) and still wants the group beside it (a decision row's own decide text) reads
+    this directly. A client row (service/client_reads.py's items/involved/item-facts rows, and the board-hook rows built from them) carries its group ready-made as `scope` and no `metadata`
+    at all (the project is not sent to a hook or a client): read that straight off, rather than falling to item_scope's no-project default, which is a different project's group, not "no group"."""
+    from stackshot.projects import projects as _prj  # noqa: PLC0415
+    if len(_prj.scopes()) < 2:
+        return ""
+    if "metadata" not in it and "scope" in it:
+        return str(it.get("scope") or "")
+    return item_scope(it.get("metadata") or {}, *(sc or scope_ctx()))
+
+
+def group_title(it: dict[str, Any], sc: tuple[dict, dict, dict] | None = None) -> str:
+    """An item's title as a text rendering shows it, `<group> · <title>`: the group once, from the item's project (item_scope), then the stored subject with any leading tag an older title carries
+    hidden (title_label.bare). The one place a text line (get, the brief, the holds list, a project page's notice) puts a group beside a title. `sc` is scope_ctx(), read once by a caller that
+    lists many items."""
+    from stackshot.model import title_label as _tl  # noqa: PLC0415
+    scope = item_group(it, sc)
+    return f"{scope} · {_tl.bare(it.get('subject'))}" if scope else _tl.bare(it.get("subject"))
+
+
+def notice_title(it: dict[str, Any], sc: tuple[dict, dict, dict] | None = None) -> str:
+    """group_title, made safe for a notice: a notice is sent whether or not the registry can be read, so a failure (a damaged page, an id file mid-write) falls back to the bare stored
+    title (title_label.bare), with no group, rather than stop the notice. The one helper every notice and message line reads an item's title through, so a title shown in a notice is
+    never the raw stored subject with its tag still on."""
+    try:
+        return group_title(it, sc)
+    except Exception:  # noqa: BLE001
+        from stackshot.model import title_label as _tl  # noqa: PLC0415
+        return _tl.bare(it.get("subject"))
+
+
 def session_hubs(name: str, reg: dict[str, dict[str, Any]] | None = None, nm: dict[str, str] | None = None) -> list[str]:
     """The hubs a session belongs to: hub_of() of every page that names it as its keeper (`display-name:`, `agent:`) or lists it
     under `agents:`. A session is matched by name or by id (canonical)."""
@@ -618,11 +675,17 @@ def session_roles(reg: dict[str, dict[str, Any]] | None = None, live: set[str] |
     Called with no argument inside a pass (core/passmemo.py) the roles are worked out once for the pass and each caller gets its own copy; the memo is stamped with the files the roles read (the page registry and
     the project record) and the settings that shape them, so a file written in the middle of the pass is read at the next call."""
     if reg is None and live is None and renames is None and _pm.active():
-        got = _pm.once("session_roles", lambda: session_roles(registry()), _roles_stamp)
+        got = _pm.once("session_roles", lambda: _session_roles_body(_pending_registry(), None, None), _roles_stamp)
         return {n: dict(r) for n, r in got.items()}
     from stackshot.projects import projects as _prj
+    reg = _pending_registry() if reg is None else _prj.with_pending(reg, made=True)
+    return _session_roles_body(reg, live, renames)
+
+
+def _session_roles_body(reg: dict[str, dict[str, Any]], live: set[str] | None, renames: dict[str, str] | None) -> dict[str, dict[str, Any]]:
+    """The body of session_roles once `reg` already carries with_pending(made=True); split out so the public function builds that once per pass (_pending_registry) and this never does it again."""
+    from stackshot.projects import projects as _prj
     ren = {str(k).casefold(): v for k, v in (renames or {}).items()}      # old names compare case-folded
-    reg = _prj.with_pending(registry() if reg is None else reg, made=True)
     first = _cfg.page_dirs()[0] + "/"
     best: dict[str, tuple[tuple, str, str]] = {}
     marked: set[str] = set()                            # the agents a page or record marks as a keeper: each carries the flag, though its best role may be on another project (the project stays the best one)

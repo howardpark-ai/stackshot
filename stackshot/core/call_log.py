@@ -32,7 +32,7 @@ Every other tool's call (get, brief, sessions, anchors, rules, route …) is log
 A line written before these fields existed has neither: it reads as a call of unknown size.
 
 A correction (`fixed`) is a pure fact the server can put right without a judgment: a bare item number read as the board id, a wake with seconds or a UTC offset read as the
-instance time, a subject with no scope prefix given the one its project's scope names. The server stores the corrected field, adds one line to the reply saying what it did
+instance time. The server stores the corrected field, adds one line to the reply saying what it did
 (`reply_note`), and counts it here. A mover who disagrees sends the field again as they want it and the server leaves it alone.
 
 Stdlib only; the config is read through config.py at each use."""
@@ -432,7 +432,6 @@ _KINDS: tuple[tuple[str, str], ...] = (
     (r"description contains '", "a changelog word in a description"),
     (r"a line of next is \d+ characters", "a line of next over its limit"),
     (r"the subject is \d+ characters", "a subject over its limit"),
-    (r"subject must start with", "a subject without a scope prefix"),
     (r"ask must read|needs an ask line", "an ask in the wrong form"),
     (r"puts two questions in its Decide part|has a (?:Decide|Recommend) part split by|has more than one Decide or Recommend part|asks several decisions in one", "an ask with a second question in its Decide part"),
     (r"carries no link to it|links a mockup .* but not in its ask", "an ask that approves a design or plan with no link in the ask"),

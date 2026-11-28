@@ -1000,12 +1000,12 @@ check("board: mode off: no call, no question", rc == 0 and not CALLS and err == 
 rc, err = bstop(A, transcript("ship it", COMMIT))
 check("board: the items read and the asks a message named, once each, keyed by the session", CALLS == [("items", A), ("asks-named", A)], CALLS)
 check("board: an untouched owned item is asked about, by id, subject and next", rc == 2 and err.startswith("BOARD: this turn did real work (a commit) while you are the mover or the `then` of open items it did not touch: ")
-      and 's5 "[home] item 5" (you are still its mover; next: step one of s5)' in err and "PROJECT PAGE" not in err, (rc, err[:400]))
-check("board: an owner stored by name is the same session", 's6 "[home] item 6"' in err, err[:400])
+      and 's5 "work · item 5" (you are still its mover; next: step one of s5)' in err and "PROJECT PAGE" not in err, (rc, err[:400]))
+check("board: an owner stored by name is the same session", 's6 "work · item 6"' in err, err[:400])
 check("board: no held, completed or other session's item", all(f"s{n} " not in err for n in (7, 8, 9)), err[:400])
 check("board: the question is the agreed text (its own text; no hint line to store a state follows it)", err.strip() == (
-      'BOARD: this turn did real work (a commit) while you are the mover or the `then` of open items it did not touch: s5 "[home] item 5" (you are still its mover; next: step one of s5); '
-      's6 "[home] item 6" (you are still its mover; next: step one of s6). Does anything from it change them? If yes, update them now (update: description, next, needs, due; '
+      'BOARD: this turn did real work (a commit) while you are the mover or the `then` of open items it did not touch: s5 "work · item 5" (you are still its mover; next: step one of s5); '
+      's6 "work · item 6" (you are still its mover; next: step one of s6). Does anything from it change them? If yes, update them now (update: description, next, needs, due; '
       "or confirm(<id>) when an item is still true as it stands). If no, say so in one line. (Next time say it in the reply itself and this question "
       "is not asked: a line `Board: no change, <reason>` for all of them, or a `Board:` line followed by one bullet per item, each on "
       "its own line, `- board#N: no change, <reason>` (in another language the instance has configured, the same lines with its own words); "
@@ -1029,10 +1029,10 @@ rc, err = bstop(A, tpn, mode="note"); check("note: the board question does not h
 check("note: …and is logged as a note", blog("note") and blog("note")[-1]["items"] == ["s5", "s6"], blog("note")[-1:])
 out = nnag(A)
 check("note: no early question was asked that turn: the next prompt says the full question, as before", out.count("[board] About your last turn: BOARD: this turn did real work (a commit)") == 1
-      and "Does anything from it change them" in out and 's5 "[home] item 5"' in out and "unanswered last turn" not in out, out[:300])
+      and "Does anything from it change them" in out and 's5 "work · item 5"' in out and "unanswered last turn" not in out, out[:300])
 check("note: …once", "[board]" not in nnag(A), "said twice")
 fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT)), mode="note")
-out = nnag(A); check("note: the early question was asked that turn: the next prompt says it in one line", out.strip() == '[board] Board question unanswered last turn: s5 "[home] item 5", s6 "[home] item 6". Answer it in the reply.', out[:300])
+out = nnag(A); check("note: the early question was asked that turn: the next prompt says it in one line", out.strip() == '[board] Board question unanswered last turn: s5 "work · item 5", s6 "work · item 6". Answer it in the reply.', out[:300])
 check("note: …and does not repeat the full question", "BOARD: this turn did real work" not in out and "Does anything from it change them" not in out and len(out) < 200, len(out))
 fresh(); rc, err = bstop(A, early_marked(transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, ok")), mode="note")
 out = nnag(A); check("note: the one line keeps the rejected-lines text", out.strip().endswith("Answer it in the reply. Not accepted from your reply: «Board: no change, ok» (the reason is under three words)."), out[-300:])
@@ -1050,7 +1050,7 @@ rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\n\nBoard: no change, t
 check("board: `Board: no change, <three words>` covers every item and is logged", rc == 0 and blog("verdict")[-1]["items"] == ["s5", "s6"]
       and "unrelated to them" in blog("verdict")[-1]["note"], (rc, err[:200]))
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard s5: no change, the commit was elsewhere"))
-check("board: `Board s5: …` covers one of two; the question names only the other", rc == 2 and 's6 "[home] item 6"' in err and "s5 " not in err, err[:300])
+check("board: `Board s5: …` covers one of two; the question names only the other", rc == 2 and 's6 "work · item 6"' in err and "s5 " not in err, err[:300])
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\n- **Board `S5`:** no change — the commit was elsewhere\nBoard s6: no change, nothing in it moved"))
 check("board: one line per item, a list marker, bold and a backticked id are fine", rc == 0, err[:300])
 rc, err = bstop(A, transcript("ship it", COMMIT, "プッシュしました。\nボード: 変更なし, このコミットは 全く 無関係です"))
@@ -1089,10 +1089,10 @@ check("bullets: the Japanese `ボード:` header with bullets passes", rc == 0, 
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard s5: no change, the commit was elsewhere\n\nBoard:\n- s6: no change, nothing in it moved"))
 check("bullets: a one-line `Board s5: …` and a bullet block in one reply both count", rc == 0 and blog("verdict")[-1]["items"] == ["s5", "s6"], (rc, err[:300]))
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard:\n- s5: no change, the commit was elsewhere\n- s6: no change, ok"))
-check("bullets: a bullet with a short reason is refused for its item only, quoted with why", rc == 2 and 's6 "[home] item 6"' in err and "s5 " not in err
+check("bullets: a bullet with a short reason is refused for its item only, quoted with why", rc == 2 and 's6 "work · item 6"' in err and "s5 " not in err
       and err.rstrip().endswith("Not accepted from your reply: «- s6: no change, ok» (the reason is under three words)."), err[-400:])
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard:\n- s5: no change, the commit was elsewhere\nThat is all for now.\n- s6: no change, nothing in it moved"))
-check("bullets: the block ends at the first line that is neither a bullet nor blank", rc == 2 and 's6 "[home] item 6"' in err and "s5 " not in err, err[:300])
+check("bullets: the block ends at the first line that is neither a bullet nor blank", rc == 2 and 's6 "work · item 6"' in err and "s5 " not in err, err[:300])
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard:   \n\nNothing else."))
 check("bullets: a bare `Board:` with no bullets covers nothing and is not quoted as a refused line", rc == 2 and "s5 " in err and "s6 " in err and "Not accepted" not in err, err[-300:])
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard:\n- s5: no change, the commit was elsewhere\n- s6, s8: no change, nothing in them moved"))
@@ -1117,12 +1117,12 @@ def gl_items(*rows):
 fresh(); gl_items(("g12", A), ("l3", A), ("g13", B))
 rc, err = bstop(A, transcript("ship it", COMMIT))
 check("the question names an issue-numbered item board#<a> and a temporary one as shown, never the store id",
-      rc == 2 and 'board#12 "[home] item g12" (you are still its mover; next: step one of g12)' in err and f'{TMP}#3 "[home] item l3"' in err and "g12 " not in err and "l3 " not in err
-      and 's5 "[home] item 5"' in err and "board#13" not in err, err[:700])
+      rc == 2 and 'board#12 "work · item g12" (you are still its mover; next: step one of g12)' in err and f'{TMP}#3 "work · item l3"' in err and "g12 " not in err and "l3 " not in err
+      and 's5 "work · item 5"' in err and "board#13" not in err, err[:700])
 check("…the block log keeps the store ids", blog("block")[-1]["items"] == ["g12", "l3", "s5", "s6"], blog("block")[-1:])
 rc, err = bstop(A, transcript("ship it", COMMIT, f"Pushed.\nBoard board#12: no change, the commit was elsewhere\nBoard {TMP}#3: no change, nothing in it moved"))
 check("`Board board#<a>: …` and `Board board-tmp-<machine>#3: …` are accepted and cover those items only", rc == 2 and "board#12 " not in err and f"{TMP}#3 " not in err
-      and 's5 "[home] item 5"' in err and "Not accepted" not in err, err[:500])
+      and 's5 "work · item 5"' in err and "Not accepted" not in err, err[:500])
 rc, err = bstop(A, transcript("ship it", COMMIT, f"Pushed.\nBoard #12, `{TMP}-3`, s5 and [board#5](https://x/items/5): no change, the commit was elsewhere\nBoard S6: no change, nothing in it moved"))
 check("#12, board-tmp-<machine>-3, a store id and a linked id in one line pass, normalized to the store ids", rc == 0 and blog("verdict")[-1]["items"] == ["g12", "l3", "s5", "s6"], (rc, err[:400], blog("verdict")[-1:]))
 rc, err = bstop(A, transcript("ship it", COMMIT, "Pushed.\nBoard g12, l3, s5, s6: no change, the commit was elsewhere"))
@@ -1157,8 +1157,8 @@ rc, err = bstop(S, transcript("ship it", COMMIT)); check("board: a session that 
 items((11, A, {"meta": {"needs": ["work-osprey"]}}), (12, A, {}))
 rc, err = bstop(S, transcript("ship it", COMMIT))
 check("board: an item whose needs names this session is asked about, marked so; the default keeper's is not", rc == 2
-      and 's11 "[home] item 11" (next: step one of s11; it names you in its needs: close it when your step completes it, or hand it on: set mover= to whoever takes it next)' in err and "s12 " not in err, err[:600])
-rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: …its owner is asked as before, without the mark", rc == 2 and 's11 "[home] item 11" (you are still its mover; next: step one of s11)' in err, err[:600])
+      and 's11 "work · item 11" (next: step one of s11; it names you in its needs: close it when your step completes it, or hand it on: set mover= to whoever takes it next)' in err and "s12 " not in err, err[:600])
+rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: …its owner is asked as before, without the mark", rc == 2 and 's11 "work · item 11" (you are still its mover; next: step one of s11)' in err, err[:600])
 rc, err = bstop(S, transcript("ship it", COMMIT, "Done.\nBoard s11: no change, my step has not run yet")); check("board: …and the agent's verdict line settles it", rc == 0, err[:300])
 # the item: a Board line about an
 # item the session neither owns nor is the linked agent of, or one already closed, gets a note at the next prompt, never a block
@@ -1202,7 +1202,7 @@ items((10, S, {}))
 (T / "touch" / f"{S}.json").write_text(json.dumps({"touches": {"projects/beta": {"ts": int(time.time()) + 1000, "task": "s9"}}}))
 rc, err = bstop(S, transcript("ship it", COMMIT))
 check("board: with a page debt, the Stop line is the board question alone, no page part", rc == 2 and err.startswith("BOARD: this turn did real work (a commit)")
-      and 's10 "[home] item 10"' in err and "PROJECT PAGE" not in err and "board item s9" not in err and err.split("\nItems with no stored state:")[0].count("\n") <= 1, err[:400])
+      and 's10 "work · item 10"' in err and "PROJECT PAGE" not in err and "board item s9" not in err and err.split("\nItems with no stored state:")[0].count("\n") <= 1, err[:400])
 check("board: …the page debt stays for nag to say", "projects/beta" in (p.load_state(S).get("touches") or {}) and "[project-page] board item s9 changed" in nnag(S), p.load_state(S))
 rc, err = bstop(S, transcript(NOTICE, TL + COMMIT))
 check("board: a keeper's page write beside the work: the board question, no page question", rc == 2 and err.startswith("BOARD: this turn did real work (gbrain add_timeline_entry, a commit)")
@@ -1226,7 +1226,7 @@ fresh(); p.save_state(A, {}); p.save_state(S, {})
 tpa = transcript("ship it", [(ST + "update", {"item_id": "s5", "next": "x"})])
 rc, q = touch(A, tpa, {"item_id": "s5", "next": "go on"})
 check("early: the first board write of a turn gets the board question as context, in the reply's own words",
-      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and 's6 "[home] item 6"' in q
+      rc == 0 and q.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and 's6 "work · item 6"' in q
       and "Page" not in q and "page" not in q
       and "`Board: no change, <reason>`" in q and "s7 " not in q and "s8 " not in q, q)
 check("early (quiet retired, Thu Oct 15th 2026): the question no longer advertises a [quiet] reply", "quiet" not in q.lower(), q)
@@ -1257,7 +1257,7 @@ for prompt, tool, inp in (("ship", "SendMessage", {"to": "x", "message": "hi"}),
     p.save_state(A, {}); time.sleep(1.05)
     q = otouch(A, transcript(prompt, []), tool, inp)
     nm = tool.rsplit("__", 1)[-1] + (" " + inp["command"][:30] if tool == "Bash" else "")
-    check(f"early: {nm} is asked too", q.startswith("[stackshot]") and 's6 "[home] item 6"' in q, q)
+    check(f"early: {nm} is asked too", q.startswith("[stackshot]") and 's6 "work · item 6"' in q, q)
     check(f"early: {nm} owes no page itself", not (p.load_state(A).get("touches") or {}), p.load_state(A))
 for prompt, tool, inp in (("ship", ST + "anchors", {"project": "projects/alpha"}), ("ship", ST + "route", {"notice": "abc123"}),
                           ("ship", GB + "put_page", {}), ("ship", GB + "add_timeline_entry", {}),
@@ -1276,7 +1276,7 @@ p.save_state(A, {})
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "priority": "p1"}); check("early: a filing edit is not a state change and asks nothing", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, resp="Refused: something"); check("early: a refused write asks nothing", q == "", q)
 rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="off"); check("early: the board check off: nothing asked", q == "", q)
-rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="note"); check("early: note mode asks the same, early", 's6 "[home] item 6"' in q, q)
+rc, q = touch(A, transcript("ship", []), {"item_id": "s5", "next": "x"}, bm="note"); check("early: note mode asks the same, early", 's6 "work · item 6"' in q, q)
 # a call made inside a subagent carries agent_id in its hook input: it asks nothing and keeps no early mark
 def atouch(sid, tp, tool, inp, resp):
     pl = {"session_id": sid, "transcript_path": tp, "tool_name": tool, "tool_input": inp, "tool_response": resp, "agent_id": "ag1", "agent_type": "general-purpose"}
@@ -1346,7 +1346,7 @@ p.save_state(A, {}); fresh()
 p.save_state(S, {}); items((10, S, {}))
 rc, q = touch(S, transcript("keeper ships", []), {"item_id": "s10", "next": "x"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha")
 check("early: a keeper gets the board question only: no Page line, no pages it keeps, no page owed", q.startswith("[stackshot] Board question")
-      and 's10 "[home] item 10"' in q and "Page" not in q and "Pages you keep" not in q and "owe `projects/alpha`" not in q, q)
+      and 's10 "work · item 10"' in q and "Page" not in q and "Pages you keep" not in q and "owe `projects/alpha`" not in q, q)
 check("early: the touch still records the page debt and the item id from a linked reply", (p.load_state(S).get("touches") or {}).get("projects/alpha", {}).get("task") == "s10", p.load_state(S))
 rc, q = touch(S, transcript("keeper ships again", []), {"item_id": "s10", "next": "y"}, resp="updated [s10](https://x/items/s10).\nproject: projects/alpha", bm="off")
 check("early: with the board check off a keeper's write asks nothing at all, and still owes its page", q == "" and "projects/alpha" in (p.load_state(S).get("touches") or {}), (q, p.load_state(S)))
@@ -1389,7 +1389,7 @@ def tell(text=SAY, to=A, ago=40, outcome="delivered"): logged((to, text, ago, ou
 asks_fixture(); tell()
 check("asks: named in a message to the session: the ask it wrote and the ask on the item it takes after, no other", named() == ["s50", "s51"], named())
 st_, _, body_ = client_reads_svc._client_get("asks-named", {"key": A, "since": str(time.time() - 60)})
-check("asks: …each row with its id as shown, its subject and its ask", json.loads(body_)["items"][0] == {"gid": "s50", "shown": "s50", "subject": "[home] item 50", "ask": "Decide: pick the blue one"}, body_)
+check("asks: …each row with its id as shown, its subject and its ask", json.loads(body_)["items"][0] == {"gid": "s50", "shown": "s50", "subject": "[home] item 50", "scope": "work", "ask": "Decide: pick the blue one"}, body_)
 check("asks: the session is matched by its name too", named("work-osprey") == [] and (tell(to="work-osprey"), asks_fixture(s50=asked_item("work-osprey", B), s51=asked_item(B, B)), named(S))[2] == ["s50"], named(S))
 asks_fixture(); logged(); check("asks: no message: nothing", named() == [], named())
 logged((A, SAY, 200, "delivered")); check("asks: a message delivered before the turn began: nothing", named() == [], named())
@@ -1442,7 +1442,7 @@ _rf = next((_held_t.dir_() / "reached").glob("*.jsonl")); os.utime(_rf, (OLD - _
 with _held_t._locked(): _held_t._sweep(time.time())
 check("asks: …and the sweep removes a session's record that has not been written for that long", not _rf.exists(), _rf)
 # the hook: the end-of-turn question, early and at Stop
-ASKED = lambda g: (f'\n{g} "[home] item {g[1:]}" (ask: Decide: pick the blue one): still on {OWNER}\'s move: withdraw it now (update with clear_ask) if it can no longer be answered as written, '
+ASKED = lambda g: (f'\n{g} "work \u00b7 item {g[1:]}" (ask: Decide: pick the blue one): still on {OWNER}\'s move: withdraw it now (update with clear_ask) if it can no longer be answered as written, '
                    f'else answer `- {g}: ask stands, <reason>` in the Board block.')
 HOW = "\nThe Board block is a `Board:` line, then one bullet per item on its own line; the reason is at least three words."
 def turn(final="done"): return transcript("ship it", COMMIT, final)
@@ -1451,7 +1451,7 @@ def early(tp=None):
 NOWISH = {"updated": time.time() + 600}
 asks_fixture(); logged(); base_early = early(); base_rc, base_err = bstop(A, turn())
 check("asks: with no naming message the question is as before", base_early.startswith("[stackshot] Board question (once per turn). Items untouched this turn: ") and "ask stands" not in base_early + base_err
-      and base_rc == 2 and 's51 "[home] item 51"' in base_err, (base_early, base_err))
+      and base_rc == 2 and 's51 "work \u00b7 item 51"' in base_err, (base_early, base_err))
 tell("s50 and s51: the plan changed"); q_ = early()
 check("asks: the early question lists each on its own line with its ask, and leaves it out of the untouched list", q_.endswith(ASKED("s50") + ASKED("s51")) and "s51 " not in q_.split("\n")[0] and "s5 " in q_.split("\n")[0], q_)
 rc, err = bstop(A, turn())
@@ -1469,7 +1469,7 @@ check("asks: …logged as a note", blog("note")[-1]["items"] == ["s50", "s51"], 
 p.save_state(A, {}); rc, err = bstop(A, turn(), mode="note"); out = nnag(A)
 check("asks: …without an early question the note is the full one", rc == 0 and "[board] About your last turn: BOARD: this turn did real work (a commit)." + ASKED("s50") + ASKED("s51") + HOW in out and "did not touch" not in out, out)
 asks_fixture(); tpn = turn(); ts_ = p.turn_activity(tpn)["start"]; p.save_state(A, {"early": ts_, "early_asked": ts_}); bstop(A, tpn, mode="note"); out = nnag(A)
-check("asks: the one-line note names the untouched items once and the asked ones on their own", 'unanswered last turn: s5 "[home] item 5", s53 "[home] item 53", s54 "[home] item 54". Answer it in the reply.' + ASKED("s50") + ASKED("s51") in out, out)
+check("asks: the one-line note names the untouched items once and the asked ones on their own", 'unanswered last turn: s5 "work \u00b7 item 5", s53 "work \u00b7 item 53", s54 "work \u00b7 item 54". Answer it in the reply.' + ASKED("s50") + ASKED("s51") in out, out)
 def answered(final):
     all_touched(); p.save_state(A, {}); CALLS.clear(); rc, err = bstop(A, turn("Done.\n" + final), mode="note"); return rc, nnag(A)
 rc, out = answered("Board:\n- s50: ask stands, the choice is still open\n- s51: ask stands, nothing in it moved")

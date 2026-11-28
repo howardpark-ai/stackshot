@@ -1025,7 +1025,8 @@ def early_question(payload):
     if not due and not asked:
         if room < 3.0 and hook_left() < 0.5: early_undone(sid)      # the asks read had less than its time and used it up (or was not made): the next write asks
         return ""
-    listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
+    from stackshot.anchors import anchors as _anc   # the group+bare title a notice names an item by, not its raw stored subject
+    listed = ", ".join(f'{item_shown(it)} "{_anc.notice_title(it)}"' + (f" ({r})" if (r := role_note(it)) else "") for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
     before = early_listed(sid, prompt) if prompt else {}      # asked again in the same turn (after a skill load): the first list still counts
     st = load_state(sid); st["early_asked"] = start or int(time.time())  # read again: the server calls above may have taken seconds, and a parallel hook (a board write's page debt) saved state meanwhile     # the question went out this turn (`early` only guards once per turn, and is set when nothing was asked too): the Stop note may then be one line
     if asked: st["early_ids"] = {"turn": prompt, "items": {**before, **{a["gid"]: item_shown(a) for a in asked}}}
@@ -1813,9 +1814,10 @@ def asked_lines(asked, alone=False):
     """The board question's part for the rows of named_asks, one line per item ("" for none). `alone`: no untouched item is listed before it, so the Board block's form is said here."""
     out = ""
     for a in asked[:BOARD_LIST]:
+        from stackshot.anchors import anchors as _anc   # the group+bare title a notice names an item by, not its raw stored subject
         sh = item_shown(a); ask = _display_safe(" ".join(str(a.get("ask") or "").split()))
         if len(ask) > 200: ask = ask[:199].rstrip() + "…"
-        out += (f'\n{sh} "{a.get("subject") or ""}" (ask: {ask}): still on {_cfg.owner()}\'s move: withdraw it now (update with clear_ask) if it can no longer be '
+        out += (f'\n{sh} "{_anc.notice_title(a)}" (ask: {ask}): still on {_cfg.owner()}\'s move: withdraw it now (update with clear_ask) if it can no longer be '
                 f"answered as written, else answer `- {sh}: ask stands, <reason>` in the Board block.")
     if len(asked) > BOARD_LIST: out += f"\n… and {len(asked) - BOARD_LIST} more with an open ask, to answer the same way: " + ", ".join(item_shown(a) for a in asked[BOARD_LIST:]) + "."
     if out and alone: out += "\nThe Board block is a `Board:` line, then one bullet per item on its own line; the reason is at least three words."
@@ -1902,10 +1904,11 @@ def board_foreign(sid, final, act):
 def board_ask(why, due, asked=()):
     """The Stop hook's board question: the items the working turn left untouched, at most BOARD_LIST named, then the items listed for their open ask (asked_lines)."""
     def one(it):
+        from stackshot.anchors import anchors as _anc                      # the group+bare title a notice names an item by, not its raw stored subject
         nxt = next((ln.strip() for ln in str(it.get("next") or "").splitlines() if ln.strip()), "") or "none"
         if len(nxt) > 200: nxt = nxt[:199].rstrip() + "…"
         rn = role_note(it, ("needs",) if it.get("role") == "agent" else ())      # an item that names the session in its needs says so in its own words below
-        return f'{item_shown(it)} "{it.get("subject") or ""}" ({rn + "; " if rn else ""}next: {nxt}' + ("; it names you in its needs: close it when your step completes it, "
+        return f'{item_shown(it)} "{_anc.notice_title(it)}" ({rn + "; " if rn else ""}next: {nxt}' + ("; it names you in its needs: close it when your step completes it, "
                                                                        "or hand it on: set mover= to whoever takes it next" if it.get("role") == "agent" else "") + ")"
     named = {a["gid"] for a in asked}; due = [it for it in due if it["gid"] not in named]
     if not due: return f"BOARD: this turn did real work ({', '.join(why)})." + asked_lines(asked, alone=True)
@@ -1921,7 +1924,8 @@ def board_unanswered(due, asked=()):
     """The note kept for the next prompt: the question the session did not answer in its last turn's reply, in one line (the full question
     was asked when the turn first wrote, and again in block mode)."""
     named = {a["gid"] for a in asked}; due = [it for it in due if it["gid"] not in named]
-    listed = ", ".join(f'{item_shown(it)} "{it.get("subject") or ""}"' for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
+    from stackshot.anchors import anchors as _anc   # the group+bare title a notice names an item by, not its raw stored subject
+    listed = ", ".join(f'{item_shown(it)} "{_anc.notice_title(it)}"' for it in due[:BOARD_LIST]) + (f", and {len(due) - BOARD_LIST} more" if len(due) > BOARD_LIST else "")
     head = f"Board question unanswered last turn: {listed}. Answer it in the reply." if due else "Board question unanswered last turn."
     return head + asked_lines(asked)
 

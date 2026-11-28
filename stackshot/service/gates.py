@@ -10,7 +10,7 @@ lookups, the effective state, the wake parser, the anchors scoped to an item) an
 runs, so a suite that replaces one there still reaches the gate; a suite that replaces a gate patches it here, on its owner.
 
 The rules of an item's fields and of an ask's options are model/'s (`field_gates.py`, `decision_gates.py`), called on those modules. The metadata gate looks a project's page up in the registry and may rebuild it, so it
-is here (`gate_metadata`) with the registry readers it uses (`registry_hits`, `registry_hit`, `registry_text`) and the scope prefix a project's record gives a subject (`project_subject_prefix`).
+is here (`gate_metadata`) with the registry readers it uses (`registry_hits`, `registry_hit`, `registry_text`).
 
 Imports point down only: this module imports the domain and core and the store's readers beside it (service/store.py), never web/ and never audit/."""
 from __future__ import annotations
@@ -2032,21 +2032,6 @@ def registry_hit(name: str, value: str) -> tuple[str | None, dict[str, Any]]:
     hits = registry_hits(name, value)
     return (hits[0], _registry(name)[hits[0]]) if hits else (None, {})
 
-
-
-def project_subject_prefix(project: str) -> str:
-    """The scope prefix a subject for `project` takes: "[<scope>] " of the project's scope when the instance has that prefix, else [subject] fallback_prefix when it is one of the prefixes;
-    "" when the project does not name one record, the record has no scope, or neither applies (the subject is then refused for its missing prefix, as before)."""
-    try:
-        recs = _prj.refs(project, _registry("projects"))
-    except Exception:  # noqa: BLE001 — a project record that cannot be read: the gate refuses the subject as it always did
-        return ""
-    if len(recs) != 1:
-        return ""
-    prefixes = list(_cfg.CFG["subject"]["prefixes"])
-    fallback = str(_cfg.get("subject", "fallback_prefix") or "")
-    scope = str(recs[0].get("scope") or "")
-    return next((p for p in (f"[{scope}] " if scope else "", fallback) if p and p in prefixes), "")
 
 
 def gate_metadata(meta: dict[str, Any], *, creating: bool) -> None:

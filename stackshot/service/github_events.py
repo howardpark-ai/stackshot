@@ -12,6 +12,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import instance as _inst
 from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
@@ -38,7 +39,7 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
         print(f"owner: {old} is now {new}; its mover {_sr._session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
         return
     _telling.tell_woken(new, _hooks().session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
-                f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_inst.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
+                f"{_gh.shown(old)} still names it): {_anc.notice_title(item)} → {_inst.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
 
 
 def _github_comment(gid: str, c: dict[str, Any]) -> bool:

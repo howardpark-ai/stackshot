@@ -203,8 +203,8 @@ def build(
         icons=[_Icon(src=_ICON, mime_type="image/svg+xml")],
         instructions=(
             f"{NAME} — {OWNER}'s task board (web UI: {_inst.BOARD_URL}). Items are HUMAN-LEVEL: a deliverable a session owns, a decision or "
-            f"input {OWNER} must give, a blocker on someone outside, a handoff — never a working step. Subject starts with "
-            f"{_cfg.CFG['subject']['prefixes']}. Description = the item's background: what the item is + where it lives + what done means, as short `- ` bullets (one fact each, at most "
+            f"input {OWNER} must give, a blocker on someone outside, a handoff — never a working step. Subject = the finished outcome, with no tag (the group comes from the item's project). "
+            f"Description = the item's background: what the item is + where it lives + what done means, as short `- ` bullets (one fact each, at most "
             f"{_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters; parallel bullets under one parent, indented two spaces; the server refuses prose), live state only, never steps or commands for {OWNER} (those go in step). metadata.project = the item's gbrain page, projects/<slug> or infra/<slug> for a machine/service item (required; a bare slug is accepted and stored as the full key). sender = your "
             f"own session (cse_… id or name) on a create, an update, a confirm and a complete: the server records it as the item's creator ('created by' in History). mover = who moves it now (with none, the project's builder, else its -main agent) (the item model, docs/design). metadata.needs = decision | external. due = YYYY-MM-DD {_cfg.get('instance', 'timezone')}, only from a real deadline. next = {_NEXT_WORDS} "
             f"An update replaces only your own lines of next, and a line of yours it leaves out stays open unless marked done or dropped (clear_next=true wipes all). Ids read board#<n> for a new item (its GitHub issue number), {_gh.local_prefix()}#<n> for one created while "

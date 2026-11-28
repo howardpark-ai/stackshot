@@ -1,6 +1,6 @@
 """question.py: `client.py post question`, a script's question for the owner as a needs=decision item.
 
-`_question` files one open item on a project for the owner, under the project's front agent, written by a script on a machine; it goes through the create tool's own code (service/create.py), so the subject prefix,
+`_question` files one open item on a project for the owner, under the project's front agent, written by a script on a machine; it goes through the create tool's own code (service/create.py), so the subject's length,
 the ask's form, the options, the page-debt rules and the GitHub mirror all apply. `_question_text` turns the script's text into the item's `- ` bullets. `_QUESTION_LOCK` makes the look in the request map and the write
 one step. The write sets the QUESTION flag of service/writes.py for its duration (the guard on alarming words does not judge a script's text), and the terminal prompt and the job gap use the same flag.
 
@@ -14,7 +14,6 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
@@ -62,7 +61,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py post question --project P --ask "…" --subject "…" --request-id T [--option "label=line" …] [--recommended label] [--sender label]`
     (the question text on stdin): file an open needs=decision item on project P for the owner, filed under the project's front agent (its
     -main agent first, as the create tool's owner refusals name them), written by a script on `machine` named `sender`. It goes
-    through create_item (service/create.py), the create tool's own code: the subject prefix, the ask's form, the options (2 to 6, exactly one recommended),
+    through create_item (service/create.py), the create tool's own code: the subject's length, the ask's form, the options (2 to 6, exactly one recommended),
     the one-decision gate, the project page, the page-debt rules (charged to the page's keeper only) and the GitHub mirror all apply, and a refusal is
     the tool's text (400). A project that lists no front agent is filed under the configured one front (anchors.sole_front), and refused (409) when none is configured. The subject and the request_id are required: there is no
     default prefix, and every filing is safe to repeat. The call is idempotent per (machine, sender, request_id): the same triple again
@@ -76,9 +75,8 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         return 400, {"error": "project, ask and text are required: the project, the ask line (Decide: \u2026 \u00b7 Recommend: \u2026 \u00b7 Stakes: \u2026 \u00b7 By: \u2026) and the question's text"}
     if options is not None and not isinstance(options, list):
         return 400, {"error": "options is a list of {label, line, recommended}"}
-    if not subject:        # no default prefix: a question filed under another scope's prefix would land in the wrong place on the board
-        return 400, {"error": "subject is required (--subject): the item's subject, which must start with one of the instance's subject prefixes "
-                              + " or ".join(f"{p!r}" for p in _cfg.CFG["subject"]["prefixes"]) + ", then the action and its object"}
+    if not subject:
+        return 400, {"error": "subject is required (--subject): the item's subject, the action and its object (no tag is needed: the project gives the group)"}
     if not rid:
         return 400, {"error": "request_id is required (--request-id): a token of the script's own, the same each time one question is filed again, so a retry files nothing twice"}
     if len(rid) > 120 or any(ord(c) < 32 or ord(c) == 127 for c in rid):

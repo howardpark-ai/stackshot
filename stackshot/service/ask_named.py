@@ -67,7 +67,11 @@ def _named(key: str, start: float) -> list[dict[str, Any]]:
             continue
         if not (me(str(rec.get("by") or "")) or me(_telling.holder(item))):
             continue
-        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(item.get("subject") or ""), "ask": ask})
+        try:
+            group = _anc.item_group(item)      # the row's group ready-made as `scope`, as a client row carries it (it has no project to read it from)
+        except Exception:  # noqa: BLE001  — a group that cannot be read leaves the title bare, never the item out
+            group = ""
+        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(item.get("subject") or ""), "scope": group, "ask": ask})
         if len(out) >= ITEMS_MAX:
             break
     return out

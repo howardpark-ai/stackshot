@@ -647,9 +647,13 @@ def agent_gap(key: str, entry: dict, reg: dict) -> dict | None:
 
 
 def marks() -> dict:
-    """The marks by project id ({} when there are none, or when the id file is damaged: a read goes on without them)."""
-    try: return _read()["marks"]
-    except ValueError: return {}
+    """The marks by project id ({} when there are none, or when the id file is damaged: a read goes on without them). Kept under the id file's stamp (core/filecache.derived), so a
+    caller that asks twice without the file changing in between (with_made's own read of them, among others) costs one open and parse, not two; a write of the file (set_mark) is
+    read at once, never the kept copy (the file's stamp moves)."""
+    def build() -> dict:
+        try: return _read()["marks"]
+        except ValueError: return {}
+    return _fc.derived("projects_marks", [record_path()], None, build)
 
 
 def set_mark(pid: str, **fields) -> dict:
@@ -662,12 +666,12 @@ def set_mark(pid: str, **fields) -> dict:
         _write(d); return dict(m)
 
 
-def with_made(reg: dict) -> dict:
+def with_made(reg: dict, marks_: dict | None = None) -> dict:
     """The registry plus an entry for each project made through `post project` whose page the registry does not hold yet (the pages checkout
     reads the new page a little after gbrain wrote it): the same fields a registry entry has, from the mark. Once the page is in the registry
-    its own entry is the one read. `reg` itself is not changed."""
+    its own entry is the one read. `reg` itself is not changed. `marks_` is `marks()`, read once by a caller (scope_ctx) that wants it too: None reads it here."""
     out = reg
-    for pid, m in marks().items():
+    for pid, m in (marks() if marks_ is None else marks_).items():
         made = m.get("made")
         if not isinstance(made, dict): continue
         key = id_to_key(pid, reg)
@@ -978,18 +982,19 @@ def restore_pending(entries) -> int:
     return n
 
 
-def with_pending(reg: dict, made: bool = False) -> dict:
+def with_pending(reg: dict, made: bool = False, marks_: dict | None = None) -> dict:
     """The page registry plus the agents only the record holds (their page line still owed), for the readers that take agents from the registry
     (anchors.session_roles / file_roles, the board's project table). An agent made through sala's New session form showed
     under Unregistered and nowhere on the board, because those readers saw page-listed agents only. Each such name joins its page's `agents`
     (name → mandate_line) and, when it is not front, `back_agents`; `owed_agents` (name → role) lists them, so a reader can tell them from the
     page's. The page wins: a name the page lists is left as it is. A retired project (its `status`) gains nothing. A project made through
     `post project` whose page the registry has not read yet (with_made) joins the result when `made` and it has an owed agent (roles: its agents
-    are registered at once), else it is skipped (the board has no row without a page). `reg` itself is not changed. It never raises: callers
+    are registered at once), else it is skipped (the board has no row without a page). `reg` itself is not changed. `marks_` is `with_made`'s
+    `marks()`, read once by a caller (scope_ctx) that wants it too: None reads it there, when `made`. It never raises: callers
     such as the server's gates have no try around session_roles, so any failure (a damaged or unreadable record, hand-edited marks) returns `reg`."""
     try:
         d = _read()
-        full = with_made(reg) if made else reg; out = reg
+        full = with_made(reg, marks_) if made else reg; out = reg
         for pid, m in sorted(d["pending_agents"].items()):
             if not m: continue
             key = d["ids"].get(pid) or id_to_key(pid, reg); e = full.get(key)

@@ -31,6 +31,7 @@ from typing import Any, Callable
 HERE = Path(__file__).resolve().parents[2]
 from stackshot.audit import audit_run as AR  # noqa: E402
 from stackshot.model import bullet_text as _bt  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
 
 CHECK = "goal-unclear"
@@ -44,7 +45,7 @@ def candidates(items: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     for gid in sorted((g for g, it in items.items() if it.get("status") == "open"), key=_nr.num):
         it = items[gid]
         meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
-        subject, desc = str(it.get("subject") or ""), str(it.get("description") or "")
+        subject, desc = _tl.bare(it.get("subject")), str(it.get("description") or "")
         goal, first = _bt.goal_of(desc), _bt.first_bullet(desc)
         if goal:
             line = f"the subject and the Goal bullet, judged once for the pass: subject: {AR._clip(subject, 120)} | Goal: {AR._clip(goal, 200)}"
@@ -59,7 +60,7 @@ def block(sus: dict[str, Any], item: dict[str, Any], entry: dict[str, Any] | Non
     verdict = "not judged" if entry is None else ("unclear" if entry.get("verdict") == "yes" else "clear")
     reason = "" if entry is None else str(entry.get("reason") or "")
     return "\n".join([f"{sus['id']} · {verdict}" + (f" · {reason}" if reason else ""),
-                      f"  subject: {' '.join(str(item.get('subject') or '').split())}",
+                      f"  subject: {' '.join(_tl.bare(item.get('subject')).split())}",
                       f"  first bullet: {' '.join(sus['first'].split()) if sus['first'] else '(none)'}"])
 
 
@@ -80,7 +81,7 @@ def run(items: dict[str, dict[str, Any]], *, env: AR.Env | None = None, rubric: 
     if dry:
         emit(f"goal pass dry run: {len(picked)} open item(s) would be judged, one call each; no call made, nothing written")
         for s in picked:
-            emit(f"{s['id']} · {' '.join(str(items[s['gid']].get('subject') or '').split())} · first bullet: {' '.join(s['first'].split()) if s['first'] else '(none)'}")
+            emit(f"{s['id']} · {' '.join(_tl.bare(items[s['gid']].get('subject')).split())} · first bullet: {' '.join(s['first'].split()) if s['first'] else '(none)'}")
         return {"text": "\n".join(lines), "counts": {"open": len(picked), "judged": 0, "unclear": 0, "clear": 0, "not_judged": 0}, "calls": {"made": 0}}
     rubric = rubric if rubric is not None else AR.RUBRIC.read_text(encoding="utf-8").replace("{owner}", _cfg.owner())
     _found, entries, calls = AR.judge(items, picked, now, env, rubric, now)

@@ -382,7 +382,7 @@ with SP.frozen(now0):
     brief12, get20, get21 = _wt_brief.stackshot_brief(), _wt_get.stackshot_get("g20"), _wt_get.stackshot_get("g21")
     page20, page21, page22 = (bd["ui/render.py"].item_html(f"g{i}") for i in (20, 21, 22))
 def card(md, n):
-    i = md.find(f"[home] item {n}**")
+    i = md.find(f" · item {n}**")
     if i < 0: return ""
     j = md.find('<a id="', i)
     return md[i: j if j > 0 else len(md)]

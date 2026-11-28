@@ -10,7 +10,7 @@ fixes (the weekly report's "corrected by the server instead of refused"), and th
   5  description-url  a session's bare http(s) address in a description: written as a link to itself, [address](address)
 
 and what stays as it was: a write that was fine is stored byte for byte (and no fix is counted), the refusals that remain (a line rewritten with words added, a subject or status line with no whole word
-that fits, a subject with no scope prefix, a bare address in next, a script's bare address left as written), each fix is one counted kind in the call log and the weekly report, a fix does not invite a
+that fits, a bare address in next, a script's bare address left as written), each fix is one counted kind in the call log and the weekly report, a fix does not invite a
 resend, and nothing is added to the item's History.
 
     tests/run-suite five_fixes        -> exit 0 / 1"""
@@ -234,7 +234,7 @@ item(25)
 res, made = create(subject="[home] " + "s" * 81)
 check("2 a subject whose first word alone does not fit is still refused, with its length and the limit", isinstance(res, ToolError) and "the subject is" in str(res) and "limit is 80" in str(res) and kinds(made) == [], (res, made))
 res, made = create(subject="[mine] " + WORDS)
-check("2 a long subject that opens with a tag that is no scope prefix is still refused for the prefix, nothing cut", isinstance(res, ToolError) and "subject must start with one of" in str(res) and kinds(made) == [], (res, made))
+check("2 a long subject that opens with a tag of no list is cut at a word like any other: no tag is asked for", not isinstance(res, ToolError) and kinds(made) == ["subject-cut"] and len(subj(gid_of(res))) <= 80 and subj(gid_of(res)).startswith("[mine] "), (res, made))
 for name, text, limit, want in (
         ("a code span", "[work] Fix `the long code span that continues here` now", 40, "[work] Fix …"),
         ("link words", "[work] See [the long documentation page about things](https://example.com/x) more", 40, "[work] See …"),

@@ -58,6 +58,9 @@ from stackshot.waits import builderless as _bl, handoff as _ho, held as _held, q
 
 
 
+_title = _anc.notice_title  # the one helper every notice line in this file names an item by (anchors.notice_title): group + bare title, never the raw tag
+
+
 @dataclass(frozen=True)
 class Hooks:
     """What the telling still reaches in server.py (the hand-off record's functions, the page keepers of a project's agents, the page debt's marks and the time zone), in the names they have
@@ -867,7 +870,7 @@ def close_owner_notice(gid: str, item: dict[str, Any], owner: str, project: str,
     recorded close merged, so a notice left to the router would reach nobody. → True when it was sent."""
     h = _hooks()
     meta = item.get("metadata") or {}
-    who, olabel, subject = by or _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
+    who, olabel, subject = by or _session_label(writer) or "a session", _session_label(owner), _title(item)
     outcome, sup, reason = str(meta.get("outcome") or "done"), str(meta.get("superseded_by") or ""), _clip_line(meta.get("reason"), 240)
     line = (f"[stackshot] {_gh.shown(gid)} closed by {who} ({outcome}{' by ' + _gh.shown(sup) if sup else ''}): {subject}"
             + (f" — {reason}" if reason else "") + f" → {notice_link(gid)}")
@@ -902,7 +905,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     if not owner or not _anc.pilot_root(project) or h.session_id(owner) == h.session_id(writer):
         return ""
     who = _session_label(writer) or "a session"
-    note = f"[stackshot] {_gh.shown(gid)} {what} by {who}: {item.get('subject') or ''} → {notice_link(gid)}"
+    note = f"[stackshot] {_gh.shown(gid)} {what} by {who}: {_title(item)} → {notice_link(gid)}"
     front, stew = front_keeper(owner, project)
     if front and decision:                 # the board shows it; nobody is told
         if heard is not None:
@@ -915,7 +918,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
             row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
         if not stew or h.session_id(stew) == h.session_id(writer):
             return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else quiet_line(item, owner)
-        tell_kind("close" if close else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} ({word} {_session_label(owner)}, a front agent) {what} by {who}: {item.get('subject') or ''} → {notice_link(gid)}", tag="owner")
+        tell_kind("close" if close else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} ({word} {_session_label(owner)}, a front agent) {what} by {who}: {_title(item)} → {notice_link(gid)}", tag="owner")
         res, why = gate_result()      # the gate may have held it, or filed it for his next turn there: the reply says what became of it
         klabel = _session_label(stew)
         tail = (f"its keeper {klabel} was not told ({why}); the board carries it" if res == "held" else f"its keeper {klabel} hears of it on his next turn" if res == "fyi"
@@ -954,13 +957,13 @@ def tell_observers(gid: str, item: dict[str, Any], what: str, writer: str) -> st
             if not stew or h.session_id(stew) in (wid, sent):
                 continue
             sent.add(h.session_id(stew))
-            tell_kind("close" if str(what).startswith("was completed") else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} (observer {_session_label(ob)}, a front agent) {what} by {who}: {item.get('subject') or ''} "
+            tell_kind("close" if str(what).startswith("was completed") else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} (observer {_session_label(ob)}, a front agent) {what} by {who}: {_title(item)} "
                                                 f"→ {notice_link(gid)} — pass it on only if it needs {_session_label(ob)}", tag="observer")
             if gate_result()[0] != "held":      # held by the gate: not told
                 told.append(f"{_session_label(stew)} for {_session_label(ob)}")
         else:
             sent.add(sid)
-            tell_or_hold(gid, sid, f"[stackshot] {_gh.shown(gid)} {what} by {who}: {item.get('subject') or ''} → {notice_link(gid)} (you observe it)",
+            tell_or_hold(gid, sid, f"[stackshot] {_gh.shown(gid)} {what} by {who}: {_title(item)} → {notice_link(gid)} (you observe it)",
                           "closed" if _done_close(what) and not _owner_words(item) else "", tag="observer")
             told.append(_session_label(ob))
     return f"\n(observers told: {', '.join(told)})" if told else ""
@@ -1063,7 +1066,7 @@ def tell_owner_change(gid: str, item: dict[str, Any], before: dict[str, Any], wr
         return ""
     project, who, olabel = str(meta.get("project") or ""), _session_label(writer) or "a session", _session_label(owner)
     front = front_keeper(owner, project)[0]
-    subject = str(item.get("subject") or "")
+    subject = _title(item)
     line = f"[board] {_gh.shown(gid)} {subject}: {who} {'; '.join(parts)}" + (f" ({word} {olabel} may need to act)" if front else "") + f" → {notice_link(gid)}"
     if not front:
         OWNER_HEARD[(gid, oid)] = now
@@ -1131,7 +1134,7 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
             quiet = quiet_line(item, owner); continue
         nxt = next_head(meta, writer)[:160]
         thn = then_part(item, to=sid)
-        tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)} now needs you (named in its needs by {who}): {item.get('subject') or ''} ({project}){thn}"
+        tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)} now needs you (named in its needs by {who}): {_title(item)} ({project}){thn}"
                               + (f"; next: {nxt}" if nxt else "") + f". Do your part and close it or hand it back (sender={_session_label(s)!r}); "
                               f"Your turn-end board check asks about it until then. → {notice_link(gid)}", tag="needs")
         told.append(_session_label(s))
@@ -1159,7 +1162,7 @@ def tell_decided(gid: str, item: dict[str, Any], sessions: list[str], writer: st
         if owner and sid == hk.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
             quiet = quiet_line(item, owner); continue
         tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)}: {OWNER} has decided (decision left its needs, by {_session_label(writer) or 'a session'}), so the move is yours "
-                              f"as named in its needs: {item.get('subject') or ''} ({project}){thn}" + (f"; next: {nxt}" if nxt else "")
+                              f"as named in its needs: {_title(item)} ({project}){thn}" + (f"; next: {nxt}" if nxt else "")
                               + f". Read its next for his call, do your part and close it or hand it back (sender={_session_label(s)!r}). → {notice_link(gid)}", tag="needs")
         told.append(s)
         if heard is not None and owner and sid == hk.session_id(owner):
@@ -1192,7 +1195,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     before = {h.session_id(x) for x in _needs_list(was_needs) if x.lower() not in _NEEDS_KINDS}
     if after != {oid} or not before or before == {oid} or not front_keeper(owner, project)[0]:
         return ""
-    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
+    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), _title(item)
     nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
     line = f"[stackshot] {_gh.shown(gid)} is back with you alone (handed back by {who}): {subject}" + (f"; next: {nxt}" if nxt else "") + f" → {notice_link(gid)}"
     rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line}
@@ -1403,7 +1406,7 @@ def tell_owner_check_closed(gid: str, item: dict[str, Any], told: list[str]) -> 
             or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return False
     by = "stackshot's done check"
-    tell_kind("close", gid, oid, f"[stackshot] {_gh.shown(gid)} {item.get('subject') or ''}: {_closed_by(item, by)} \u2192 {notice_link(gid)}", tag="owner")      
+    tell_kind("close", gid, oid, f"[stackshot] {_gh.shown(gid)} {_title(item)}: {_closed_by(item, by)} \u2192 {notice_link(gid)}", tag="owner")      
     OWNER_HEARD[(gid, oid)] = time.time()
     return gate_result()[0] != "held"      # False when the gate held it: the caller does not count the mover as told
 
@@ -1435,7 +1438,7 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
         return ""
     if not front_keeper(owner, project)[0] or _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return ""
-    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
+    who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), _title(item)
     tell_kind("close", gid, oid, f"[stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {notice_link(gid)}", tag="owner")      
     res, why = gate_result()      # the gate may have held it: the reply says what became of it
     heard.append(oid)
@@ -1459,7 +1462,7 @@ def pilot_relay(project: str, gid: str, item: dict[str, Any], what: str, writer:
     if front_keeper(keeper, project)[0] and not _router_live.holds(project, keeper):      # a front agent gets no page-owed notice; the charge already passed it by (pilot_charge); one that is only the address of a nameless page's notices is the router's
         return ""
     who = _session_label(writer) or "a session"
-    subject = str(item.get("subject") or "")
+    subject = _title(item)
     tail = tail or f"the page update is yours as {'its agent' if role == 'agent' else 'its keeper'}"
     live = _router_live.holds(project, keeper, stand_in_too=(role != "agent"))      # a live project: the router rules this notice, the keeper (or the stand-in standing in for it) is not told; a page's own agent is told directly
     ask = "yours as" in tail          # "…so it is yours as its keeper" (the fallback after the writer left it undone) and "the page update is yours as its keeper" hand the debt to the keeper: an ask, delivered
@@ -1536,7 +1539,7 @@ def pilot_relay_many(keeper: str, rows: list[tuple[str, str, dict[str, Any], str
     held = [] if head else [r for r in rows if _router_live.holds(r[0], keeper, stand_in_too=True)]       # a live project: the router rules these, the keeper (or its stand-in) is not told; a caller that names its recipient (head: the page-debt fallback to the page's agent or -main) is delivered to
     if held:
         for project, gid, item, what, writer in held:
-            who = _session_label(writer) or "a session"; subject = str(item.get("subject") or "")
+            who = _session_label(writer) or "a session"; subject = _title(item)
             try:
                 nid = _routing.record(project, kind="board", to="", label=f"board {_gh.shown(gid)}", who=who, text=f"{what}: {subject}",
                                       url=notice_link(gid), target="for " + who, pilot=True, live=True)
@@ -1550,7 +1553,7 @@ def pilot_relay_many(keeper: str, rows: list[tuple[str, str, dict[str, Any], str
     lines = [head or f"[board] {len(rows)} page updates are yours as its keeper: their writers left them undone past {h.grace_min()} min."]
     for project, gid, item, what, writer in rows:
         who = _session_label(writer) or "a session"
-        subject = str(item.get("subject") or "")
+        subject = _title(item)
         try:
             nid = _routing.record(project, kind="board", to=keeper, label=f"board {_gh.shown(gid)}", who=who, text=f"{what}: {subject}",
                                   url=notice_link(gid), target="for " + who, pilot=True, batch=batch)
@@ -1628,7 +1631,7 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
     why = _clip_line(cm.get("reason") or reason, 160)
     told = []
     me = _gh.shown(gid)
-    cause = f"{me} {_clip_line(closed.get('subject') or '', 100)} closed ({how}" + (f": {why}" if why else "") + f"){' by ' + _session_label(writer) if writer else ''}"
+    cause = f"{me} {_clip_line(_title(closed), 100)} closed ({how}" + (f": {why}" if why else "") + f"){' by ' + _session_label(writer) if writer else ''}"
     for sid, rows in by_sid.items():
         keep: list[tuple[str, dict[str, Any]]] = []
         for g, it in rows:         # the path of wake_tell in service/wakes.py: a recipient the router holds the project for gets the notice through the routing log, the router passes it on
@@ -1638,11 +1641,11 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
                 keep.append((g, it)); continue
             thn = then_part(it, to=sid)
             try:
-                nid = _routing.record(project, kind="board", to="", label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {it.get('subject') or ''}",
+                nid = _routing.record(project, kind="board", to="", label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {_title(it)}",
                                       url=notice_link(g), target="for " + _session_label(sid), pilot=True, live=True)
             except Exception:
                 keep.append((g, it)); continue      # not recorded: told as before, never lost
-            _router_live.stash(nid, f"[stackshot] {cause}. {_gh.shown(g)} {it.get('subject') or ''} ({project}){thn}, names it → {notice_link(g)}")
+            _router_live.stash(nid, f"[stackshot] {cause}. {_gh.shown(g)} {_title(it)} ({project}){thn}, names it → {notice_link(g)}")
         if keep != rows or not keep:
             told.append(sid)
         if not keep:
@@ -1656,12 +1659,12 @@ def tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip: 
             nid = ""
             if _anc.pilot_root(project) and sid != (h.session_id(owner) if owner else ""):
                 try:
-                    nid = _routing.record(project, kind="board", to=sid, label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {it.get('subject') or ''}",
+                    nid = _routing.record(project, kind="board", to=sid, label=f"close {me}", who="stackshot", text=f"{cause}; {_gh.shown(g)} names it{thn}: {_title(it)}",
                                           url=notice_link(g), target="for " + _session_label(sid), pilot=True, batch=batch)
                 except Exception:
                     nid = ""
                 live_pass(project, nid, sid)
-            lines.append(f"- {_gh.shown(g)} {_clip_line(it.get('subject') or '', 100)} (its {'next' if rx.search(str(m_.get('next') or '')) else 'description'} names {me}) → {notice_link(g)}" + (f" · notice {nid}" if nid else ""))
+            lines.append(f"- {_gh.shown(g)} {_clip_line(_title(it), 100)} (its {'next' if rx.search(str(m_.get('next') or '')) else 'description'} names {me}) → {notice_link(g)}" + (f" · notice {nid}" if nid else ""))
         if len(keep) > _MENTION_LINES_MAX:
             lines.append(f"- … and {len(keep) - _MENTION_LINES_MAX} more")
         body = f"[stackshot] {cause}." + (" An open item you move names it:\n" if len(keep) == 1 else f" {len(keep)} open items you move name it:\n") + "\n".join(lines) \
@@ -1688,7 +1691,7 @@ def tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: 
         if not kid:
             print(f"waiting: {gid} wait failed ({why}); no keeper to tell", file=sys.stderr, flush=True)
         return ""
-    tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({project}){then_part(item, to=kid)}: its wait ({what}) can no longer end: {why}. "
+    tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{_title(item)}\" ({project}){then_part(item, to=kid)}: its wait ({what}) can no longer end: {why}. "
                           f"The item stays open. As {keeper_words(project, k)}: see that its mover or the session doing the work "
                           f"gives it what it waits on now (a new check, a wake, an item to wait after) or closes it. → {notice_link(gid)}", tag="wait")
     return kid
@@ -1845,7 +1848,7 @@ def tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
     oid = h.session_id(owner) if owner else ""
     front = bool(owner) and front_keeper(owner, project)[0]
     if oid and not front:
-        tell_woken(gid, oid, f"[stackshot] {_gh.shown(gid)} closed itself: its done check passed ({label}): {item.get('subject') or ''} ({project}){then_part(item, to=oid)} → {notice_link(gid)}", tag="check")
+        tell_woken(gid, oid, f"[stackshot] {_gh.shown(gid)} closed itself: its done check passed ({label}): {_title(item)} ({project}){then_part(item, to=oid)} → {notice_link(gid)}", tag="check")
         told.append(oid)
     elif not oid:
         print(f"check: {gid} closed, and nobody moves it to tell", file=sys.stderr, flush=True)

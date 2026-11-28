@@ -73,7 +73,7 @@ def audit_files(): return sorted(p.name for p in AUD.glob("*")) if AUD.exists() 
 lines = []
 res = GP.run(dict(ITEMS), env=env(), dry=True, out=lines.append)
 check("dry run: lists the open items, lowest id first, closed ones left out", [l.split(" · ")[0] for l in lines[1:]] == ["board#1", "board#2", "board#3", "board#5"], lines)
-check("dry run: shows the subject and the first bullet, '(none)' for prose", any("board#2 · [home] Retry bug in the sync · first bullet: The sync retries forever" in l for l in lines) and any("board#5" in l and "first bullet: (none)" in l for l in lines), lines)
+check("dry run: shows the subject and the first bullet, '(none)' for prose", any("board#2 · Retry bug in the sync · first bullet: The sync retries forever" in l for l in lines) and any("board#5" in l and "first bullet: (none)" in l for l in lines), lines)
 check("dry run: no call, and the CLI writes no file", asked == [] and GP.main(["--dry-run"], env=env(), items=dict(ITEMS)) == 0 and audit_files() == [] and asked == [], (len(asked), audit_files()))
 
 # ---- 2. the full pass
@@ -81,12 +81,12 @@ asked.clear(); lines = []
 res = GP.run(dict(ITEMS), env=env(), out=lines.append)
 text = "\n".join(lines)
 check("one call per open item (the Goal-less ones too), lowest id first, none for the closed one", [re.search(r"^Item (board#\d+):", m, re.M).group(1) for m in asked] == ["board#1", "board#2", "board#3", "board#5"], [m[:30] for m in asked])
-check("the message of an item with a Goal bullet names the subject and the Goal sentence", "- goal-unclear: the subject and the Goal bullet, judged once for the pass: subject: [home] Make the nightly run finish by 06:00 | Goal: The nightly run finishes by 06:00" in asked[0], asked[0])
-check("…and of an item with none its first bullet", "- goal-unclear: the item has no Goal bullet (filed before the form): subject: [home] Retry bug in the sync | first bullet: The sync retries forever" in asked[1], asked[1])
+check("the message of an item with a Goal bullet names the subject and the Goal sentence", "- goal-unclear: the subject and the Goal bullet, judged once for the pass: subject: Make the nightly run finish by 06:00 | Goal: The nightly run finishes by 06:00" in asked[0], asked[0])
+check("…and of an item with none its first bullet", "- goal-unclear: the item has no Goal bullet (filed before the form): subject: Retry bug in the sync | first bullet: The sync retries forever" in asked[1], asked[1])
 check("…and of prose with no bullet says so", "first bullet: (none)" in asked[3], asked[3])
 check("the report: id, verdict and the judge's reason, then the subject and the first bullet, per item",
-      "board#1 · clear · board#1: names a result\n  subject: [home] Make the nightly run finish by 06:00\n  first bullet: Goal: The nightly run finishes by 06:00" in text
-      and "board#2 · unclear · board#2: names a symptom\n  subject: [home] Retry bug in the sync\n  first bullet: The sync retries forever" in text
+      "board#1 · clear · board#1: names a result\n  subject: Make the nightly run finish by 06:00\n  first bullet: Goal: The nightly run finishes by 06:00" in text
+      and "board#2 · unclear · board#2: names a symptom\n  subject: Retry bug in the sync\n  first bullet: The sync retries forever" in text
       and "board#3 · unclear · board#3: names a symptom" in text, text)
 check("a failed call is 'not judged', and the counts say so", "board#5 · not judged\n" in text and text.splitlines()[-1].startswith("counts: 2 unclear · 1 clear · 1 not judged") and res["counts"] == {"open": 4, "judged": 3, "unclear": 2, "clear": 1, "not_judged": 1}, (text[-300:], res["counts"]))
 check("…and the header says report only", text.startswith("goal pass: 4 open item(s), one call each (4 made, 1 failed) · report only: nothing filed, no message sent"), text[:200])

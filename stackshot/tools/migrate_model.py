@@ -559,6 +559,7 @@ def main(argv: list[str]) -> int:
     from stackshot.model import migration as M
     from stackshot.model import model_guards as _mg
     from stackshot.model import states as _states
+    from stackshot.model import title_label as _tl
     tz = _cfg.tz()
     now = dt.datetime.now(tz)
     today = now.date()
@@ -595,11 +596,11 @@ def main(argv: list[str]) -> int:
     closed_plan = M.Plan()
     for g in picked:
         M.plan_closed(g, items[g], closed_reads[g], closed_plan)
-    sample_rows = [{"item": M.shown(g), "title": str(items[g].get("subject") or ""), "outcome": ((closed_reads[g].get("answer") or {}).get("read") or "unread").replace("_", " "),
+    sample_rows = [{"item": M.shown(g), "title": _tl.bare(items[g].get("subject")), "outcome": ((closed_reads[g].get("answer") or {}).get("read") or "unread").replace("_", " "),
                     "reason": (closed_reads[g].get("answer") or {}).get("call_said") or (closed_reads[g].get("answer") or {}).get("reason") or closed_reads[g].get("why") or "",
                     "github": ((closed_reads[g].get("github") or {}).get("state_reason") or ((closed_reads[g].get("github") or {}).get("state") or "no issue read"))}
                    for g in picked]
-    closed_all = {M.shown(g): {"title": str(items[g].get("subject") or ""), "outcome": (closed_reads[g].get("answer") or {}).get("outcome") or "unread",
+    closed_all = {M.shown(g): {"title": _tl.bare(items[g].get("subject")), "outcome": (closed_reads[g].get("answer") or {}).get("outcome") or "unread",
                                "reason": (closed_reads[g].get("answer") or {}).get("reason") or closed_reads[g].get("why") or "", "superseded_by": (closed_reads[g].get("answer") or {}).get("superseded_by", ""),
                                "call_said": (closed_reads[g].get("answer") or {}).get("call_said", ""), "confidence": (closed_reads[g].get("answer") or {}).get("confidence", ""),
                                "read": (closed_reads[g].get("answer") or {}).get("read", "")} for g in picked}

@@ -150,7 +150,7 @@ check("…so the newest is last", got[-1] == shown(9) and got[0] == shown(1), go
 
 r = rows()
 check("a row has exactly the six fields", all(set(x) == {"shown", "subject", "url", "ask", "updated", "scope"} for x in r.values()), [set(x) for x in r.values()][:2])
-check("shown is the id as a person reads it, subject the item's", r[shown(1)]["subject"] == "[home] a decision with its ask" and all(x["shown"] == s for s, x in r.items()), r[shown(1)])
+check("shown is the id as a person reads it, subject the item's, its tag hidden", r[shown(1)]["subject"] == "a decision with its ask" and all(x["shown"] == s for s, x in r.items()), r[shown(1)])
 check("ask is the open ask line of a decision, and empty for an item with none or with an ask that is no open question", r[shown(1)]["ask"] == ASK and r[shown(3)]["ask"] == "" and r[shown(2)]["ask"] == "" and r[shown(10)]["ask"] == "", [(k, x["ask"]) for k, x in r.items()])
 check("updated is the item's last write in epoch seconds", isinstance(r[shown(1)]["updated"], float) and abs(r[shown(1)]["updated"] - (now0 - 9 * DAY)) < 1, r[shown(1)]["updated"])
 check("…and for an old file that stores none, the file's time", isinstance(r[shown(8)]["updated"], float) and abs(r[shown(8)]["updated"] - now0) < 120, r[shown(8)]["updated"])
@@ -296,10 +296,13 @@ finally:
 
 # the session roles are worked out once for a read: with the queue rule on, the group asks who is a front agent about each item an agent moves
 def roles_builds(call):
-    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build)."""
+    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build, through _pending_registry's with_pending(made=True),
+    not the unrelated with_pending call Board.__init__ makes for its own project table (web/render.py), which this does not count. A pass memo (core/passmemo.py) makes the anchors.py one call stand for
+    the whole pass, however many callers inside it ask for the registry; with the memo, with_pending's direct caller is no longer a frame named "session_roles" but _pending_registry's own build lambda,
+    so this counts a call whose caller frame is in anchors.py, by file, not by function name."""
     count = [0]; real = _prj.with_pending
     def counted(*a, **k):
-        if sys._getframe(1).f_code.co_name == "session_roles": count[0] += 1
+        if sys._getframe(1).f_code.co_filename.endswith("anchors.py"): count[0] += 1
         return real(*a, **k)
     _prj.with_pending = counted
     try: call()

@@ -276,7 +276,7 @@ what the connector's `rules` tool serves.
 ## Items
 - An item is human-level: a deliverable a session owns, a decision {owner} must make, a blocker on someone outside, or a handoff between sessions.
 - Working steps (read, edit, run, check) never go on the board; a session tracks those itself.
-- The subject starts with one of the prefixes ({prefixes}) and says what is to be done, not the area it is in.
+- The subject says what is to be done, not the area it is in. It carries no tag: the item's group comes from its project.
 - Description: what the item is, where it lives, what done means; short `- ` bullets, one fact each (at most {max_lines} lines of {line_max} characters, links by their text), live state only.
 
 ## Fields
@@ -378,8 +378,8 @@ def cmd_setup(a: argparse.Namespace) -> int:
     base = (a.base_url or ask("Public base URL", f"http://127.0.0.1:{port}", interactive)).rstrip("/")
     emails_s = a.emails if a.emails is not None else ask("Google emails allowed to sign in (comma-separated)", "", interactive)
     emails = [e.strip() for e in emails_s.split(",") if e.strip()]
-    prefixes_s = a.prefixes if a.prefixes is not None else ask("Subject prefixes (comma-separated)", "[todo] ", interactive)
-    prefixes = [p.strip() + " " for p in prefixes_s.split(",") if p.strip()] or ["[todo] "]
+    prefixes_s = a.prefixes if a.prefixes is not None else ask("Tags an older title may still open with (comma-separated, none needed)", "", interactive)
+    prefixes = [p.strip() + " " for p in prefixes_s.split(",") if p.strip()]
     data = Path(os.path.expanduser(a.data or ask("Data repository", "~/stackshot-data", interactive))).resolve()
     pages = Path(os.path.expanduser(a.pages or ask("Project pages directory", str(data / "pages"), interactive))).resolve()
 
@@ -423,7 +423,6 @@ def cmd_setup(a: argparse.Namespace) -> int:
     ensure_identity(data, user)
     (data / "board-data").mkdir(exist_ok=True)
     (data / "RULES.md").write_text(RULES_MD.format(title=str(c.get("instance", {}).get("title") or title), owner=owner, tz=tzname, pages=str(pages),
-                                                   prefixes=", ".join(f"`{p}`" for p in prefixes),
                                                    max_lines=int(c.get("description", {}).get("max_lines", 8)), line_max=int(c.get("description", {}).get("line_max", 120))), encoding="utf-8")
     slug = re.sub(r"[^a-z0-9]+", "-", user.lower()).strip("-") or "owner"
     page = pages / "projects" / "getting-started.md"
@@ -1126,7 +1125,7 @@ def setup_main(argv: list[str]) -> int:
     s.add_argument("--port", type=int, help="the server's local port, [server] port (default 8020); a second person on the same "
                                             "box sets up under their own account with a port of their own")
     s.add_argument("--emails", help="Google emails allowed to sign in, comma-separated (default none)")
-    s.add_argument("--prefixes", help='subject prefixes, comma-separated, e.g. "[work] ,[home] " (default "[todo] ")')
+    s.add_argument("--prefixes", help='tags an older title may still open with, hidden wherever a title is shown, comma-separated, e.g. "[work] ,[home] " (default none)')
     s.add_argument("--data", help="the data repository (default ~/stackshot-data)")
     s.add_argument("--pages", help="the project pages directory (default <data>/pages)")
     s.add_argument("--yes", action="store_true", help="ask nothing: the defaults fill the gaps")

@@ -11,6 +11,7 @@ import sys
 import time
 from typing import Any
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
@@ -94,7 +95,14 @@ def _foryou_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any
     if own:
         return
     who = (_session_label(writer) if writer else "") or "the server"
-    for kind, what, disc in _rows.changes(before, item, who, _gh.shown, _hooks().parse_ask):
+    sc: list[Any] = []                      # scope_ctx() built at most once, and only if rows.changes finds a change that actually makes a row
+    def _sc() -> Any:
+        if not sc:
+            sc.append(_anc.scope_ctx())
+        return sc[0]
+    grp = lambda it_: _anc.group_title(it_, _sc())
+    grp_prefix = lambda it_: (lambda g: f"{g} · " if g else "")(_anc.item_group(it_, _sc()))
+    for kind, what, disc in _rows.changes(before, item, who, _gh.shown, _hooks().parse_ask, grp=grp, grp_prefix=grp_prefix):
         _foryou_make(gid, item, kind, what, disc)
 
 
@@ -132,6 +140,7 @@ def _foryou_tick(now: float | None = None) -> list[str]:
         return []
     _FORYOU_LAST[0] = now
     made: list[str] = []
+    sc = _anc.scope_ctx()
     for gid, _p in _item_files():
         try:
             it = _load(gid)
@@ -140,7 +149,7 @@ def _foryou_tick(now: float | None = None) -> list[str]:
                 continue
             when, stored = due
             his = _owner_moves(gid, it)
-            if _foryou_make(gid, it, "due", _rows.due_what(when, _hooks().when_words(_rows.due_day(stored)), it.get("subject")), stored, urgent=his) \
+            if _foryou_make(gid, it, "due", _rows.due_what(when, _hooks().when_words(_rows.due_day(stored)), _anc.group_title(it, sc)), stored, urgent=his) \
                     or (his and _foryou_raise(gid, it, "due", stored)):
                 made.append(gid)
         except Exception as e:  # noqa: BLE001  — one item never stops the pass

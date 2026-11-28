@@ -77,6 +77,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402  — an issue title is the title as screens show it (no tag)
 from stackshot.model import option_labels as _ol  # noqa: E402  — the letter an option's label repeats from its badge, dropped on read
 from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy makes no GitHub write
 from stackshot.core import ghbudget as _gb   # noqa: E402  — the hourly ledger of GitHub calls shared with the other readers of the host's token
@@ -809,7 +810,7 @@ def marker(gid: str, was: str = "") -> str:
 
 
 def title_of(item: dict[str, Any]) -> str:
-    return str(item.get("subject") or "").strip()[:250] or "(no subject)"
+    return _tl.bare(item.get("subject")).strip()[:250] or "(no subject)"      # the title as every screen shows it: a tag an older title carries is not put on the issue
 
 
 def state_of(item: dict[str, Any]) -> tuple[str, str]:

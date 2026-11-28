@@ -20,6 +20,7 @@ import sys
 import time
 from typing import Any
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
@@ -87,7 +88,7 @@ def ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
         span = _hooks().silence_minutes(now - _hooks().silence_clock(item, who))
         _stall.note(meta, now, f"{_session_label(who)}: nothing was written to it for {span}" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
-        subject = str(item.get("subject") or "")
+        subject = _anc.notice_title(item)
     if not front:
         tail = "" if _stallsvc.stall_background(who) else (f" If nothing is written to it and your pane stays quiet for {minutes:g} more minutes, a fresh session is asked who takes it.")
         _telling.tell_woken(gid, _hooks().session_id(who) or who,
@@ -135,7 +136,7 @@ def ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list
         since = _hooks().when_words(dt.datetime.fromtimestamp(last, _hooks().zone())) if last > 0 else "it was handed over"
         before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
         told = _hooks().when_words(dt.datetime.fromtimestamp(before, _hooks().zone())) if before else ""
-        data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
+        data = {"subject": _anc.notice_title(item), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
         if not to:      # with a -main agent the History line is written after the send (`ladder_main_log`): the front gate may archive the notice, and the line says what became of it
             _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: {why}")
             _writes.save(gid, item, note="ladder: its mover is silent, " + ("it is the -main agent itself" if itself else "no -main agent to tell"))

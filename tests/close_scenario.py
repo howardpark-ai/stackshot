@@ -274,11 +274,11 @@ def part_close():
     check("history: close, reopen, close", hist("a4") == ["completed · dropped — not needed after all", "reopened · needs your call", "completed · superseded by a1 — reworded as a1"]
           or [h.split(" · ")[0] for h in hist("a4")] == ["completed", "reopened", "completed"], hist("a4"))
     md = bd.markdown()
-    check("board.md: the completed list carries outcome and reason", "**a2** [home] item 2 · **superseded** by a3: merged into a3 · " in md and "**a9** [home] item 9 · " in md,
+    check("board.md: the completed list carries outcome and reason", "**a2** home · item 2 · **superseded** by a3: merged into a3 · " in md and "**a9** home · item 9 · " in md,
           [l for l in md.splitlines() if l.startswith("- <a id=\"task-a-")])
     a9md = [l for l in md.splitlines() if l.startswith('- <a id="task-a-9">')]
     check("board.md: a completed item with no session names no one: no backticked label, no stray store letter",
-          len(a9md) == 1 and "`" not in a9md[0] and re.search(r"\*\*a9\*\* \[home\] item 9 · (?:\d{4}-)?\d\d-\d\d \d\d:\d\d \S+$", a9md[0]), a9md)
+          len(a9md) == 1 and "`" not in a9md[0] and re.search(r"\*\*a9\*\* home · item 9 · (?:\d{4}-)?\d\d-\d\d \d\d:\d\d \S+$", a9md[0]), a9md)
 
     # ---- 7. the descriptions say what a close carries
     check("the complete and update descriptions carry the close form", all("outcome: done | dropped" in d and "clears next, ask and needs" in d

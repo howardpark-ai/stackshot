@@ -73,8 +73,8 @@ def next_of(gid):
     h = bd.item_html(gid); i = h.find('<ul class="inext"')
     return h[i:h.find("</details>", i)] if i >= 0 else ""      # the checklist list, to the end of its fold
 OPEN1 = '<ul class="inext" aria-label="Next steps"><li class="cl-open"><span class="cb" aria-hidden="true"></span><div class="cl-b"><span class="sr">To do: </span><span class="cl-t">'      # the first step of a checklist
-IA = lambda gid, subj: f'<a href="/items/{gid[1:] if gid.startswith("g") else gid}" target="_blank" rel="noopener" title="{subj}">'
-BN5 = IA("g5", SUBJ5); LBL5 = "#5"        # an issue-numbered item is written, its link reads #5 (ui_render.shown)
+IA = lambda gid, subj: f'<a href="/items/{gid[1:] if gid.startswith("g") else gid}" target="_blank" rel="noopener" title="home · {subj}">'
+BN5 = IA("g5", "the issue-numbered one"); LBL5 = "#5"        # an issue-numbered item is written, its link reads #5 (ui_render.shown)
 
 # ---- 1. the subset
 d11 = desc_of("a11")
@@ -116,7 +116,7 @@ check("an invalid IPv6 address in item text renders and does not raise (block, i
 # ---- 3. the link passes on the markdown
 d13 = desc_of("a13")
 check("an item id in text, a list item and a quote links to its item page, its subject as the tooltip",
-      f"Text {BN5}#5</a> and {IA('a1', '[home] other')}a1</a> link" in d13 and f"list item with {BN5}#5</a>" in d13 and f"quote with {IA('a1', '[home] other')}a1</a>" in d13, d13)
+      f"Text {BN5}#5</a> and {IA('a1', 'other')}a1</a> link" in d13 and f"list item with {BN5}#5</a>" in d13 and f"quote with {IA('a1', 'other')}a1</a>" in d13, d13)
 check("not inside a code span", "<code>board#5 and a1</code>" in d13, d13)
 check("not inside a fenced block", "<pre><code>board#5 a1\n</code></pre>" in d13, d13)
 check("not inside a link's label or its href", '<a href="https://example.invalid/board#5" target="_blank" rel="noopener">board#5 ↗</a>' in d13, d13)
@@ -127,7 +127,7 @@ check("a bare url ends before its trailing full stop", ui_render.md_block("see h
 # ---- 4. an old description, written as sentences and "- " lines
 d10 = desc_of("a10")
 check("an old description: a paragraph, a list of its dash lines, then the plain line after them as a paragraph of its own",
-      d10 == ('<div class="desc md"><p>Move the board to GitHub issues. It keeps the old ids as aliases. Check the mirror first (see ' + IA("a1", "[home] other") + 'a1</a>).</p>\n'
+      d10 == ('<div class="desc md"><p>Move the board to GitHub issues. It keeps the old ids as aliases. Check the mirror first (see ' + IA("a1", "other") + 'a1</a>).</p>\n'
               '<ul>\n<li>the worker posts the comments</li>\n<li>the reader polls every 30 s</li>\n</ul>\n<p>Done when the History reads from the issue.</p>\n</div>'), d10)
 check("a plain line after a list starts a new paragraph, but not inside a fenced block, and an indented line or a quote stays where it is",
       ui_render.md_block("- a\n  cont\nPlain\nPlain2\n- b\n> q\n```\n- k\nraw\n```\nafter") == "<ul>\n<li>a<br>\ncont</li>\n</ul>\n<p>Plain<br>\nPlain2</p>\n<ul>\n<li>b</li>\n</ul>\n<blockquote>\n<p>q</p>\n</blockquote>\n<pre><code>- k\nraw\n</code></pre>\n<p>after</p>\n", ui_render.md_block("- a\n  cont\nPlain\nPlain2\n- b\n> q\n```\n- k\nraw\n```\nafter"))
@@ -137,7 +137,7 @@ check("a description equal to the subject still says none", '<h2>Background</h2>
 
 # ---- 5. Next: the steps stay one per line, each line inline markdown, the owner's command keeps its copy block
 n10 = next_of("a10")
-check("Next keeps a line whole (item model, step 3: one line, one mover) with its mover's name added, and its sub-step, the id linked", n10.startswith(OPEN1 + "home-here: pick vendor A or B; then tell the keeper</span><ul><li>ask about " + IA("a1", "[home] other") + "a1</a></li></ul></div></li>"), n10)
+check("Next keeps a line whole (item model, step 3: one line, one mover) with its mover's name added, and its sub-step, the id linked", n10.startswith(OPEN1 + "home-here: pick vendor A or B; then tell the keeper</span><ul><li>ask about " + IA("a1", "other") + "a1</a></li></ul></div></li>"), n10)
 n14 = next_of("a14")
 check("Next: bold in a step, an id in it linked", "then <strong>confirm</strong> it; see " + BN5 + "#5</a><div class=\"cplace\"><span>Runs on host</span></div><div class=\"cmd\">" in n14, n14)
 check("Next: a step addressed to the owner keeps its command block", '<div class="cmd"><pre><code>ssh -t host &#x27;x y&#x27;</code></pre><button type="button" class="b copy"' in n14 and "the command below" in n14, n14)

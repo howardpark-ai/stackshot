@@ -265,6 +265,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
     record has no setter: `by` is "" and `at` is 0. Read only: the item's mover releases each (update clear_hold=true, which the server takes from any session that writes the item) or gives it a condition.
     → [{gid, owner, wake, by, at, subject}], oldest hold first."""
     rows = []
+    sc = _anc.scope_ctx()
     for gid, p in _item_files():
         try:
             with open(p, encoding="utf-8") as f:
@@ -281,7 +282,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
             continue
         owner = _telling.holder(it)
         rows.append({"gid": gid, "owner": _sr._session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
-                     "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": str(it.get("subject") or "")})
+                     "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": _anc.group_title(it, sc)})
     return sorted(rows, key=lambda r: (r["at"], r["gid"]))
 
 

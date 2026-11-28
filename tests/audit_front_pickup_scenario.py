@@ -143,7 +143,7 @@ got = tp(0, present=None)      # the real presence reader: an empty stamp folder
 check("1 an idle front agent with its own first open step, the item quiet for an hour: its turn is started, once", got == ["a1"] and len(sent) == 1 and sent[0][1] == U["a-main"] and sent[0][0] == "a1", (got, sent))
 m = sent[0][2] if sent else ""
 check("1 the line: the item and its project, the agent's own step by its first line, that it is idle and what is asked, no owner mark, no reply owed, the tag that makes a turn of a front agent",
-      m.startswith("[stackshot] ") and "[home] item 1" in m and "projects/alpha" in m and '"do the thing"' in m and "you are idle" in m and "Take it, or write what blocks it" in m and "No reply is owed to the audit" in m
+      m.startswith("[stackshot] ") and "home · item 1" in m and "projects/alpha" in m and '"do the thing"' in m and "you are idle" in m and "Take it, or write what blocks it" in m and "No reply is owed to the audit" in m
       and _web_tools_text._FOR_OWNER not in m and m.count("\n") == 1 and sent[0][3] == "stall", m)
 check("1 the item is not written (the pick-up sends a line and records its own mark elsewhere)", rd(1) == before)
 check("1 the mark is in <state>/front-pickup.json, whole, with no temporary file beside it", marks() == {"a1": at(0)} and json.loads(marks_file().read_text())["schema"] == 1 and not list((T / "state").glob(".front-pickup*")), (marks(), list((T / "state").iterdir())))
@@ -423,7 +423,7 @@ body = snap(time.time(), {"a-back": "busy"});      # the project's background ag
 code, resp = agent_state_svc.post("machine-a", body)
 check("13 the fixture: the route stores the snapshot", code == 200, (code, resp))
 audit_ticks_svc._silence_tick()
-check("13 the probe: an item on an idle front agent gets its turn started by the audit tick, once, naming the item and its step", len(to("a-main")) == 1 and "[home] item 1" in to("a-main")[0][2] and '"do the thing"' in to("a-main")[0][2], sent)
+check("13 the probe: an item on an idle front agent gets its turn started by the audit tick, once, naming the item and its step", len(to("a-main")) == 1 and "home · item 1" in to("a-main")[0][2] and '"do the thing"' in to("a-main")[0][2], sent)
 audit_ticks_svc._silence_tick()
 check("13 …and the tick after it starts nothing more (the mark)", len(to("a-main")) == 1 and set(marks()) == {"a1"}, (sent, marks()))
 check("13 the owner is never told: every recipient is a session", all(x[1] in U.values() for x in sent) and not any(x[1] in ("Oliver", "") for x in sent))

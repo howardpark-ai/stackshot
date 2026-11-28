@@ -652,7 +652,7 @@ def part_examples():
     # ---------------------------------------------------------------------------------------------------------------------------------------------------- create
     DEC = ('ask="Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099", '
            'options=[{"label": "Approve", "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a week", "recommended": false}]')
-    SUBJ = 'subject="[work] Make the export finish in under a minute"'
+    SUBJ = 'subject="Make the export finish in under a minute"'
     DESC_X = r'description="- Goal: the export finishes in under a minute\n- Problem: the nightly run takes 9 minutes"'
     P = 'project="projects/widgets"'
 

@@ -94,10 +94,10 @@ def _jobgap_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     """`client.py post job-gap open <timer> <code> --repo <owner/name> [--detail T] [--sender L]` and `… clear <timer> <code> [--sender L]`: sala's job-gap watcher says a timer or service of
     the host has a gap (code: no-description | no-lane | bad-lane | not-git | git-differs; any `[a-z][a-z0-9-]*` is taken) or that the gap is fixed. body: action (open | clear), timer, code,
     sender (default "client.py"), and for open the repo and an optional detail (at most 600 characters).
-    open: one open item per (timer, code), filed through create_item (service/create.py: the create tool's own code: subject prefix, description and next gates, project page, GitHub mirror; a refusal is the tool's
+    open: one open item per (timer, code), filed through create_item (service/create.py: the create tool's own code: subject length, description and next gates, project page, GitHub mirror; a refusal is the tool's
     text, 400). The repo is mapped to its project page by [job_gap.repos] (else none): the config repo -> projects/config, salamander -> projects/example-two, stackshot -> projects/example;
     a repo it does not list is a 400 naming the ones it does. The mover is the project's builder (_builder_agent: the background agent whose mandate builds), the creator the project's front
-    agent (its -main first); a project with no builder is moved by that -main agent, and the item says so (`fallback` in the answer). The subject is "<prefix> <the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (the project scope's prefix, else [subject] fallback_prefix, else the first prefix) cut to [subject]
+    agent (its -main first); a project with no builder is moved by that -main agent, and the item says so (`fallback` in the answer). The subject is "<the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (no tag in front) cut to [subject]
     max_length, p2, the description says what the gap is and how to fix it, next "<mover>: <the fix>", marked metadata.job_gap = "<timer>: <code>". The builder is told once, at the create
     (the needs notice: the item names it in needs), no front agent is woken; the row owes the page nothing (a script's notification). A repeat open of an open (timer, code) changes nothing and
     answers the existing item. clear: closes the open item (outcome done, reason within [close] reason_max, bullets); with none open it does nothing and answers 200 (`cleared` empty).
@@ -184,10 +184,9 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
         lines.append(f"{key} lists no builder, so this is with {owner}, its front agent")
     lines.append(f"Opened by {sender} (a script on {machine}); it closes when the watcher finds the gap fixed")
     desc = _terminal._terminal_bullets(*lines)
-    pfx_ = _terminal._terminal_subject_prefix(str(rec.get("scope") or ""))
     timer_ = _svcstore._shown_ids(timer)
-    room_ = (_subject_max() - len(pfx_) - len(task.format(unit=""))) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused (as the terminal prompt's)
-    subject = pfx_ + task.format(unit=_fit(timer_, room_) if 8 <= room_ < len(timer_) else timer_)
+    room_ = (_subject_max() - len(task.format(unit=""))) if _subject_max() else 0      # a long unit name is cut so the server's own subject is never refused (as the terminal prompt's)
+    subject = task.format(unit=_fit(timer_, room_) if 8 <= room_ < len(timer_) else timer_)
     if _subject_max():
         subject = _fit(subject, _subject_max())
     nxt = _fit(f"{mover}: {fix}", _next_line_max())

@@ -591,3 +591,19 @@ allow = []
 retired = "its old name `wake`"
 use = "`until` is the one date of a wait; `wake` is a retired parameter"
 allow = []
+
+# ---- a tag in the title: an item shows ONE group, from its project (the scope of the board row its page rolls up to); no write asks for a tag or adds one, and a title that still opens with one is shown without it (title_label.py).
+[[term]]
+retired = "scope prefix"
+use = "no tag in a title: an item's group is its project's; a leading tag an older title still carries is hidden wherever the title is shown"
+allow = []
+
+[[term]]
+retired = "subject prefix"
+use = "no tag in a title: an item's group is its project's; a leading tag an older title still carries is hidden wherever the title is shown"
+allow = []
+
+[[term]]
+retired = "fallback_prefix"
+use = "nothing adds a tag to a title, so there is no fallback tag to set"
+allow = []

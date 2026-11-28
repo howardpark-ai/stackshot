@@ -229,7 +229,7 @@ def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[s
     progress notice (watch_tell)."""
     if not rows:
         return None
-    msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
+    msg_rows = [(_gh.shown(g), what, f"{_anc.notice_title(it)} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
     marked = any(_telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and _waits_decision(m) for _g, it, _w in rows)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): the mark is for what he has to decide; a wake that is the agent's own move is not marked
     return _watch.message(msg_rows), (_FOR_OWNER if marked else ""), [g for g, *_ in rows]
 

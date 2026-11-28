@@ -133,7 +133,7 @@ check("…the times of the rows are non-increasing", lambda: (lambda ts: ts == s
 r = rows(A)
 check("a row has exactly the twelve fields, in this order", lambda: all(list(x) == FIELDS for x in r.values()) and len(r) == len(FOR_A), [list(x) for x in r.values()][:1])
 check("scope is the item's group, from its project (the page is in org home)", lambda: all(x["scope"] == "home" for x in r.values()) and len(r) == len(FOR_A), [x["scope"] for x in r.values()])
-check("shown is the id as a person reads it, subject the item's", lambda: r[shown(11)]["subject"] == "[home] contact only, the owner moves it" and all(k == x["shown"] for k, x in r.items()), r.get(shown(11)))
+check("shown is the id as a person reads it, subject the item's, its tag hidden", lambda: r[shown(11)]["subject"] == "contact only, the owner moves it" and all(k == x["shown"] for k, x in r.items()), r.get(shown(11)))
 check("contact is the contact's name now, observers the names of the observers: a stored name, a permanent id (as the name in use), an old name (as the current one), once each, in the stored order",
       lambda: r[shown(11)]["contact"] == A and r[shown(11)]["observers"] == [] and r[shown(13)]["observers"] == [A, B] and r[shown(18)]["observers"] == [A] and rows(B)[shown(21)]["observers"] == [B] and rows(B)[shown(22)]["observers"] == [B],
       (r[shown(13)], r[shown(18)], rows(B).get(shown(21))))
@@ -224,10 +224,12 @@ def queue_rule(on):
     forget_queue()
 def forget_queue(): _audit_ticks._QUEUE_CACHE.update(at=0.0, map={})          # the queue map is kept for some seconds: the next read works it out again
 def roles_builds(call):
-    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build)."""
+    """How many times the session roles were built while `call` ran (anchors.session_roles reads the projects waiting for their page once per build, through _pending_registry's with_pending(made=True) —
+    a pass memo (core/passmemo.py) makes that one call stand for the whole pass, however many callers inside it ask for the registry, so this counts calls to with_pending itself, not frames named "session_roles":
+    with the memo, session_roles is no longer with_pending's direct caller, _pending_registry's own build is)."""
     n = [0]; real = _prj.with_pending
     def counted(*a, **k):
-        if sys._getframe(1).f_code.co_name == "session_roles": n[0] += 1
+        n[0] += 1
         return real(*a, **k)
     _prj.with_pending = counted
     try: call()

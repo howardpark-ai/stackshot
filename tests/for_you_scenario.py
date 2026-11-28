@@ -157,10 +157,10 @@ for live in (True,):      # the router rules every project since the "router off
     rr = of(gid_, "closed")
     mode = "router live" if live else "router off"
     check(f"close with his said entry, owner a front agent, {mode}: one closed row", len(rr) == 1, rows())
-    check(f"…naming who closed it, the outcome, the subject and the reason; no item id inside (the list shows it beside)",
-          rr and rr[0]["what"] == f"closed by osprey-x (done): [home] item {gid_[1:]} — PR 14 is live" and rr[0]["item"] == gid_ and rr[0]["project"] == "projects/alpha" and not rr[0]["urgent"], rr)
+    check(f"…naming who closed it, the outcome, the item's group and its title with no tag, and the reason; no item id inside (the list shows it beside)",
+          rr and rr[0]["what"] == f"closed by osprey-x (done): home · item {gid_[1:]} — PR 14 is live" and rr[0]["item"] == gid_ and rr[0]["project"] == "projects/alpha" and not rr[0]["urgent"], rr)
     check(f"…{mode}: the front agent is told by its own message and no other: one line without the owner mark (nothing is for him on a close), no row-style or old-style notice (Sun Oct 25th 2026)",
-          [x[1] for x in to_front(p0) if "closed" in x[1] or "[for Oliver]" in x[1]] == [f"[stackshot] {gid_} [home] item {gid_[1:]}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{gid_}"], pushes()[p0:])
+          [x[1] for x in to_front(p0) if "closed" in x[1] or "[for Oliver]" in x[1]] == [f"[stackshot] {gid_} home · item {gid_[1:]}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{gid_}"], pushes()[p0:])
     check(f"…{mode}: no `close` notice is recorded for the router", not [n for n in routing.read("projects/alpha")[n0:] if str(n.get("label", "")).startswith("close ")], routing.read("projects/alpha")[n0:])
     check(f"…{mode}: the reply says it is a row on the For you list and that the owner was told at once", "is a row on his For you list" in out and "not a message to" not in out
           and "(its mover osprey-main is a front agent: told at once that it was closed)" in out and "not told" not in out, out)
@@ -193,7 +193,7 @@ for live in (True,):      # the router rules every project since the "router off
     g = lambda k: f"a{b + k}"
     p0 = len(pushes()); out = cl(b); settle()
     check(f"owner told, {mode}: a close by the builder (no words on the item, so no row): one unmarked line to the front agent owner, with the outcome, the subject and the item link",
-          to_owner(A, g(0), p0) == [f"[stackshot] {g(0)} [home] item {b}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{g(0)}"] and not of(g(0)), (pushes()[p0:], of(g(0))))
+          to_owner(A, g(0), p0) == [f"[stackshot] {g(0)} home · item {b}: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/{g(0)}"] and not of(g(0)), (pushes()[p0:], of(g(0))))
     check(f"…{mode}: the reply says so, and not the quiet 'not told' line", "told at once that it was closed" in out and "not told" not in out, out)
     p0 = len(pushes()); out = cl(b + 1, sender="osprey-main"); settle()
     check(f"owner told, {mode}: a close by the owner itself tells the owner nothing", not to_owner(A, g(1), p0) and "told at once" not in out, (pushes()[p0:], out))
@@ -238,7 +238,7 @@ check("...a line of another agent still open: the builder's own last line done p
 # (a) to (c): a builder leaving needs while another session stays, its last work line, and the hand-back's one line, are in router_live_scenario (it has a second background agent)
 # (d) another session closes the item while a second session is still named in its needs: the owner still gets the close line
 item(66, needs=["osprey-x", "osprey-docs"]); p0 = len(pushes()); outd = cl(66); settle()
-check("(d) a close by another session: the front agent owner still gets its one unmarked close line", to_owner(A, "a66", p0) == [f"[stackshot] a66 [home] item 66: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/a66"]
+check("(d) a close by another session: the front agent owner still gets its one unmarked close line", to_owner(A, "a66", p0) == [f"[stackshot] a66 home · item 66: closed by osprey-x: done (PR 14 is live) \u2192 {BOARD}/items/a66"]
       and "told at once that it was closed" in outd, (pushes()[p0:], outd))
 # the done check's own close tells a front agent owner too
 CHK = "item_closed a99"
@@ -246,7 +246,7 @@ item(92); item(93); item(94, owner="Oliver"); item(95, owner="an-outside-party")
 fy.set_flag("a93", "mute")
 p0 = len(pushes()); checks_svc.check_close("a92", _service_store._load("a92"), CHK, time.time()); settle()
 check("done check: its close tells the front agent owner at once, one unmarked line, the same shape as a session's close with the check as the closer",
-      len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[stackshot] a92 [home] item 92: closed by stackshot's done check: done (done check passed: ")
+      len(to_owner(A, "a92", p0)) == 1 and to_owner(A, "a92", p0)[0].startswith("[stackshot] a92 home · item 92: closed by stackshot's done check: done (done check passed: ")
       and to_owner(A, "a92", p0)[0].endswith(f") \u2192 {BOARD}/items/a92"), pushes()[p0:])
 # Oliver not there for the pane: the same close tells nobody (the item's close revision is the board's record), and the routing log records it (ruled archived: nothing was filed for the agent's next turn)
 PRESENT[0] = False; item(67, needs=["osprey-x"]); p0 = len(pushes()); n0 = len(routing.read("projects/alpha")); outh = cl(67); settle(); PRESENT[0] = True
@@ -274,7 +274,7 @@ cfg(live=True)
 settle(); cfg(live=True); p0 = len(pushes())
 _update_svc._update("a10", needs=["decision"], ask=ASK, next="Oliver: make the call", sender="osprey-x"); settle()
 d10 = of("a10", "decision")
-check("needs=decision on an item with no words on it: a decision row with the question", len(d10) == 1 and d10[0]["what"] == "needs your decision: whether to ship", d10)
+check("needs=decision on an item with no words on it: a decision row with the question", len(d10) == 1 and d10[0]["what"] == "needs your decision: home · whether to ship", d10)
 check("…nothing is pushed to the front agent for it", not to_front(p0), pushes()[p0:])
 _update_svc._update("a11", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x"); mute_before = len(rows())
 fy.set_flag("a12", "mute"); _update_svc._update("a12", needs=["decision"], ask=ASK, next="Oliver: wait", sender="osprey-x")
@@ -711,7 +711,7 @@ check("the row write fails on a close with his words: no row, the failure is log
 check("…the writer's reply says which happened: the list could not be written, so the old notice was sent (not 'a row', not 'not told')",
       "For you list could not be written" in out60 and "sent to osprey-main instead" in out60 and "is a row on his For you list" not in out60 and "not told" not in out60, out60)
 check("a watched close with none of his words has no fallback: no row, no old-style notice to the owner (its own unmarked line is the only one)",
-      not of("a62") and len(to_a("a62")) == 1 and to_a("a62")[0][1].startswith("[stackshot] a62 [home] item 62: closed by osprey-x: done") and "For you list" not in out62, (to_a("a62"), out62))
+      not of("a62") and len(to_a("a62")) == 1 and to_a("a62")[0][1].startswith("[stackshot] a62 home · item 62: closed by osprey-x: done") and "For you list" not in out62, (to_a("a62"), out62))
 check("the done check's close with his words: same fallback, the mover is in the ids told, and no keeper (the mover alone)", len(to_a("a61 closed by stackshot's done check")) == 1 and A in told61 and len(told61) == 1, (told61, told[t12:]))
 out63 = (item(63, said=SAID), cl(63))[1]; settle()
 check("(afterwards) with the list writable again the same close is a row, not a notice", len(of("a63", "closed")) == 1 and not to_a("a63 closed") and "is a row on his For you list" in out63, (of("a63"), out63))

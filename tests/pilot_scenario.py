@@ -178,7 +178,7 @@ def wait_push(n):
 res = _update_svc._update("a1", next="call the vendor", sender="work-osprey-main")
 check("agent told it was charged to the keeper", "charged to the keeper work-osprey" in res and "[nag]" not in res, res)
 owed = _web_page_debts._owed_load(); check("ledger: the keeper owes projects/alpha", list(owed.get("projects/alpha", {})) == [S], owed)
-p = wait_push(1); check("keeper notified of the board write", len(p) == 1 and p[0][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — the page update is yours as its keeper · notice [0-9a-f]{6}$", p[0][1])
+p = wait_push(1); check("keeper notified of the board write", len(p) == 1 and p[0][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — work · item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — the page update is yours as its keeper · notice [0-9a-f]{6}$", p[0][1])
       and "#task-" not in p[0][1], p)
 check("board write in the routing log", any(x["kind"] == "board" and x["pilot"] for x in routing.read("projects/alpha")))
 res = _update_svc._update("a1", next="keeper edits", sender="work-osprey"); check("the keeper's own write is not relayed", "charged to the keeper" not in res and len(wait_push(1)) == 1, res)
@@ -377,7 +377,7 @@ _ix = bd.projects_table(); _proj = re.findall(r'<td class="proj"[^>]*>(.*?)</td>
 check("Projects page: the project name links its details page /<key> in a new tab, not the gbrain mirror", '<a href="/projects/alpha" target="_blank" rel="noopener" title="work/Alpha">work/Alpha</a>' in _proj
       and not any("example.invalid" in x for x in _proj), _proj)
 _dp = bd.routing_html("projects/alpha")
-check("details page: a gbrain page link to the mirror under the title, in a new tab", '</h1><p class="sub"><a href="https://example.invalid/Alpha" target="_blank" rel="noopener">gbrain page ↗</a></p>' in _dp, _dp[_dp.find("<h1>"):][:300])
+check("details page: a gbrain page link to the mirror under the title, in a new tab; no pjgroup sub-line (the h1 \"work/Alpha\" already carries the scope, on a multi-scope instance)", '</h1><p class="sub"><a href="https://example.invalid/Alpha" target="_blank" rel="noopener">gbrain page ↗</a></p>' in _dp and 'class="sub pjgroup"' not in _dp, _dp[_dp.find("<h1>"):][:300])
 # the way back to the Projects page: a small link above the project's title, on a project page and a sub-page, not on the Projects page itself
 _BACK = '<p class="pjback"><a href="/projects">\u2190 Projects</a></p>'
 _ds = bd.routing_html("projects/alpha/sub"); _pl = bd.projects_html()
@@ -1062,7 +1062,7 @@ hp_ = bh.item_html("a67")
 check("held: the item page says it waits and until when, not whose move", '<span class="tag t-wait">Waiting</span>' in hp_ and "<dt>Watched by</dt><dd>the scheduler</dd><dt>Until</dt><dd>Mon Mar 2nd</dd>" in hp_ and "your call</span>" not in hp_, hp_[hp_.find('class="istate"'):][:400])
 _md = bh.markdown(); _mdw = _md[_md.find("\n## Waiting\n"):_md.find("\n## On agents\n")]; _mda = _md[_md.find("\n## On agents\n"):_md.find("## Completed")]
 check("held: board.md lists them in the list the model puts them in (a hold with a wake is a wait), marked, and drops the Parked section", "## Parked" not in _md
-      and "**a67 · [home] queue item 67** (parked, wake Mon Mar 2nd)" in _mdw and "**a68 · [home] queue item 68** (parked, no wake date)" in _mdw + _mda
+      and "**a67 · home · queue item 67** (parked, wake Mon Mar 2nd)" in _mdw and " · queue item 68** (parked, no wake date)" in _mdw + _mda
       and "waiting on needs your call" not in _md and "[a67](#task-a-67) (parked)" in _md and "_9 open · " in _md and "on hold)" not in _md[:_md.find("## Machines")], (_mdw[-900:], _mda[-300:]))
 check("held: the helper is the one place", render.is_held({"status": "open", "metadata": {"hold": True}}) and render.is_held({"status": "on_hold"})
       and not render.is_held({"status": "open"}) and not render.is_held({"status": "open", "metadata": {"hold": False}}) and not render.is_held({"status": "completed", "metadata": {"hold": True}})
@@ -1095,9 +1095,9 @@ witem(107, "[work] wk parked 107", "projects/wk", 3 * H_, hold=True); witem(108,
 witem(110, "[work] wk done 110", "projects/wk", 6 * H_, status="completed"); witem(111, "[home] box done 111", "ops/box", 7 * H_, status="completed")
 witem(112, "[home] box relay 112", "ops/box", 8 * H_, needs="external")
 bw = ui_render.Board(str(W), now=qnow); wh = bw.html()
-check("scope groups: the stored subject and board.md keep the tag (a leading tag is dropped from a home row's goal and from the item page's title)", bw.item("a21")["subject"] == "[work] wk call 21"
+check("scope groups: the stored subject keeps its tag; board.md, a home row's goal and the item page's title show it without the tag", bw.item("a21")["subject"] == "[work] wk call 21"
       and "<title>a21 · wk call 21</title>" in bw.item_html("a21") and '<span class="hgoal">wk call 21</span>' in wh and "[work] wk call 21</span>" not in wh
-      and "[work] wk call 21" in bw.markdown() and "[home] box parked 106" in bw.markdown(), bw.markdown()[:600])
+      and "work · wk call 21" in bw.markdown() and "[work] wk call 21" not in bw.markdown() and " · box parked 106" in bw.markdown() and "[home] box parked 106" not in bw.markdown(), bw.markdown()[:600])
 check("scope groups: the sub-heading is a small bold line with a rule under it", "h3.iscope{font-size:12px;font-weight:600;color:var(--fg);" in bw._css()
       and "border-bottom:1px solid var(--mut)" in bw._css()[bw._css().find("h3.iscope{"):])
 check("scope groups: the group heading is the fold's summary with the section folds' marker",
@@ -1143,14 +1143,14 @@ v["subject"] = "[home] history item, renamed"; v["updated"] = at(4, 18, 30); (G 
 bgs = ui_render.Board(str(G), now=datetime.datetime(2026, 2, 23, 12, 0, tzinfo=ZONE_TZ))
 evs, more = bgs.item_events(bgs.item("a70")); txt = [(bgs.when(ts), k_, re.sub(r"<[^>]+>", "", h_)) for ts, k_, h_ in evs]
 check("history: every event, newest first, in the instance timezone, with the uncommitted write on top", txt == [
-    ("Sun Feb 22nd 18:30", "edit", "subject edited (was “[home] history item”)"),
+    ("Sun Feb 22nd 18:30", "edit", "subject edited (was “history item”)"),
     ("Sun Feb 22nd 18:05", "completed", "completed"),
     ("Sun Feb 22nd 09:15", "unhold", "unparked · Waiting"),
     ("Sat Feb 21st 20:00", "hold", "wake cleared"),
     ("Sat Feb 21st 08:00", "hold", "parked · wake Mon Mar 2nd"),
     ("Fri Feb 20th 11:30", "due", "due moved: Fri Feb 27th → Mon Mar 2nd"),
     ("Thu Feb 19th 10:00", "needs", "moved to Waiting"),
-    ("Thu Feb 19th 09:00", "created", "created as “[home] history item” · Your move · mover the owner · created by home-beta")] and more == 0, txt)
+    ("Thu Feb 19th 09:00", "created", "created as “history item” · Your move · mover the owner · created by home-beta")] and more == 0, txt)
 gp = bgs.item_html("a70")
 check("history: on the page, with the time and the event", '<h2>History <span class="count">8</span></h2></summary><ul class="hist"><li class="ev ev-edit"><div class="eh"><span class="t">Sun Feb 22nd 18:30</span></div>' in gp
       and '<li class="ev ev-completed"><div class="eh"><span class="t">Sun Feb 22nd 18:05</span></div><div class="w"><div class="eb">completed</div></div></li>' in gp, gp[gp.find("<h2>History"):][:600])
@@ -1286,7 +1286,7 @@ p = wait_push(n0 + 1)
 _w3 = sorted(p[n0][1].splitlines()[1:]) if len(p) == n0 + 1 else []
 check("wake pass (the turn rule's fourth build): the owner is told once for the three, one line each, naming the wake as stored and the lane",
       len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].startswith("[stackshot] 3 items are yours now, their waits ended:\n")
-      and [x.split(" [home]")[0] for x in _w3 if x.startswith("- a")] == [f"- a3: its until {D(-2)} came.", f"- a5: its until {D(-1)} came.", f"- a8: its until {D(0)} came."], p[n0:])
+      and [x.split(" home ·")[0] for x in _w3 if x.startswith("- a")] == [f"- a3: its until {D(-2)} came.", f"- a5: its until {D(-1)} came.", f"- a8: its until {D(0)} came."], p[n0:])
 check("wake pass: it owes no page", json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0)
 check("wake pass: a second run finds nothing and tells nobody", wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 1)
 # the item (the item before it): an item whose needs names no session wakes the keeper of its page, whatever its needs (an agent prepares the ask):
@@ -1365,7 +1365,7 @@ check("date-only wake: still stored as YYYY-MM-DD", wk_(rd("a9")["metadata"]) ==
 check("date-only wake: a pass given a date takes the whole day, as before (not due today, due on its day)",
       wakes_svc.wake_pass(now=today) == [] and wakes_svc.wake_pass(now=today + datetime.timedelta(days=1)) == ["a9"] and not held_("a9"))
 p = wait_push(n9 + 2)
-check("timed and date-only wakes: the owner is told each time, the date as stored", sorted(x[1].split(" [home]")[0] for x in p[n9:]) == sorted([   # pushed from threads: either order
+check("timed and date-only wakes: the owner is told each time, the date as stored", sorted(x[1].split(" home ·")[0] for x in p[n9:]) == sorted([   # pushed from threads: either order
       f"[stackshot] a9 is yours now: its until {d2}T13:30 came.",
       f"[stackshot] a9 is yours now: its until {D(1)} came."]), p[n9:])
 # brief: the held item has its own block, after the open ones and not among them
@@ -1448,7 +1448,7 @@ check("wake alone pass: both items are told their date came; the date and kind a
 _rem_b = next((m for m in p[n0:] if m[0] == B), ["", ""]); _rem_s = [m for m in p[n0:] if m[0] == ZZB]
 check("wake alone pass: the mover of a30 is told its one line, and a25's mover (the session its needs name) its own once, nobody else",
       len(p) == n0 + 2 and _rem_b[1].startswith(f"[stackshot] a30 is yours now: its until {D(-1)} came.")
-      and [m[1].split(" [home]")[0] for m in _rem_s] == [f"[stackshot] a25 is yours now: its until {D(-1)} came."], p[n0:])
+      and [m[1].split(" home ·")[0] for m in _rem_s] == [f"[stackshot] a25 is yours now: its until {D(-1)} came."], p[n0:])
 pj = json.load(open(T / "store/projects.json")); pj["pages"].pop("projects/zz"); (T / "store/projects.json").write_text(json.dumps(pj))
 check("wake alone pass: it owes no page, and a second pass finds nothing and tells nobody",
       json.dumps(_web_page_debts._owed_load(), sort_keys=True) == led0 and wakes_svc.wake_pass() == [] and len(wait_push(0)) == n0 + 2)
@@ -2323,7 +2323,7 @@ jcommit(m_next="decide", updated=at(4, 9), state_updated=at(4, 9), confirmed=at(
 bj = ui_render.Board(str(J), now=know); jev = [(bj.when(ts), k_, re.sub(r"<[^>]+>", "", h_)) for ts, k_, h_ in bj.item_events(bj.item("a90"))[0]]
 check("ask/stale history: a confirm alone reads 'confirmed' at its time; an ask set or edited reads 'ask edited'; a state change is not a confirm event", jev == [
     ("Sun Feb 22nd 09:00", "edit", "next: decide"), ("Sat Feb 21st 12:00", "edit", "ask edited"), ("Sat Feb 21st 11:00", "confirm", "confirmed"),
-    ("Fri Feb 20th 10:00", "edit", "ask edited"), ("Thu Feb 19th 09:00", "created", "created as “[home] confirm item” · Your move · mover the owner · created by home-beta")], jev)
+    ("Fri Feb 20th 10:00", "edit", "ask edited"), ("Thu Feb 19th 09:00", "created", "created as “confirm item” · Your move · mover the owner · created by home-beta")], jev)
 
 # ---- error handling on the landing page
 # stale / unreachable: the render stamp, the banner, the poll and its guards, the warn threshold
@@ -2629,7 +2629,7 @@ ritem(86, 4 * H_, "no"); ritem(87, 1 * H_, 0)                                   
 r1 = _rb(); h1 = r1.html(); m1 = r1.markdown(); w1 = _ws(h1)
 _ms = lambda h: h[h.find('<section id="machines">'):h.find("</section>", h.find('<section id="machines">'))]
 x1 = _ms(h1)
-_ra = lambda g: f'<a class="r-id" href="/items/{g}" target="_blank" rel="noopener" title="[home] recycle item {g[1:]}">{g}</a>'
+_ra = lambda g: f'<a class="r-id" href="/items/{g}" target="_blank" rel="noopener" title="home · recycle item {g[1:]}">{g}</a>'
 check("recycle: the field is read as set for true, \"true\", 1, \"yes\" and not for false, 0, \"\", \"no\" or absent",
       all(render.waits_recycle({"metadata": {"recycle": v}}) for v in (True, "true", "TRUE", 1, "yes", "Yes", "1"))
       and not any(render.waits_recycle({"metadata": {"recycle": v}}) for v in (False, 0, "", "no", "false", None, 2)) and not render.waits_recycle({"metadata": {}}))
@@ -2706,7 +2706,7 @@ mb = _rb()
 sala_on()                                                                               # the keeper has a live pane; work-osprey-main and -x have none
 mb.sess["name:work-osprey-main"]["gone"] = mb.sess["name:work-osprey-x"]["gone"] = GONE
 mb.sess["name:testbox"] = {"id": "z", "kind": "pane", "name": "testbox", "url": "", "machine": "a"}   # a live session named like the machine
-_ia = lambda g: f'<a href="/items/{g}" target="_blank" rel="noopener" title="[home] recycle item {g[1:]}">{g}</a>'
+_ia = lambda g: f'<a href="/items/{g}" target="_blank" rel="noopener" title="home · recycle item {g[1:]}">{g}</a>'
 _sa = _sl("work-osprey")
 mp_ = mb.item_html("a88"); md_ = mp_[mp_.find('<div class="desc md">'):mp_.find("</div>", mp_.find('<div class="desc md">'))]
 check("mentions: a real item id in a description links to its item page in a new tab, its subject as the tooltip", f"Blocked on {_ia('a81')}, not" in md_, md_)
@@ -2778,7 +2778,7 @@ check("past the grace it moves", _page_debt_svc._pilot_fallback_tick() == 1)
 e = _web_page_debts._owed_load().get("projects/alpha", {}); p = wait_push(n0 + 1)
 check("re-marked to the keeper, dropped from the writer", list(e) == [S] and "moves" not in e[S] and e[S].get("settle") == "any", e)
 check("the keeper gets the board notice, saying who left it undone",
-      len(p) == n0 + 1 and p[-1][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — work-osprey-main left its page update undone past 30 min, so it is yours as its keeper · notice [0-9a-f]{6}$", p[-1][1]), p[-1:])
+      len(p) == n0 + 1 and p[-1][0] == S and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — work · item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — work-osprey-main left its page update undone past 30 min, so it is yours as its keeper · notice [0-9a-f]{6}$", p[-1][1]), p[-1:])
 check("and the routing log has the line, linked to the item page, never the card's store-id anchor",
       sum(1 for x in routing.read("projects/alpha") if x["kind"] == "board" and x.get("label") == "board a1" and x.get("url") == "https://stackshot.example.com/items/a1") >= 2
       and not any("#task-" in str(x.get("url")) for x in routing.read("projects/alpha")))
@@ -2797,8 +2797,8 @@ check("debt digest: three debts past the grace move in one tick; the keeper gets
       k == 3 and len(new) == 2 and len(mS) == 1 and len(mB) == 1, new)
 check("debt digest: the message counts them and lists each with its item, writer, link and notice id",
       mS and mS[0].startswith("[board] 2 page updates are yours as its keeper: their writers left them undone past 30 min.\n")
-      and re.search(r"^- a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 · notice [0-9a-f]{6}$", mS[0], re.M)
-      and re.search(r"^- a40 changed \(description\) by work-osprey-x — \[home\] item 40 \(projects/alpha\) → https://stackshot\.example\.com/items/a40 · notice [0-9a-f]{6}$", mS[0], re.M), mS)
+      and re.search(r"^- a1 changed \(next\) by work-osprey-main — work · item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 · notice [0-9a-f]{6}$", mS[0], re.M)
+      and re.search(r"^- a40 changed \(description\) by work-osprey-x — work · item 40 \(projects/alpha\) → https://stackshot\.example\.com/items/a40 · notice [0-9a-f]{6}$", mS[0], re.M), mS)
 check("debt digest: the one at 30 min was not held for a later digest: moved in this tick, the writer's dropped, the keeper's marked",
       X not in _web_page_debts._owed_load().get("projects/alpha", {}) and S in _web_page_debts._owed_load().get("projects/alpha", {}), _web_page_debts._owed_load())
 check("debt digest: one alone keeps its old text", mB and re.match(r"\[board\] a3 changed \(next\) by work-osprey-x — .* — work-osprey-x left its page update undone past 30 min, so it is yours as its keeper · notice [0-9a-f]{6}$", mB[0]), mB)
@@ -2958,7 +2958,7 @@ res = _update_svc._update(a1_, after=[a2_, a3_], sender="home-beta")
 check("after: stored; get shows each with its state", rd(a1_)["metadata"].get("after") == [a2_, a3_] and f"\nafter: {a2_} (open), {a3_} (open)\n" in res, res)
 bA = ui_render.Board(str(T / "store")); rA = bA.item(a1_)
 check("after: the item is parked (out of the queue, a wait on the item) without a hold; the tooltip and board.md say 'after …', and the brief counts it waiting", a1_ in [r["gid"] for r in bA.held] and a1_ not in [r["gid"] for r in bA.agent + bA.n_call]
-      and not render.is_held(rA) and render.is_parked(rA) and bA.hold_tip(rA) == f"after {a2_}, {a3_} · until it closes" and f"**{a1_} · [home] after test** (after {a2_}, {a3_})" in bA.markdown()
+      and not render.is_held(rA) and render.is_parked(rA) and bA.hold_tip(rA) == f"after {a2_}, {a3_} · until it closes" and f" · after test** (after {a2_}, {a3_})" in bA.markdown() and "[home] after test" not in bA.markdown()
       and f"- after: [{a2_}](#task-{a2_[0]}-{a2_[1:]}), [{a3_}](#task-{a3_[0]}-{a3_[1:]})" in bA.markdown() and a1_ in [r["gid"] for r, _m in bA.home_pairs()["waiting"]] and "after another item" not in bA.brief().splitlines()[0], (bA.hold_tip(rA), bA.brief().splitlines()[0]))
 _ap = "".join(bA.routing_html(k) for k in bA.proj); _ar = _ap[_ap.find(f'<li class="irow hrow" id="task-{a1_[0]}-{a1_[1:]}" data-st="wait">'):][:1400]
 check("after: the project page's Waiting row says what it waits for (after the two items), and the item page's prop",
@@ -3113,7 +3113,7 @@ check("auto-name: an item page link and an upper-case id count, an id that names
       needs46(h2) == ["work-osprey-x"] and needs46(h3) == ["work-osprey-x"] and res.count("(named work-osprey-x") == 2, (needs46(h2), needs46(h3), res))
 ow = [m for m in p[n0:] if m[0] == "work-osprey-bld"]
 check("auto-name: a handover by another session tells the owner once per item, through the owner path (a front owner: its keeper)",
-      len(ow) == 2 and all(re.match(r"\[stackshot\] [a-z]\d+ \(mover work-osprey-main, a front agent\) now names work-osprey-x in its needs, handed over by home-beta: \[home\] auto-name test", m[1]) for m in ow)
+      len(ow) == 2 and all(re.match(r"\[stackshot\] [a-z]\d+ \(mover work-osprey-main, a front agent\) now names work-osprey-x in its needs, handed over by home-beta: work · auto-name test", m[1]) for m in ow)
       and "its keeper work-osprey-bld has been told instead" in res, (ow, res))
 h4 = mk46(); n0 = len(wait_push(0))
 _messaging._message("work-osprey-main", f"{MK} a900 {h4} needs your look", "home-beta"); _messaging._message("work-osprey", f"{h4} for the keeper", "home-beta"); _messaging._message("projects/alpha", f"{h4} for the project", "home-beta"); wait_push(n0 + 3)
@@ -3124,7 +3124,7 @@ _d1 = rd(d1); _d1["metadata"]["project"] = "projects/alpha"; writes.save(d1, _d1
 res = _messaging._message("work-osprey-x", f"take {d1}", "work-osprey-main"); p = wait_push(n0 + 2)
 ow = [m for m in p[n0:] if m[0] == B]
 check("auto-name: a plain first naming tells the owner in one line (an owner that is not a front agent, directly)", needs46(d1) == ["work-osprey-x"] and len(ow) == 1
-      and ow[0][1].startswith(f"[stackshot] {d1} now names work-osprey-x in its needs, handed over by work-osprey-main: [home] auto-name test") and "(its mover home-beta has been told)" in res, (ow, res))
+      and ow[0][1].startswith(f"[stackshot] {d1} now names work-osprey-x in its needs, handed over by work-osprey-main: work · auto-name test") and "(its mover home-beta has been told)" in res, (ow, res))
 # only an id written as a plain word names the receiver (misfires to avoid: a test name quoted in a brief,
 # "a close by …"; a format example "1 g9191@1791800000"; a sala handover's context line): not in code, not in quotes, nothing glued on
 q1, q2, q3 = mk46(), mk46(), mk46()
@@ -3838,14 +3838,14 @@ _web_page_debts._owing_note = lambda debtor: ""        # the page rule is not un
 Xn = "work-osprey-x"
 def told_owner(to, g):
     """The [board] lines this section's notices put to one session for one item (the pilot relay's own lines start `[board] a1 changed`)."""
-    return [m for m in wait_push(0) if m[0] == to and m[1].startswith(f"[board] {g} [home] item ")]
+    return [m for m in wait_push(0) if m[0] == to and m[1].startswith(f"[board] {g} home · item ")]
 for i_, o_ in ((78, B), (79, B), (93, _core_instance.OWNER), (94, "Kim Lee")): item(i_, "projects/beta", o_)
 item(95, "projects/alpha", A)
 time.sleep(0.3); n0 = len(wait_push(0))
 res = _update_svc._update("a78", next="Live since 09:15", sender=Xn); wait_push(n0 + 1); time.sleep(0.3)
 t1 = told_owner(B, "a78")
 check("tell owner: a non-owner's change to next tells the owner once, in the notice's form, with the item's link",
-      len(t1) == 1 and t1[0][1] == "[board] a78 [home] item 78: work-osprey-x set next: Live since 09:15 → https://stackshot.example.com/items/a78"
+      len(t1) == 1 and t1[0][1] == "[board] a78 home · item 78: work-osprey-x set next: Live since 09:15 → https://stackshot.example.com/items/a78"
       and "(its mover home-beta has been told)" in res, (t1, res[-200:]))
 n1 = len(wait_push(0)); res = _update_svc._update("a78", next="Rolled back at 09:40\nsecond line", sender=Xn); time.sleep(0.5)
 check("tell owner: a second change inside ten minutes sends no second notice, and the reply says nothing of it", len(told_owner(B, "a78")) == 1 and len(wait_push(0)) == n1 and "has been told" not in res, (told_owner(B, "a78"), res[-200:]))
@@ -3866,7 +3866,7 @@ check("tell owner: the owner's own update sends nothing", len(told_owner(B, "a78
 n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a78", sender=Xn, outcome="done", reason="it is live", description="- Goal: The thing is live"); wait_push(n1 + 1); time.sleep(0.3)
 t6 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a78 was completed")]
 check("tell owner: a non-owner's close tells the owner at once even inside the window, though the item is closed, with the outcome and the reason (every page is a router page: the close notice of tell_owner, once, and no second '[board]' line)",
-      len(told_owner(B, "a78")) == 3 and len(t6) == 1 and t6[0][1] == "[stackshot] a78 was completed (done: it is live) by work-osprey-x: [home] item 78 → https://stackshot.example.com/items/a78" and rd("a78")["status"] == "completed", (t6, told_owner(B, "a78")))
+      len(told_owner(B, "a78")) == 3 and len(t6) == 1 and t6[0][1] == "[stackshot] a78 was completed (done: it is live) by work-osprey-x: home · item 78 → https://stackshot.example.com/items/a78" and rd("a78")["status"] == "completed", (t6, told_owner(B, "a78")))
 n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a79", sender=Xn, outcome="dropped", reason="not needed", description="- Goal: Dropped"); wait_push(n1 + 1); time.sleep(0.3)
 t7 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a79 was completed")]
 check("tell owner: …and a close with no change before it is told too", len(t7) == 1 and "(dropped: not needed) by work-osprey-x" in t7[0][1] and not told_owner(B, "a79"), (t7, told_owner(B, "a79")))
@@ -3885,7 +3885,7 @@ _rg9["pages"]["projects/beta"].update(agents={"home-beta-main": "front", "home-b
 _sj = json.loads((T / "fleet/a/sessions.json").read_text()); _sj[P_] = {"name": "plain-owner", "machine": "a", "url": "", "seen": "x"}; _sj[Y_] = {"name": "plain-y", "machine": "a", "url": "", "seen": "x"}
 (T / "fleet/a/sessions.json").write_text(json.dumps(_sj))
 def item2(i, proj, owner, **m): (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": owner, "mover": owner, "project": proj, "next": "orig", **m}, "updated": 1, "state_updated": 1, "confirmed": 1}))
-mine = lambda g: [m for m in wait_push(0) if m[1].startswith(f"[board] {g} [home] item ")]
+mine = lambda g: [m for m in wait_push(0) if m[1].startswith(f"[board] {g} home · item ")]
 item2(10, "projects/alpha", P_)
 n1 = len(wait_push(0)); res = _update_svc._update("a10", next="builder step", sender="work-osprey-y"); time.sleep(0.7)
 to_p = [m for m in wait_push(0)[n1:] if m[0] in (P_, "plain-owner")]
@@ -3903,9 +3903,9 @@ n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a16", sender="wor
 check("tell owner: the keeper closing a front agent owner's item sends nothing to the page key, the quiet line standing", not to_page(n1) and "went to projects/alpha" not in res, (wait_push(0)[n1:], res[-200:]))
 n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a17", sender="plain-y", outcome="done", reason="plain closes", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one line, with no owner mark (tell_owner_close) and sends nothing to the page key",
-      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a17 [home] item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
+      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a17 work · item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
 # a front agent owner whose write no relay carried (outside the pilot): the page key, through its keeper or stand-in, once
-_NOTE = lambda g, n, what: f"[board] {g} [home] item {n[1:]}: plain-y {what} (mover work-osprey-main may need to act) → https://stackshot.example.com/items/{g}"
+_NOTE = lambda g, n, what: f"[board] {g} work · item {n[1:]}: plain-y {what} (mover work-osprey-main may need to act) → https://stackshot.example.com/items/{g}"
 item2(18, "projects/delta", A)
 general(True)
 n1 = len(wait_push(0)); res = _update_svc._update("a18", next="the front owner's next", sender="plain-y"); time.sleep(0.7); got_res_delta = res
@@ -3919,7 +3919,7 @@ n1 = len(wait_push(0)); _update_svc._update("a18", next="a second front change",
 check("tell owner: …and a second change inside ten minutes sends no second inbound", not to_page(n1) and len([x for x in routing.read("projects/delta") if x["kind"] == "message" and "may need to act" in x["text"]]) == 1, wait_push(0)[n1:])
 item2(19, "projects/delta", A); n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a19", sender="plain-y", outcome="done", reason="front owner's item closed", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: a close of a front agent owner's item no relay carried is told to the owner itself, once, unmarked, and not also to the page key; the 'not told' line is gone",
-      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a19 [home] item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
+      not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[stackshot] a19 work · item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
       and "not told; the board shows it" not in res and "told at once that it was closed" in res, (wait_push(0)[n1:], res[-300:]))
 # a builder's step on a front agent owner's item is never pushed to the owner
 item2(129, "projects/alpha", A, needs=[Xn], next=f"{Xn}: w"); item2(142, "projects/alpha", A, needs=["external", Xn])
@@ -3940,7 +3940,7 @@ check("tell owner: when the routing record cannot be written nothing is pushed (
 _cfg.CFG["board"]["tell_owner"] = False; item(95, "projects/beta", B); n1 = len(wait_push(0))
 _update_svc._update("a95", next="with the switch off", sender=Xn); _wt_complete.stackshot_complete("a95", sender=Xn, outcome="done", reason="closed with it off", description="- Goal: Done"); time.sleep(0.5)
 check("tell owner: with [board] tell_owner = false neither a next change nor a close sends a '[board]' line: the close is told once by the older close notice alone",
-      not told_owner(B, "a95") and [m[1] for m in wait_push(0)[n1:] if m[0] == B] == ["[stackshot] a95 was completed (done: closed with it off) by work-osprey-x: [home] item 95 \u2192 https://stackshot.example.com/items/a95"], wait_push(0)[n1:])
+      not told_owner(B, "a95") and [m[1] for m in wait_push(0)[n1:] if m[0] == B] == ["[stackshot] a95 was completed (done: closed with it off) by work-osprey-x: home · item 95 \u2192 https://stackshot.example.com/items/a95"], wait_push(0)[n1:])
 _cfg.CFG["board"]["tell_owner"] = True
 
 # the keepers are retired: with home-beta's pane not running, a non-pilot page of user-facing agents answers its page key with its -main agent,
@@ -3971,7 +3971,7 @@ check("tell owner: …and in the pilot too (the older rule), with no 'may need t
 item2(29, "projects/beta", P_); n1 = len(wait_push(0))
 _update_svc._update("a29", next="n1", sender="plain-y"); _wt_complete.stackshot_complete("a29", sender="plain-y", outcome="done", reason="r", description="- Goal: Done")
 res = _update_svc._update("a29", status="open", next="reopened step", sender="plain-y"); wait_push(n1 + 3); time.sleep(0.5); replies.append(res)
-t_ = [m[1] for m in wait_push(0)[n1:] if m[0] in (P_, "plain-owner", B, "home-beta-main", "home-beta-ops") and m[1].startswith(("[board] a29 [home] item ", "[stackshot] a29 "))]
+t_ = [m[1] for m in wait_push(0)[n1:] if m[0] in (P_, "plain-owner", B, "home-beta-main", "home-beta-ops") and m[1].startswith(("[board] a29 home · item ", "[stackshot] a29 "))]
 check("tell owner: set next and the close are told to the mover (each once); the reopen is not: a close drops the mover, the item falls to the project's default holder, a front agent, which is not pushed",
       len(t_) == 2 and sum(m_.startswith("[board] a29") and "set next: n1 \u2192" in m_ for m_ in t_) == 1 and sum(m_.startswith("[stackshot] a29 was completed (done: r) by plain-y") for m_ in t_) == 1
       and not any("was reopened" in m_ for m_ in t_), t_)    # each notice goes out on its own thread: the order varies

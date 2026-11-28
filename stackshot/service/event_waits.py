@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.anchors import anchors as _anc
 from stackshot.anchors import machine_anchor as _ma
 from stackshot.core import config as _cfg
 from stackshot.core import ghbudget as _gb
@@ -347,7 +348,7 @@ def machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                         continue                  # its own box_online wait on this machine tells its mover when the wait ends
                     step = next((t for t in steps if _ma.names_in(t, machine_state(fleet, boxes)[3])), "")
                     if scoped or step:
-                        out.setdefault(sid, []).append((fleet, gid, str(it.get("subject") or ""), step or (steps[0] if steps else ""), bool(alive) or not who))      # a failed reading of the item (no mover) is unsure: told as asking, as before
+                        out.setdefault(sid, []).append((fleet, gid, _anc.notice_title(it), step or (steps[0] if steps else ""), bool(alive) or not who))      # a failed reading of the item (no mover) is unsure: told as asking, as before
             except Exception as e:  # noqa: BLE001  — one item never stops the others
                 print(f"machine anchor: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         told: list[str] = []

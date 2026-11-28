@@ -80,7 +80,7 @@ def model(prompt, use_items=True):
     nid, text = json.loads(body)["id"], words(json.loads(body)["text"])
     target = None
     if use_items:
-        for m in re.finditer(r"^- (\S+) · (?:mover (\S+)|no agent of this project moves it)(?: · work by (\S+))?(?: · party [^·]+)? · (.*)$", prompt, re.M):
+        for m in re.finditer(r"^- (\S+) · (?:mover (\S+)|no agent of this project moves it)(?: · work by (\S+))?(?: · party [^·]+)? · (?:\S+ · )?(.*)$", prompt, re.M):
             if text & words(m.group(4)):
                 target = m.group(3) or m.group(2)       # None for an item no agent moves: the mandates decide
                 break
@@ -106,7 +106,7 @@ def rule(root, n, **kw):
 n_item = notice("aaa111", "the blog draft needs fixes in a few sentences, polish it next week")
 ln, prompt = rule("projects/docs", n_item)
 check("item: the notice about the blog draft goes to the item's mover, not to the agent whose mandate says blog", ln["ruling"] == "passed" and ln["target"] == "docs-main", ln)
-check("item: the prompt lists the item with its id, mover, party and title", f"- {shown('a' + str(i_style))} · mover docs-main · party Sam · Style pass on the blog draft about the weekly digest" in prompt, prompt[:1500])
+check("item: the prompt lists the item with its id, mover, party and title", f"- {shown('a' + str(i_style))} · mover docs-main · party Sam · home · Style pass on the blog draft about the weekly digest" in prompt, prompt[:1500])
 check("item: the list has the project's two open items only (not the closed one, not another project's)", prompt.count(" · mover ") == 2 and "Old newsroom" not in prompt and "Other project" not in prompt, prompt[:1500])
 check("item: the same 'model' without the list picks the mandate's agent (the list is what moves the notice)", rule("projects/docs", n_item, use_items=False)[0]["target"] == "docs-site")
 
@@ -141,16 +141,16 @@ check("empty: no open item, no list in the prompt", "Open items of the project" 
 # ---- 5. the work-by agent of a front mover's item, in a project with a background agent
 cx = router.Context()
 ops = router.open_items_block("projects/ops", cx)
-check("work-by: an item whose first next line opens with a background agent shows `work by` it", any(f"{shown('a' + str(i_work))} · mover site-main · work by ops-builder · Fix the header" in l for l in ops), ops)
-check("work-by: an item its front mover does itself shows no `work by`", any(f"{shown('a' + str(i_own))} · mover site-main · Call the vendor" in l for l in ops), ops)
+check("work-by: an item whose first next line opens with a background agent shows `work by` it", any(f"{shown('a' + str(i_work))} · mover site-main · work by ops-builder · home · Fix the header" in l for l in ops), ops)
+check("work-by: an item its front mover does itself shows no `work by`", any(f"{shown('a' + str(i_own))} · mover site-main · home · Call the vendor" in l for l in ops), ops)
 n_hdr = notice("ddd444", "the header still shows the old logo")
 ln, _p = rule("projects/ops", n_hdr)
 check("work-by: the notice about that item goes to the agent doing the work", ln["ruling"] == "passed" and ln["target"] == "ops-builder", ln)
 
 block = "\n".join(ops)
 check("off-map: a mover that is no agent of the project is not named", "fleet-engineer · Rotate" not in block and "infra" not in block
-      and any(f"- {shown('a' + str(i_off))} · no agent of this project moves it · Rotate the keys" in l for l in ops), ops)
-check("off-map: a worker of another project is not named as `work by`", any(f"{shown('a' + str(i_offwork))} · mover site-main · Move the machine" in l for l in ops) and "work by fleet-engineer" not in block, ops)
+      and any(f"- {shown('a' + str(i_off))} · no agent of this project moves it · home · Rotate the keys" in l for l in ops), ops)
+check("off-map: a worker of another project is not named as `work by`", any(f"{shown('a' + str(i_offwork))} · mover site-main · home · Move the machine" in l for l in ops) and "work by fleet-engineer" not in block, ops)
 ln, _p = rule("projects/ops", notice("eee555", "rotate the keys before friday"))
 check("off-map: a notice about an item no agent moves is left to the mandates (the stub picks the -main agent, the front-agent rule moves it to the builder)", ln["ruling"] == "passed" and ln["target"] == "ops-builder" and "not to site-main" in ln["reason"], ln)
 # the front-agent rule still applies to a front mover in a project with a background agent: the governor sends the pass to the agent that works
@@ -172,8 +172,8 @@ def put_raw(subject, **md):
 i_ret = put_raw("Waiting on Acme legal", wait_event="Acme legal replies", ask_by="2026-12-01")
 i_kept = put_raw("Party still stored", party="Beta", chase="2026-12-02", wait_event="Acme legal replies", ask_by="2026-12-01")
 ops = router.open_items_block("projects/ops", router.Context())
-check("retired: the router's list shows the wait_event as the party when the item stores no party", any(f"{shown('a' + str(i_ret))} · mover site-main · party Acme legal replies · Waiting on Acme legal" in l for l in ops), ops[:4])
-check("retired: a stored party still wins over the wait_event", any(f"{shown('a' + str(i_kept))} · mover site-main · party Beta · Party still stored" in l for l in ops), ops[:4])
+check("retired: the router's list shows the wait_event as the party when the item stores no party", any(f"{shown('a' + str(i_ret))} · mover site-main · party Acme legal replies · home · Waiting on Acme legal" in l for l in ops), ops[:4])
+check("retired: a stored party still wins over the wait_event", any(f"{shown('a' + str(i_kept))} · mover site-main · party Beta · home · Party still stored" in l for l in ops), ops[:4])
 import datetime as _dt; from stackshot.model import cold_call
 def hidden(i):
     msg = cold_call.build_hidden_message(shown("a" + str(i)), json.loads((T / f"store/a/{i}.json").read_text()), [], _dt.date(2026, 11, 5), ["site-main"], [], "test")

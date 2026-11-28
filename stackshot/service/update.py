@@ -506,7 +506,7 @@ def _goal_moved_note(item_was: dict[str, Any], item: dict[str, Any], sent: str) 
     if new is None or old is None or said is None or subject != str(item_was.get("subject") or "") or goal_words(old) in (goal_words(new), goal_words(said)):
         return ""
     _calls.noted("goal-moved")
-    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(subject)}": send subject= if the work it names no longer reaches that Goal)'
+    return f'\n(note: the Goal changed and the subject did not; the stored subject is "{_clip_line(_anc.notice_title(item))}": send subject= if the work it names no longer reaches that Goal)'
 
 
 def _mark_next_stale(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, Any], writer: str, naming_added: list[str], next_passed: bool) -> None:
@@ -819,7 +819,7 @@ def update_unlocked(
     gid = _norm_id(item_id, bare=True)
     item = _load(gid)
     if status == "completed":
-        _name_read(gid, str(item.get("subject") or ""))          # a close read from a bare number or #N says which item it is: its subject's first words
+        _name_read(gid, item)          # a close read from a bare number or #N says which item it is: its group and title's first words
     answered_note = _answered_since_note(gid, item, sender)      # read now: the write below is the sender's too
     had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save

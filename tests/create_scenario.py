@@ -6,7 +6,7 @@ a create means. This suite installs hooks that record each call and return what 
   1  order          the whole sequence of a session's create, from the subject gate to the reply's last note; a create from a script (`by`) leaves out the checks of a session's own write
   2  flags          the three thread-local flags are read through the hooks: a session's write (goal, an open step, a front agent's step), a script's question (the open-question checks are skipped), the
                     terminal prompt's row (no owner-step check, no page debt, no pilot relay)
-  3  the file       the item the save gets: id, clocks, who wrote it, `filed_by` for a script, the fixes recorded; the subject takes the project's prefix; the writer is `by` or the creator
+  3  the file       the item the save gets: id, clocks, who wrote it, `filed_by` for a script, the fixes recorded; the subject is stored as given, no tag added; the writer is `by` or the creator
   4  refusals       a gate that refuses stops the create before an id is taken or a file is written, and the request is remembered only after the save
   5  request map    a retry with the same request id returns the item the first call made and runs no gate; an entry whose item is gone files anew; the map is written whole and leaves no temporary file
   6  github ids     with the issue-number ids on, the id is the issue's; a GitHub that does not answer is a refusal without the queue and a temporary id with it (budget or outage), told in the reply
@@ -54,7 +54,7 @@ BORED = {"gate_options": [], "gate_needs": [], "gate_observers": [], "gate_after
          "gate_draft_args": ("", False), "step_proof_set": "", "fallback_wait_date": ("", "", ""), "evwait_gate": "", "then_stands": "", "owner_then_default": "", "lift_ask": "", "ask_owed": "",
          "options_note": "", "actor_note": "", "gate_model": "", "after_open": False, "model_guards_on": True, "pilot_charge": ("", ""), "writer_owes": False, "pilot_relay": "",
          "tell_needed": "", "handoff_notify": "", "machine_note": "", "fmt": "<item>", "said_note": "", "form_notes": "", "similar_note": "", "nag": "", "session_id": None,
-         "gate_ask": None, "gate_contact": "", "wait_alias_gate": None, "project_subject_prefix": "", "writer_charge": "", "owing_note": ""}
+         "gate_ask": None, "gate_contact": "", "wait_alias_gate": None, "writer_charge": "", "owing_note": ""}
 def hook(name):
     def run(*a, **k):
         LOG.append((name, a, k))
@@ -78,14 +78,14 @@ def flag(name):
 # the write gates are service/gates.py's, not hooks: the create calls them on that module, so this suite replaces each there (the recorder above) and puts the real ones back before it imports the server
 REAL_GATES = {n: getattr(gates, n) for n in dir(gates) if n.startswith("gate_") and callable(getattr(gates, n))}
 for _n in REAL_GATES: setattr(gates, _n, hook(_n))
-# the field and decision rules are model/'s and the similar-items note and the project's subject prefix are the create's and service/gates.py's, none a hook either: the create calls each on its owner, so this suite replaces each there
+# the field and decision rules are model/'s and the similar-items note is the create's, not a hook either: the create calls each on its owner, so this suite replaces each there
 # with the same recorder, under the name the order below lists it by (the owner's name without its leading underscore)
 from stackshot.model import decision_gates as _dg, field_gates as _fg
 MOVED = {"gate_subject": (_fg, "subject_faults"), "gate_recycle_item": (_fg, "_gate_recycle_item"), "gate_description": (_fg, "description_faults"), "gate_goal": (_fg, "goal_fault"),
          "gate_next": (_fg, "next_faults"), "gate_bare_urls": (_fg, "bare_url_faults"), "gate_one_decision": (_dg, "_gate_one_decision"), "gate_alternatives": (_dg, "_gate_alternatives"),
          "gate_open_question": (_dg, "_gate_open_question"), "gate_recommend_stance": (_dg, "_gate_recommend_stance"), "gate_mockup": (_dg, "_gate_mockup"),
          "gate_own_action": (_dg, "_gate_own_action"), "options_note": (_dg, "_options_note"), "actor_note": (_dg, "_actor_note"),
-         "similar_note": (create, "similar_note"), "project_subject_prefix": (gates, "project_subject_prefix")}
+         "similar_note": (create, "similar_note")}
 REAL_MOVED = {n: getattr(m, a) for n, (m, a) in MOVED.items()}
 for _n, (_m, _a) in MOVED.items(): setattr(_m, _a, hook(_n))
 # the telling is service/telling.py's, not a hook either: the create calls each notice on that module, so this suite replaces the five it calls there with the same recorder
@@ -196,14 +196,12 @@ check("3 the item is open and has no filed_by", it["status"] == "open" and "file
 gid_b, _ = mk(by="a script (a script on box-a)", subject="[home] filed by a script", extra={"terminal_prompt": "wr3"})
 it_b = rd(gid_b); sv_b = called("save")[0]
 check("3 a script's item is saved under the script's name, records it as filed_by, and carries the route's own marks", sv_b[1]["writer"] == "a script (a script on box-a)" and it_b["filed_by"] == "a script (a script on box-a)" and it_b["metadata"].get("terminal_prompt") == "wr3" and it_b["metadata"]["owner"] == OWNER, (sv_b, it_b))
-RET["project_subject_prefix"] = "[work] "
 gid_p, _ = mk(subject="no prefix at all")
-check("3 a subject with no scope prefix takes the project's, through the hook", rd(gid_p)["subject"] == "[work] no prefix at all" and called("project_subject_prefix"), rd(gid_p)["subject"])
+check("3 a subject with no tag is stored as given: no tag is put before it, and the project is not asked for one", rd(gid_p)["subject"] == "no prefix at all", rd(gid_p)["subject"])
 gid_q, _ = mk(subject="[home] already scoped")
-check("3 …and one with a prefix of the instance's list does not ask the project", not called("project_subject_prefix") and rd(gid_q)["subject"] == "[home] already scoped", names())
+check("3 …and one that still opens with a tag of the instance's list is stored as written", rd(gid_q)["subject"] == "[home] already scoped", names())
 gid_r, _ = mk(subject="no prefix at all", by="a script (a script on box-a)")
-check("3 …nor does a script's subject get one", not called("project_subject_prefix") and rd(gid_r)["subject"] == "no prefix at all", names())
-RET.pop("project_subject_prefix")
+check("3 …a script's subject is left as given too", rd(gid_r)["subject"] == "no prefix at all", names())
 gid_f, _ = mk(fixes=[("front-mover", "tok", "line")])
 check("3 what a tool wrapper fixed is passed to the record before the save", names().index("record_fixes") < names().index("save") and called("record_fixes")[0][0][1] == [("front-mover", "tok", "line")], called("record_fixes"))
 RET["contact_default"] = "wr3-main"
@@ -362,7 +360,7 @@ check("7 the table holds the one constant, and neither a flag (service/writes.py
 # ---------------------------------------------------------------- 8. the table the server builds
 # The server's own table, not this suite's: a hook is looked up when it is called, so a suite that replaces the owner's function after the install still reaches the create.
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
-for _n, _f in REAL_MOVED.items(): setattr(MOVED[_n][0], MOVED[_n][1], _f)      # and the real field and decision rules, the similar-items note and the subject prefix
+for _n, _f in REAL_MOVED.items(): setattr(MOVED[_n][0], MOVED[_n][1], _f)      # and the real field and decision rules, the similar-items note
 for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
 tbl = create._hooks()
@@ -380,7 +378,7 @@ try: mk(); via_gate = None
 except ToolError as e: via_gate = str(e)
 finally: _fg.subject_faults = real_gate
 n_mv = len(MOVED)
-check("8 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the create), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(create.Hooks)} & set(MOVED)) and n_mv >= 16, sorted(MOVED))
+check("8 the field and decision rules are model/'s, called on their modules at each call (a suite's patch of the owner reaches the create), and none is a hook", via_gate == "<patched gate>" and not ({f.name for f in dataclasses.fields(create.Hooks)} & set(MOVED)) and n_mv >= 15, sorted(MOVED))
 
 writes.save = real_save
 print(f"create scenario: {len(ran) - len(fails)}/{len(ran)} checks")

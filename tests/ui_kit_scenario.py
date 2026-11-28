@@ -901,7 +901,7 @@ check("recycle: the field reads as set for true, yes and 1, and not for false, n
 check("recycle: the status line lists the open items that wait for a recycle, oldest update first, a hold for the recycle alone included", [r["gid"] for r in br.recycle] == ["a82", "a88", "a81", "a83"], [r["gid"] for r in br.recycle])
 check("recycle: one plain status line under the Machines heading with each id linked (new tab, subject as tooltip), in that order",
       hr.count('<p id="recycle"') == 1 and "Pane recycle pending for" in rline and re.findall(r'/items/(a\d+)"', rline) == ["a82", "a88", "a81", "a83"]
-      and 'target="_blank" rel="noopener" title="[home] recycle item 82"' in rline and hr.find('id="machines"') < hr.find('<p id="recycle"'), rline)
+      and 'target="_blank" rel="noopener" title="recycle item 82"' in rline and hr.find('id="machines"') < hr.find('<p id="recycle"'), rline)
 check("recycle: an item held for a wake as well, a completed item and a falsy value are not on the line", all(f'/items/a{g}"' not in rline for g in (84, 85, 86, 87)), rline)
 RB = '<span class="badge recycle">waits for recycle</span>'
 check("recycle: the badge is on the item page of an item that waits (a held one too), not on a completed one or one without the field",

@@ -78,7 +78,7 @@ check("no board_url configured: the text unchanged", lk("a1") == "a1"); _core_in
 
 # ---- one call of each tool, through the MCP client
 err, out = run("get", item_id="a2")
-check("get: the id, and an id in the subject and description, linked", not err and out.startswith(f"{L('a2')} [open] [home] item 2, after {L('a1')}") and f"Follows {L('a1')}." in out and f"Done when {L('a1')} is {L('a1')}." in out, out)
+check("get: the id, and an id in the subject and description, linked", not err and out.startswith(f"{L('a2')} [open] home · item 2, after {L('a1')}") and f"Follows {L('a1')}." in out and f"Done when {L('a1')} is {L('a1')}." in out, out)
 err, out = run("create", subject="[home] made after a1", description="- Goal: Made after a1\n- It lives here\n- Done when done", project="projects/x", owner="home-x-main", next="home-x-main: ask about a2")
 gid = re.search(r"created \[([a-z]\d+)\]", out); gid = gid.group(1) if gid else ""
 check("create: the new id and the ids in subject, description and next linked", not err and gid and out.startswith(f"created {L(gid)}") and f"made after {L('a1')}" in out and f"home-x-main: ask about {L('a2')}" in out, out)

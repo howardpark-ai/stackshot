@@ -744,7 +744,7 @@ def migrate_wake(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         who = _wakes.reminder_to(meta)
         sid, label = (who[0][0], _session_label(who[0][0])) if who else ("", "nobody")
         e = by_owner.setdefault(label, {"sid": sid, "hand": {}, "lines": [], "gids": [], "subject": {}})
-        e["subject"][gid] = str(item.get("subject") or "")
+        e["subject"][gid] = _anc.notice_title(item)
         if gid not in e["gids"]:
             e["gids"].append(gid)
         if res.kind in ("default_end", "anchor_seen"):

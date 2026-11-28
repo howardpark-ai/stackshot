@@ -19,7 +19,6 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.core.store import _item_files
 from stackshot.fleet import sessions_registry as _sr
@@ -28,6 +27,7 @@ from stackshot.model import model as _model
 from stackshot.model import owner_steps as _hs
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
+from stackshot.model import title_label as _title_label
 from stackshot.model.field_gates import _close_reason_max, _fit, next_faults
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry
@@ -81,7 +81,7 @@ def _itemsync_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     """`client.py post item-sync <marker> open --project P --subject S --mover <the person> --then <agent> --step "<what he does>" --line "<fact>" [--line ...] [--sender L]`,
     `… <marker> refresh --line "<fact>" [--line ...] [--sender L]` and `… <marker> close [--reason "<why>"] [--sender L]`: a script keeps ONE board item in step with a condition it checks.
     body: action (open | refresh | close), marker (`<kind>:<what>`, the item's mark: item-open's form), sender (the script's own label, one word; default client.py), and for open project (an id, a page key or a bare slug),
-    subject (the action and its object, no prefix: the server puts the project scope's prefix before it), description (the bullets: a list of lines or one text of lines, as item-open takes them), mover (the person the instance names: nobody
+    subject (the action and its object, no tag: the server adds none), description (the bullets: a list of lines or one text of lines, as item-open takes them), mover (the person the instance names: nobody
     else), then (an agent the project's page lists, front or background: it takes the item after his step) and step (one line, what he does; his name is put before it, and one the caller wrote is not doubled); for refresh the description; for close an optional
     reason (one line, cut to [close] reason_max; default says the script saw the condition gone). Any other key is refused.
     open: the item is filed through create_item (service/create.py), the create tool's own code, so the create tool's subject and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400); the description's line count and line length are item-open's own pre-checks; the caller picks no
@@ -185,13 +185,12 @@ def _itemsync_plan(texts: dict[str, str]) -> tuple[dict[str, Any], tuple[int, di
         return {}, (409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"})
     if then not in front and then not in back:
         return {}, (400, {"error": f"then {then!r} is not an agent listed on {key}'s page (its agents map): " + ", ".join(sorted([*front, *back]))})
-    prefixes = [p.strip() for p in _cfg.CFG["subject"]["prefixes"] if p.strip()]
+    prefixes = [p.strip() for p in _title_label.prefixes() if p.strip()]
     subject = _svcstore._shown_ids(subject)
     while (hit := next((b for b in prefixes if subject.startswith(b) and (len(subject) == len(b) or subject[len(b)].isspace() or any(subject[len(b):].startswith(o) for o in prefixes))), "")):
-        subject = subject[len(hit):].lstrip()      # a prefix the caller wrote comes off: the scope's prefix is the server's to choose, and goes on once
+        subject = subject[len(hit):].lstrip()      # a tag the caller still writes comes off: the group is the project's, and a title carries no tag
     if not subject:
-        return {}, (400, {"error": "subject is only an instance prefix: write the action and its object after it (the server puts the project's prefix on)"})
-    subject = _terminal._terminal_subject_prefix(str(rec.get("scope") or "")) + subject
+        return {}, (400, {"error": "subject is only a tag: write the action and its object (no tag is needed, the project gives the group)"})
     return {"key": key, "subject": subject, "step": step, "then": then, "owner": sorted(front, key=lambda n: (not n.endswith("-main"), n))[0]}, None
 
 

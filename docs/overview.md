@@ -12,7 +12,7 @@ one-line notice into the sessions that care. It runs on one Linux box with syste
 ## How a write flows
 
 1. A session calls `create`, `update` or `complete` through the connector, signed in with Google.
-2. The server checks the gates: subject prefix, description shape (short `- ` bullets), next lines, an existing project page, the enums, the date, an owner.
+2. The server checks the gates: subject length, description shape (short `- ` bullets), next lines, an existing project page, the enums, the date, an owner.
 3. It allocates the id, writes the item file and, for a state-changing write, records a page debt against the writer.
 4. About five seconds later the publisher renders `board.md` and the site, commits the store and pushes the data repository.
 5. The board at `/` and the next `brief` show the change.

@@ -211,7 +211,7 @@ from stackshot.router import router_live
 reset(); owe("projects/alpha", A, "a1", "changed (next)", settle="any")
 n0 = len(pushes()); pdebt_svc._pilot_fallback_tick(); time.sleep(0.4); p = pushes()[n0:]
 nb = [n for n in routing.read("projects/alpha") if n.get("kind") == "board" and n.get("live") and not n.get("ruling")][-1:]
-check("shadow: the 30-minute move is recorded for the router in today's words and pushed to no keeper", not p and len(nb) == 1 and not nb[0].get("to") and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — \[home\] item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — work-osprey-main left its page update undone past 30 min, so the page update is owed$", router_live.stashed(nb[0]["id"]) or ""), (p, nb))
+check("shadow: the 30-minute move is recorded for the router in today's words and pushed to no keeper", not p and len(nb) == 1 and not nb[0].get("to") and re.match(r"\[board\] a1 changed \(next\) by work-osprey-main — work · item 1 \(projects/alpha\) → https://stackshot\.example\.com/items/a1 — work-osprey-main left its page update undone past 30 min, so the page update is owed$", router_live.stashed(nb[0]["id"]) or ""), (p, nb))
 
 # ---- 5. live: a matching edit is applied, revision-checked, read back, the debt settled
 _cfg.CFG["router"].update(page_debt_shadow=False)
@@ -245,7 +245,7 @@ def fallback_case(name, mode, text, why_has, *, io_mode="", timeout=20, page=Non
     check(f"{name}: -main gets one message in today's relay words, unmarked, with the reason, the item and its notice",
           len(p) == 1 and p[0][0] == main and p[0][1].startswith(f"[board] 1 page update on {key} is yours to write: the writer left it undone past 30 min and the audit's page call could not write it (")
           and "or hand it to the agent that keeps the page." in p[0][1].split("\n")[0]
-          and why_has in p[0][1].split("\n")[0] and re.search(rf"^- {gid} changed \(description\) by \S+ — \[home\] item \d+ \({key}\) → https://stackshot\.example\.com/items/{gid} · notice [0-9a-f]{{6}}$", p[0][1], re.M), p)
+          and why_has in p[0][1].split("\n")[0] and re.search(rf"^- {gid} changed \(description\) by \S+ — \S+ · item \d+ \({key}\) → https://stackshot\.example\.com/items/{gid} · notice [0-9a-f]{{6}}$", p[0][1], re.M), p)
     check(f"{name}: the debt is the -main agent's now (not dropped, not moved again), the keeper is not told", list(led) == [main] and "moved" not in led[main] and led[main]["item"] == gid and led[main]["settle"] == "ct"
           and not any(m[0] in ("work-osprey", "work-gamma") for m in pushes()[n0:]), (led, pushes()[n0:]))
     nid = re.search(r"notice ([0-9a-f]{6})", p[0][1]).group(1) if p else ""

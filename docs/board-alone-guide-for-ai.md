@@ -71,7 +71,7 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | `[instance] timezone` | an IANA name | `--tz` |
 | `[instance] board_url`, `[auth] base_url`, `[client] url` | the final public HTTPS base URL, no trailing slash | `--base-url` (restart-only; get it right first) |
 | `[auth] allowed_emails` | the Google emails that may sign in; at least one | `--emails` (empty list breaks server start, stackshot/web/server.py) |
-| `[subject] prefixes` | the user's prefixes, each ending in a space | `--prefixes` |
+| `[subject] prefixes` | tags an older title may still open with, each ending in a space (none asked for on a new title) | `--prefixes` |
 | `[paths] repo/store/markdown/rules/brain/fleet_names` | derived from `--data` and `--pages` | `--data`, `--pages` |
 | `[server] port` | 8020 unless taken | `--port` |
 | `[auth] ui_open` | `false` | `sed` after setup (step 3). Default `true` serves the board page to anyone who reaches the URL (stackshot/web/auth/signin.py: the comment block above `_ui_open`, and `_ui_guard`) |
@@ -148,7 +148,7 @@ Expected: a version. The user must be signed in to Claude Code with the claude.a
 
 Ask the user for these answers before step 2 (setup), and do not guess any of them:
 
-- first name for the board; timezone; the public HTTPS base URL; the Google emails allowed to sign in; subject prefixes; the private data repo URL; whether the default folders are fine.
+- first name for the board; timezone; the public HTTPS base URL; the Google emails allowed to sign in; the tags an older title may still open with (none needed); the private data repo URL; whether the default folders are fine.
 
 ### Step 1. Clone
 
@@ -336,7 +336,7 @@ The new tool list reaches Claude Code only in a new session. Tell the user to st
 
 In the new session, call `create` with:
 
-- `subject`: starts with one of the configured prefixes, at most 80 characters
+- `subject`: the work that closes the item, at most 80 characters, with no tag (the board shows the item's group from its project)
 - `description`: 1 to 8 lines, each starting `- `, at most 120 characters (no `resolved:` or `done:` words); the first bullet opens `Goal:` and states the finished outcome (the subject names the work that closes the item, as a task: an English imperative such as "Keep hand-off times on closed items", in Korean ending in -hagi or a noun task; never the symptom "X fails when Y", a statement, a should sentence or a question); a symptom goes in a later bullet that opens `Problem:`
 - `project`: `projects/getting-started`
 - `sender`: a short stable name for this session
@@ -402,7 +402,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T16 | `deploy.sh` says "already at origin/main; nothing to deploy" after an update the user expected | `git pull` was run first, so HEAD already equals `origin/main` and no restart is planned | deploy.sh | Run `./install.sh units --start` (re-renders the units, restarts `stackshot.service`, `stackshot-reload.path`, `stackshot-puller.service` and, if enabled, `anchor-hub.service`). Next time run only `./deploy.sh` |
 | T17 | `deploy.sh`: "healthz did not answer within 180 s" | Server failed to start after the update | deploy.sh | `journalctl --user -u stackshot.service -n 80 --no-pager` |
 | T18 | A write's reply says "This write went through. Still owed by you: <page>" | A page the session changed the board for is still owed longer than `grace_minutes` (30); the write was not refused | stackshot/web/page_debts.py; example `[page_rule]` | Edit the page (its Current state), commit, push; the debt settles by itself when the server's copy has the edit |
-| T19 | `create` refused: "subject must start with one of [...]", a description line "is not a `- ` bullet", or "the description must open with its goal" | Gate texts | stackshot/web/server.py | Fix the call. Read `rules` for the shape |
+| T19 | `create` refused: a description line "is not a `- ` bullet", or "the description must open with its goal" | Gate texts | stackshot/web/server.py | Fix the call. Read `rules` for the shape |
 | T20 | `create` refused: "metadata.project ... names no page" | The page file does not exist or the registry is stale | stackshot/web/server.py | Create `pages/projects/<slug>.md`; `python3 ~/stackshot/stackshot/projects/pages.py registry` |
 | T21 | Notice shows as archived (delivered to no one); router log says "no agent can take it" | Page and scope list no user-facing agent | stackshot/router/router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
 | T22 | Router calls time out or fail | `claude` not on the login-shell PATH, not signed in, or slow | example `[router]` (`command`, `timeout_seconds`, `login_shell`); stackshot/router/router.py:146 (timeout_seconds), stackshot/router/router.py:1187 (login_shell) | Run `bash -lc 'claude --version'` as the user; sign in. The notice is retried then passed to a `-main` agent (stackshot/router/router_live.py:18-19) |
@@ -440,7 +440,7 @@ Start each session by reading the brief. The SessionStart hook injects it. Call 
 Rules that apply on every write:
 
 - Item = human-level: a deliverable, a decision, a blocker, a handoff. Never a working step.
-- Subject starts with a configured prefix, at most 80 characters. `description` is 1 to 8 short `- ` bullets of at most 120 characters, live state only; its first bullet opens `Goal:` with the finished outcome, and the subject names the work that reaches it, as a task (a create or a replaced description without a `Goal:` bullet is refused), a symptom goes under a later `Problem:` bullet.
+- Subject is at most 80 characters, with no tag (the board shows the item's group from its project). `description` is 1 to 8 short `- ` bullets of at most 120 characters, live state only; its first bullet opens `Goal:` with the finished outcome, and the subject names the work that reaches it, as a task (a create or a replaced description without a `Goal:` bullet is refused), a symptom goes under a later `Problem:` bullet.
 - `due` only from a real deadline, `YYYY-MM-DD` in the instance timezone.
 - Every `next` line opens with who takes it (`<session>: ...`). A line naming no one is refused.
 - After a write that changes state (create, complete, or update of description, next, needs, status or due) on an item whose project has a page, update that page in the same turn when it is yours to update (the page's keeper, or the writer when `[pilot] writer_owes_page = true`): rewrite `Current state` where it changed, add a dated line under `Timeline`, commit and push. The hooks remind the session that owes it at the next prompt. A project with no page owes none.

@@ -1,4 +1,4 @@
-"""field_gates.py: the write-time checks of an item's fields: the subject (its scope prefix and length, `_gate_subject`), the description (short `- ` bullets, `_gate_description`, and its opening
+"""field_gates.py: the write-time checks of an item's fields: the subject (its length, `_gate_subject`), the description (short `- ` bullets, `_gate_description`, and its opening
 goal, `_gate_goal`), `next` (a named actor and a length per line, `_gate_next`; the marks of a dropped step), a session's bare URLs (`_gate_bare_urls`), the small limits they read (`_subject_max`,
 `_close_reason_max`, `_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the two sentences a refusal borrows from the fleet settings (`_when_idle`, `_fleet_tool`).
 
@@ -25,17 +25,18 @@ from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
 from stackshot.model import step_split as _ss
 from stackshot.model import steps as _steps
+from stackshot.model import title_label as _tl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.web import render as _rmod
 
 
 # ----------------------------------------------------------------------------- gates (all deterministic)
-SUBJECT_MAX_DEFAULT = 80          # a title is one short line (was 200 in code, 160 in the example config); the length of the whole subject, scope prefix included
+SUBJECT_MAX_DEFAULT = 80          # a title is one short line (was 200 in code, 160 in the example config); the length of the whole subject as stored
 CLOSE_REASON_MAX_DEFAULT = 120    # a close's reason is one short line ([close] reason_max)
 
 
 def _subject_max() -> int:
-    """[subject] max_length (default 80): the longest subject a create or an update that sets one takes, the scope prefix counted (len of the stored text, as before)."""
+    """[subject] max_length (default 80): the longest subject a create or an update that sets one takes (len of the stored text)."""
     return int(_cfg.CFG["subject"].get("max_length", SUBJECT_MAX_DEFAULT) or 0)
 
 
@@ -55,26 +56,23 @@ def _fit(text: str, limit: int) -> str:
     return cut.rstrip(" ,;:") + " …"
 
 
-# a subject that already opens with a bracketed tag or a "word:" (`[Work] x`, `[work]x`, ` [work] x`, `work: x`) is somebody's attempt at a prefix, not a missing one: it is refused as ever, the list named
-_SUBJECT_TAGGED = re.compile(r"[\s​-‏⁠﻿]*(?:\[[^\]]*\]|\w+:)")
-
-
 def subject_faults(subject: str, current: str | None = None) -> list[str]:
-    """Every fault of a subject's form, each as the refusal it is alone: no scope prefix, over [subject] max_length. `current` is the stored subject of an update: a write that sets the very text
-    it already has (a long one stored before the limit) is not a change and passes the length check."""
-    s = _cfg.CFG["subject"]
+    """Every fault of a subject's form, each as the refusal it is alone: empty once any leading tag is taken off (blank, whitespace, or nothing but a tag — title_label.bare), over
+    [subject] max_length. No tag is asked for (an item's group comes from its project), and a title that still opens with one is taken as written. `current` is the stored subject of an
+    update: a write that sets the very text it already has (a long one stored before the limit) is not a change and passes the length check, even one that is itself empty once bared
+    (a record from before this rule, kept as it was)."""
     out: list[str] = []
-    if not any(subject.startswith(pfx) for pfx in s["prefixes"]):
-        out.append(f"Refused: subject must start with one of {s['prefixes']} — got {subject[:40]!r}")
+    if not _tl.bare(subject, or_blank=True).strip() and subject != current:
+        out.append("Refused: the subject is empty (once any leading tag is taken off). Say the finished outcome in a few words.")
     lim = _subject_max()
     if lim and len(subject) > lim and subject != current:
-        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}, the scope prefix counted. Shorten it to the work that closes the item; "
+        out.append(f"Refused: the subject is {len(subject)} characters and the limit is {lim}. Shorten it to the work that closes the item; "
                    "the detail goes in the description bullets (and the project page's timeline).")
     return out
 
 
 def _gate_subject(subject: str, current: str | None = None) -> None:
-    """Refuse a subject that does not start with a scope prefix, or is over [subject] max_length (every fault of it, together; `subject_faults` has them as a list)."""
+    """Refuse a subject over [subject] max_length (`subject_faults` has the faults as a list)."""
     if got := subject_faults(subject, current):
         raise _faults.refusals(got)
 
@@ -209,7 +207,7 @@ def _verb_after(text: str) -> bool:
 
 
 def subject_reads_as(subject: str) -> str:
-    """"a question", "a should or must sentence" or "a statement" when the subject plainly is one and so does not read as work, else "". Read past the scope prefix. A question mark at the end is a question, as
+    """"a question", "a should or must sentence" or "a statement" when the subject plainly is one and so does not read as work, else "". Read past any tag an older title carries. A question mark at the end is a question, as
     is a part that opens `how to` or `whether to` (the first part, or one after a label of at most five words) in a title that goes on to state nothing, and a Korean last part that asks by its ending
     (_ko_question). A Korean last part is a "should" sentence or a statement by its ending. An English title is neither when any part opens with a task's verb; else each part is read for a verb of its own. A
     subject that ends with " …", as the server's cut (fix_long_subject) leaves one, is not read: the cut may have taken the words that decide. An ellipsis or dots typed onto the last word are dropped."""
@@ -251,16 +249,16 @@ def subject_form_note(subject: str, sent: str = "") -> str:
 
 def fix_long_subject(subject: str, current: str | None = None) -> str:
     """A subject over [subject] max_length, put right instead of refused: cut at the last word that fits with " …" after it, the whole counted in the limit (bullet_text.cut_words: no word is cut in two, the kept
-    words and the scope prefix are as written), and the reply says so (call_log.fixed). The subject as given when it fits, when it is the stored text sent back (a long one stored before the limit), when it
-    has no scope prefix (the prefix check refuses it as before) or when no word after the prefix fits: the gate then refuses it as before."""
+    words are as written, a leading tag an older title carries included), and the reply says so (call_log.fixed). The subject as given when it fits, when it is the stored text sent back (a long one stored before the limit)
+    or when no word fits: the gate then refuses it as before."""
     lim = _subject_max()
     if not lim or len(subject) <= lim or subject == current:
         return subject
-    pfx = next((p for p in _cfg.CFG["subject"]["prefixes"] if subject.startswith(p)), None)
-    new = _bt.cut_words(subject, lim) if pfx is not None else None
-    if not new or not new.startswith(pfx) or len(new) - 2 <= len(pfx.rstrip()):          # the cut fell inside the prefix, or left nothing after it
+    new = _bt.cut_words(subject, lim)
+    kept = (new or "")[:-2].strip()
+    if not kept or not _tl.bare(kept, or_blank=True).strip():          # the cut left nothing, or only a leading tag an older title carries (title_label.bare: no care for case, stacked tags taken off too)
         return subject
-    _calls.fixed("subject-cut", f"the subject was {len(subject)} characters and the limit is {lim}, the scope prefix counted: it was cut at the last word that fits and ends with an ellipsis; to change it, send a shorter subject",
+    _calls.fixed("subject-cut", f"the subject was {len(subject)} characters and the limit is {lim}: it was cut at the last word that fits and ends with an ellipsis; to change it, send a shorter subject",
                  fields=["subject"], stored=new, sent=subject)
     return new
 
@@ -312,10 +310,7 @@ _RECYCLE_ONLY = re.compile(r"^\s*(?:re-?launch|recycle)\b|\b(?:re-?launch|recycl
 
 
 def _gate_recycle_item(subject: str) -> None:
-    rest = subject
-    for pfx in _cfg.CFG["subject"]["prefixes"]:
-        if rest.startswith(pfx):
-            rest = rest[len(pfx):]; break
+    rest = _tl.bare(subject)
     if _RECYCLE_ONLY.search(rest):
         raise ToolError("Refused: a recycle is not an item. Flag the item whose change needs it: update(<item>, recycle=true), with the "
                         f"after-recycle check as its next; when no item covers the change, {_when_idle()}")

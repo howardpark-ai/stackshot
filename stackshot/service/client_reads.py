@@ -27,6 +27,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
+from stackshot.model import title_label as _tl
 from stackshot.core import config as _cfg
 from stackshot.core import instance as _inst
 from stackshot.core import passmemo as _passmemo
@@ -426,12 +427,8 @@ def _items_view() -> _ItemsView:
 
 
 def _scope_ctx() -> tuple[dict, dict, dict]:
-    """(the page registry as the home page holds it (the record laid over the pages, then the agents only the record holds: with_pending), key -> id, the marks by id) that an item's group is read from, taken once for a read or a view."""
-    try:
-        ids = _prj.ids_by_key()
-    except ValueError:
-        ids = {}                                   # a damaged id file: the registry's own copy of the id answers
-    return _prj.with_pending(_anc.registry()), ids, _prj.marks()
+    """(the page registry as the home page holds it, key -> id, the marks by id) that an item's group is read from, taken once for a read or a view (`anchors.scope_ctx`)."""
+    return _anc.scope_ctx()
 
 
 def _item_scope(it: dict[str, Any], sc: tuple[dict, dict, dict]) -> str:
@@ -451,7 +448,7 @@ def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", que
     except (TypeError, ValueError):
         up = None
     st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)
-    return {"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _hooks().shown_needs(_needs_of(m)),
+    return {"gid": gid, "shown": _gh.shown(gid), "subject": _tl.bare(it.get("subject")), "needs": _hooks().shown_needs(_needs_of(m)),
             **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
             "contact": _contacts._contact_label(dict(it, gid=gid)),
             "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),
