@@ -25,6 +25,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import ask_leaves as _askl
 from stackshot.model import decision_gates as _dg
+from stackshot.model import draft as _draft
 from stackshot.model import holders as _holders
 from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
@@ -251,13 +252,14 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         authors = _ask_authors(item)
         back = next((a for a in ([sender.strip()] if sender.strip() else []) + authors if a and not _model.is_owner(a)), "")
         shown_opts = _hooks().options_of(item)
+        offered = _draft.of(item) and (_draft._offer(meta) or not _draft.owner_steps(item))      # did this ask offer the item's draft (the test draft.settle makes for his pick), read before the take-off changes what is open
         meta.pop("ask", None); meta.pop("options", None); meta.pop("idle", None)
         _holders._state_end(meta, "your-call")
         _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
         if back and _handover._then_live(back, meta):
             meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
         mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
-        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
+        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {}), **({"draft": _draft.normalize(_draft.kept(item))} if offered else {})}
         _handover._decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
         _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
         item["metadata"] = meta
