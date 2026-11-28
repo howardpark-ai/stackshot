@@ -34,6 +34,7 @@ from stackshot.model import draft as _draft   # an item's draft: the verbatim te
 from stackshot.web import itempage as _ip   # the item page's words on the item model: since, next lines
 from stackshot.web import item_history as _ihist   # the commits of an item's file in the store's git, kept per item (item_history.py)
 from stackshot.model import step_commands as _sc   # the step of a your-step item: numbered list, commands to copy (step_commands.py)
+from stackshot.model import step_howto as _howto   # the description's how-to bullets, drawn under his open step (step_howto.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
@@ -3736,7 +3737,13 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         if not sb: return ""
         held = not member or member == _steps.member_for((r["metadata"] or {}).get("step"), r["metadata"])
         draft = (lambda text="": self.draft_html(r, self.draft_label(text), home)) if held else None
-        return self.step_nexts_html(r, draft, member) or (self.step_block_html(r, sb=sb, home=home) if held else "")
+        body = self.step_nexts_html(r, draft, member) or (self.step_block_html(r, sb=sb, home=home) if held else "")
+        return body + self.step_howto_html(r) if body else ""
+    def step_howto_html(self, r):
+        """The description's how-to bullets (step_howto.howto_bullets: a click path, an attach or upload with a link) as a list under his open step; "" with none. Drawn only from your_step_html, so only
+        while the step is his and open. Reads the item and writes nothing."""
+        bullets = _howto.howto_bullets(r.get("description"), (r.get("metadata") or {}).get("step"))
+        return '<ul class="istephowto">' + "".join(f"<li>{self.md_line(b, r['gid'])}</li>" for b in bullets) + "</ul>" if bullets else ""
     def step_block_html(self, r, sb=None, home=False):
         """The step field of a your-step item as HTML (itempage.step_block is the one reading), for an item whose checklist holds no step of his: its text as markdown with each command taken out of it
         into a copyable block of its own (a link stays in the text); a `! ...` line he types in a pane stays whole and verbatim in one block. The item's draft goes right under the step's text,

@@ -43,6 +43,7 @@ from stackshot.model import model_guards as _mg  # noqa: E402
 from stackshot.fleet import fleet as _fleet  # noqa: E402
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402
 from stackshot.model import states as _states  # noqa: E402
+from stackshot.model import step_howto as _howto  # noqa: E402
 from stackshot.waits import watchers as _watch  # noqa: E402
 from stackshot.web import render as _render  # noqa: E402
 from stackshot.model import step_proof as _sp  # noqa: E402
@@ -68,6 +69,7 @@ FIX = {
     "goal-unclear": "reword the subject to the task that closes the item and the first bullet to `Goal: <the outcome>`; move the symptom, cause or trigger to a later bullet that opens `Problem:`",
     "why-not-now": "do the step now, or write what concretely keeps it from running before then (an event, someone's run, a scheduled job)",
     "proof-wait": "close the item with that evidence; if part of it really cannot be staged (another party, a vendor, a date), write that as the wait's basis",
+    "step-howto": "check the step line says what he does and that the how-to bullets in the description read as actions to take (the page draws them under his step); nothing is moved or rewritten",
     "step-handover": "split the delivery into a step of its own or give it step_proof, or hand the item to the session the next step names (mover=)",
     "wait-end": ("say what ends the wait: after=[\"board#N\"]; wait_kind=event with wait_event=<pr_merged|pr_released owner/repo#n | box_online <machine> | recycle | fleet_op <verb>> and until=YYYY-MM-DD; "
                  "wait_kind=anchor with wait_anchor=<link> (add the link with the anchors tool); wait_kind=relay with wait_event=<who> and until (news only " + _cfg.owner() + " relays); step_proof for a step a pull request's merge or release finishes; "
@@ -87,7 +89,7 @@ FIX = {
 #   needs him       stale (an item he moves is past its own wake: only he writes a date, a decision or a done; the dates pass leaves an item he moves alone today, so it is kept for a pass that does)
 #   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged; mover-no-session (the project's front agent, which sets the mover; it needs nothing of him either)
 NO_PERSON_NEED = frozenset({"ask-missing", "ask-options", "next rules", "board checks", "reads-as-wait", "why-not-now", "wait-end", "next-done", "wrong-needs", "unneeded-escalation",
-                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop", "mover-no-session"})
+                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "step-howto", "proof-wait", "wait-loop", "mover-no-session"})
 
 
 def needs_person(category: Any) -> bool:
@@ -394,10 +396,22 @@ def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
 
 # ---------- the filing rules: is the item filed in the right state? ----------
 FILING_KINDS = ("arbitrary-hold", "mislabeled-state")      # the board report's kinds that are filing rules (all of them now)
-CHECKS_FILING = ("stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
+CHECKS_FILING = ("stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "step-handover", "step-howto", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
 
 
 _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a Recommend part that opens by answering a yes/no
+
+
+def check_step_howto(item: dict[str, Any], meta: dict[str, Any]) -> str:
+    """Why the owner-side session should look at an item's description, "" when there is nothing to say: the owner's step is open (a your-step item, open, with a step line) and the description holds
+    how-to bullets (step_howto.howto_bullets: a click path, an attach or upload with a link), which the page draws under his step. Read only: nothing is moved, and a step that ended is no case."""
+    if item.get("status") != "open" or _states.stored(item) != "your-step":
+        return ""
+    step = str(meta.get("step") or "")
+    bullets = _howto.howto_bullets(item.get("description"), step)
+    if not bullets:
+        return ""
+    return f"his step is open and the description holds {len(bullets)} how-to bullet(s) ({'; '.join(_clip(b, 60) for b in bullets[:2])!r}), which the page draws under his step"
 
 
 def check_ask_options(meta: dict[str, Any]) -> str:
@@ -577,6 +591,9 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         ho = check_step_handover(it, meta, mover, known, env.role_map(), now)
         if ho:
             add(gid, meta, mover, "step-handover", ho)
+        sh = check_step_howto(it, meta)
+        if sh:
+            add(gid, meta, mover, "step-howto", sh)
         ao = check_ask_options(meta)
         if ao:
             add(gid, meta, mover, "ask-options", ao)
