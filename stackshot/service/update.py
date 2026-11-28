@@ -37,6 +37,7 @@ from stackshot.fleet.sessions_registry import _role_name, _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
 from stackshot.model import decision_gates as _dg
+from stackshot.model import draft as _draft
 from stackshot.model import member_gates as _mgates
 from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
@@ -1503,10 +1504,14 @@ def update_unlocked(
     if said_l:                    # appended, never replaced: every entry keeps its position (the anchor the issue's trailer links)
         meta["said"] = [*(meta.get("said") if isinstance(meta.get("said"), list) else []), *said_l]
         work_note += h.said_note(said_l)
+    _draft.pin(meta, item_was)                                                 # a draft stored before its record gets one before the write's steps are judged (the guard below reads it)
     if clear_draft:                                                            # the draft: a filing edit like the ask (no clock moves, no page is owed)
-        meta.pop("draft", None)
+        for k in ("draft", *_draft.RECORD):
+            meta.pop(k, None)
     elif draft_set:
         meta["draft"] = draft_set
+        meta.pop(_draft.RETIRED, None)
+        meta[_draft.CLOSED] = True                                             # set by this write, the same text too: the save reads it as new (draft.settle)
     alias_note = ""
     alias_picker = False      # the `mover` this write sets came from post_wake_mover: it names who picks the item up when its wait ends, so it is no hand-over
     pw_given = post_wake_mover.strip()
@@ -1673,6 +1678,7 @@ def update_unlocked(
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     unnamed: list[str] = []      # the server's naming of the writer, taken back below: the step hand-over of this write still judges with it
+    save_ctx = _writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN)
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
         as_set = lambda xs: {x.lower() if x.lower() in _NEEDS_KINDS else x for x in xs}      # noqa: E731  — needs compared as stored names and kinds, whatever the order
         if naming_added and not needs_replaced and as_set(x for x in _needs_of(meta) if x not in naming_added) == as_set(pre_named) and _sc.owner_facing(item_was):
@@ -1743,8 +1749,14 @@ def update_unlocked(
                     fc.add(e_step)                   # beside other faults the write is refused whole: the writer sends it again with all of them fixed
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or ask or "mover" in model_set or "mover" in model_drop:      # several members: a decision, a step or a `you:` line names which member (no check with one)
             fc.call(_mgates.gate_members, meta)
-        if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft:      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
-            fc.call(_gates.gate_draft, item_now, gid)
+        step_draft = bool(state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft)      # the draft guard reads a write that sets the state, the step, the mover or the draft, never an unrelated one
+        asked_draft = _draft.question(item_now) != _draft.question(item_was)                        # …and its guard on a decision, a write that changes the question
+        if step_draft or asked_draft:
+            saved = _writes.settled(gid, item_now, item_was, debtor, save_ctx, next if next_touch else "") if _draft.kept(item_now) else item_now      # the draft as the save will leave it: this write may retire it
+            if step_draft:
+                fc.call(_gates.gate_draft, item_now, gid, saved)
+            if asked_draft and not _writes.cold_ask():      # the cold call's own question cannot pass the draft fields: the guard is for a session's write
+                fc.call(_gates.gate_draft_offer, item_now, gid, saved)
         if state_st or state_given.get("step") or "mover" in model_set or "mover" in model_drop or draft_set or clear_draft or description.strip():      # the step guards read the same writes, and a new description
             fc.call(_gates.gate_step, item_now, gid, item_was.get("description") if description.strip() and _sc.owner_facing(item_was) else None, step_set=bool(state_given.get("step")))      # only an item already his to move (mover the owner, your-step, your-call) keeps the old lines out of the judgement
         fc.call_depending(*_faults.MOVER_HANDOFF, fc.marked(_faults.MOVER), _gates.gate_handoff, gid, item_was, item_now, debtor)     # step 2: a hand-off to a session with no pane is refused, the background agent named
@@ -1808,7 +1820,7 @@ def update_unlocked(
         item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject) leave the state clock alone; an ask alone on an open item adds the decision need, which is a state change
         item["confirmed"] = item["updated"]       # a state change confirms the item; a filing edit does not
     named = name_commit()                  # every gate has passed: the naming is stored as its own save, then this write's
-    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN), written=next if next_touch else "")
+    _writes.save(gid, item, writer=debtor, ctx=save_ctx, written=next if next_touch else "")
     now_held = h.is_held(item)
     now_parked = now_held or h.date_parked(item)
     if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
@@ -1924,13 +1936,27 @@ def update_unlocked(
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never parked: the park is dropped"
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
-    return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid, step=step_written,
+    return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + _draft_note(item_was, item) + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid, step=step_written,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + owing + h.nag(debtor))
 
 
 _UPDATE_PARAMS = frozenset(inspect.signature(update_unlocked).parameters)      # the arguments of the write (close_extra_args reads these, never another local)
+
+
+def _draft_note(was: dict[str, Any], item: dict[str, Any]) -> str:
+    """The reply line of an update on the item's draft (draft.py): this write retired it (a close drops it), or it gave him a step while the draft stays retired. "" otherwise."""
+    if item.get("status") == "completed":
+        return "\n(note: the close drops the item's draft)" if _draft.kept(was) else ""
+    if not _draft.retired(item):
+        return ""
+    if not _draft.retired(was):
+        return ("\n(note: this write retired the draft: it closed the step of his the draft served, so no page offers it for copying any more. The text stays stored on the item; a step of his that closed under it open again, "
+                "or draft=, shows a draft)")
+    if _draft.his_open(item) - _draft.his_open(was):
+        return "\n(note: the item's draft stays retired, its step closed earlier: pass draft= to show a text under this step)"
+    return ""
 
 
 def _handover_by_hand(gid: str, done: list[str], unnamed: list[str] | None = None) -> str:

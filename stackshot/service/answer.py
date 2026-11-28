@@ -26,6 +26,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import ask_leaves as _askl
 from stackshot.model import ask_read as _ar
+from stackshot.model import draft as _draft
 from stackshot.model import holders as _holders
 from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
@@ -343,6 +344,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
                     return _handover._keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this", by=who, files=recs) if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
                 text, choice, kind = f"(late, on the ask the server took off {'their' if _mgates.many() else 'his'} move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
+                if meta[_askl.LEFT].get("draft") and meta[_askl.LEFT]["draft"] == _draft.normalize(_draft.kept(item)):
+                    meta[_draft.ANSWERED] = True      # that ask offered this very text (decided when it was taken off): it stays readable for the session his pick reaches, as a pick made in time leaves it
             else:
                 kind = "decision"
         elif act == "done":             # the Done button of a step form (his note in the box, if any, stays on the record as `text`). Only an item that stands in your-step with its step line has one: any other is refused, nothing written
@@ -453,10 +456,11 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             if not until:
                 _hs.route_answered(meta)      # a script's route does not ask him again on an item he answered
             _holders._state_end(meta, "your-step")
-            meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)
             _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
+            if not _draft.his_open({**item, "metadata": meta}) and not _draft.to_send(item):
+                meta.pop("draft", None)     # no line of his stays open: the text he was to post is posted (a note that names a later time, one that leaves a line of his open, or a text a session may still send keeps it; draft.settle says whether it is offered)
             if then and not _model.is_owner(then):
                 _handover._hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else notice_to falls back to the page's keeper)
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)

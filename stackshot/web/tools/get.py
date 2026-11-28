@@ -139,9 +139,15 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if item.get("status") == "open":         # where it stands: the stored state with the fields it carries; an item that stores none shows no state line (the model line below says alive or waiting)
         out.extend(w for w in [_states.words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))] if w)
         out.extend(f"{k}: {v}" for k, v in _states.carry_of(item).items())
-        if _draft.of(item):                          # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
-            d_ = _draft.of(item)
-            out.append(f"draft: {len(d_.splitlines())} lines, {len(d_)} characters (get shows it)" if brief else "draft:\n" + d_)
+        d_ = _draft.kept(item)                       # the verbatim text the owner pastes elsewhere, as stored (many lines); the brief, which loads into every session, only says it is there
+        if d_:
+            size_ = f"{len(d_.splitlines())} lines, {len(d_)} characters"
+            if not _draft.retired(item):
+                out.append(f"draft: {size_} (get shows it)" if brief else "draft:\n" + d_)
+            elif _draft.to_send(item):               # he answered on it: no page offers it, the session that sends it still reads it here
+                out.append(f"draft: kept for sending, {size_} (get shows it)" if brief else "draft: kept for sending (he answered on it and its step is closed, so no page offers it for copying):\n" + d_)
+            else:
+                out.append(f"draft: retired, its step is closed ({size_} stored, offered nowhere; pass draft= to show a text)")
         out.extend(_mover_steps._state_check_notes(item))            # next names the owner under an agent's state; next may be stale (the owner-step and stale-next checks)
     out.extend(_notes._model_lines(item, brief))                   # dead, alive or waiting, with the mover and the wait
     if not brief:

@@ -303,9 +303,16 @@ step must be only that phrase or carry step_proof, or the write is refused.
 ## text DRAFT_FORM lead trail
 draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel
 message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most
-{{DRAFT_MAX}} characters). His item page draws it under the step as a block with a Copy button; a close drops it, and
-so does his Done or Send note on the step. A text a session can send itself (a Slack message, an email in his name, new
-or a reply) is not his step: it goes to him as a decision (needs=decision, an ask, the options Send / Change it /
+{{DRAFT_MAX}} characters). His item page draws it under the step as a block with a Copy button, only while a step of
+his that it could serve is open. A close drops it, and so does his Done or Send note when that leaves no step of his
+open (not once he has answered a decision on it). A write that leaves nothing of his open (his steps dropped, or the ask or step withdrawn, with nothing of his in
+their place, or his steps ticked) retires the draft and the reply says so: nothing offers it for copying, the text stays
+stored, and a step of his that closed under it open again, or a new draft=, shows one. A step reworded or replaced in the same write keeps it,
+with several steps of his open it stays until the last closes, and a draft stored before any step of his is shown. Once
+he has answered a decision on it, get keeps printing it after its step closes (no page shows it), whatever is added or
+said later, so send it from there, then pass clear_draft=true or close the item. A write that asks or rewords a decision
+with an option such as Send while the draft stays retired is refused unless it passes draft=. A text a
+session can send itself (a Slack message, an email in his name, new or a reply) is not his step: it goes to him as a decision (needs=decision, an ask, the options Send / Change it /
 Don't send, the text in draft), and the session sends it when he picks Send; a step with a draft is for what only he
 can post or paste himself (an app or account a session cannot reach). An item whose step is such a post, send or paste
 carries the text: a write that sets the step or mover of an item so that it is his step, or that sets or clears its

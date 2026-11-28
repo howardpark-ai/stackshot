@@ -19,6 +19,7 @@ Imports point down only: this module imports the domain and core, and the store'
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import sys
 import threading
@@ -35,6 +36,7 @@ from stackshot.core.instance import NAME
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
+from stackshot.model import draft as _draft
 from stackshot.model import item_project as _ip
 from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
@@ -260,6 +262,26 @@ def _settle_members(gid: str, item: dict[str, Any], before: dict[str, Any] | Non
         print(f"member steps: {gid} not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _settle_stored(gid: str, item: dict[str, Any], before: dict[str, Any] | None, writer: str, author: tuple[str, str] | None, ctx: WriteContext, written: str) -> None:
+    """What a save brings into agreement before it stamps anything: the mover, his step on the checklist, whose each step is, and the draft's record. `save` and `settled` share it."""
+    steps = _steps
+    assert steps is not None
+    if not ctx.settle:
+        steps.settle_mover(item, before)      # an item that waits on him has him as mover (the agent in then), and the mover he held goes back when it leaves his state: for every save, the server's own included
+        steps.owner_steps(item, before, writer, author)      # N2/N4/N5: an item that waits on him has his open step on its checklist, and one that stops waiting on him by a session's write loses it: every save, the server's own included
+    elif ctx.settle == SETTLE_NAMED:
+        steps.owner_steps(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms (QUIET) leaves the checklist alone
+    _settle_members(gid, item, before, written)      # once the checklist is final: whose each bare step is, on a board of several members
+    _draft.settle(item, before)      # …and whether this write closed the last step of his the draft could serve: every save, the server's own included
+
+
+def settled(gid: str, item: dict[str, Any], before: dict[str, Any], writer: str = "", ctx: WriteContext = PLAIN, written: str = "") -> dict[str, Any]:
+    """A copy of `item` as `save` would leave its mover, checklist and draft record, nothing written and `item` untouched: for a write guard that judges what the save will store."""
+    after = copy.deepcopy(item)
+    _settle_stored(gid, after, copy.deepcopy(before), str(writer or "").strip(), None, ctx, written)
+    return after
+
+
 def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", author: tuple[str, str] | None = None, mirror: bool = True, background: bool = False, activity: str = "", activity_at: float | None = None,
          ctx: WriteContext = PLAIN, *, written: str = "") -> None:
     """Write the item's file. `writer` is the session whose write this is (a name or id; '' = the server's own act: a wake,
@@ -290,12 +312,7 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
             _ip.read_through(before)              # read as `item` was: through the project's id, so a page that moved is no re-file of the item
         except Exception:  # noqa: BLE001
             before = None
-    if not ctx.settle:
-        steps.settle_mover(item, before)      # an item that waits on him has him as mover (the agent in then), and the mover he held goes back when it leaves his state: for every save, the server's own included
-        steps.owner_steps(item, before, writer, author)      # N2/N4/N5: an item that waits on him has his open step on its checklist, and one that stops waiting on him by a session's write loses it: every save, the server's own included
-    elif ctx.settle == SETTLE_NAMED:
-        steps.owner_steps(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms (QUIET) leaves the checklist alone
-    _settle_members(gid, item, before, written)      # once the checklist is final: whose each bare step is, on a board of several members
+    _settle_stored(gid, item, before, writer, author, ctx, written)
     quiet = ctx.settle == SETTLE_QUIET
     record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
     _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)

@@ -148,7 +148,7 @@ def _views() -> list[dict[str, Any]]:
             continue
         m = it.get("metadata") or {}
         step = _clean(m.get("step"))
-        text = " ".join(_clean(x) for x in (it.get("subject"), it.get("description"), step, m.get("draft"), m.get("next")))
+        text = " ".join(_clean(x) for x in (it.get("subject"), it.get("description"), step, _draft.of(it), m.get("next")))
         try:
             since = float(it.get("state_updated") or it.get("updated") or 0)
         except (TypeError, ValueError):
@@ -209,7 +209,7 @@ def build_message(item: dict[str, Any], row: dict[str, Any], named: tuple[str, .
     addrs = [a for _n, a in row["to"] + row["cc"]]
     ordered = [a for a in addrs if a in named] + [a for a in addrs if a not in named]
     who = ", ".join(_data(a, 80) for a in ordered[:RECIPIENTS_MAX])
-    return "\n".join([f"<step>{_data(m.get('step'), 300)}</step>", f"<draft>{_data(m.get('draft'), 400) or '(none)'}</draft>",
+    return "\n".join([f"<step>{_data(m.get('step'), 300)}</step>", f"<draft>{_data(_draft.of(item), 400) or '(none)'}</draft>",
                       f"<mail><to>{_data(who, 300)}</to><subject>{_data(row['subject'], 120)}</subject><start>{_data(row['snip'], 200)}</start></mail>", "",
                       "Is this mail the one the step asks for? Answer YES, NO or UNSURE."])
 

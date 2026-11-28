@@ -19,6 +19,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.core import members as _members
 from stackshot.core.instance import NAME, OWNER
+from stackshot.model import draft as _draft
 from stackshot.model import holders as _holders
 from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
@@ -216,8 +217,9 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     """`member`'s answer on a your-step that more than one member has a part in (a board of several members): what it ticks, and who the step is with after it → that member's name. Not `done` (a note
     that does not say the step is done): nothing is ticked or moved. Done: the open steps that are `member`'s or no one's are ticked (_check_his_step), never another member's. A step asked of another
     member (steps.member_for) stays theirs, and the answer's record names the step `member` finished. A step asked of `member` passes on: the member of the next open step is the mover, that step is the
-    item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
+    item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to, unless a session may still send it (draft.to_send)."""
     asked = _steps.member_for(meta.get("step"), meta)
+    held = _draft.to_send({"status": "open", "metadata": meta})      # read before the step moves: a text a session may still send outlives it
     if member != asked:      # the record names their own step, whatever the answer says about it, and whose the item's step was
         rec["asked"] = asked
         cl, _at, whose = _steps.member_rows(meta)
@@ -233,7 +235,7 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     cl, _at, whose = _steps.member_rows(meta)
     line, other = next((x["text"], who) for x, who in zip(cl, whose) if x["status"] == _steps.OPEN and who and who != member)
     meta["mover"], meta["step"] = other, _steps.strip_owner(_steps.first_line(line))
-    for k in ("step_lines", "draft", _hs.KEY):
+    for k in ("step_lines", _hs.KEY, *(() if held else ("draft",))):
         meta.pop(k, None)
     _watch.end_wait(meta)
     return other

@@ -536,14 +536,25 @@ def gate_draft_args(draft: Any, clear: bool) -> tuple[str, bool]:
     return (text if text.strip() else ""), bool(clear)
 
 
-def gate_draft(item: dict[str, Any], gid: str = "") -> None:
+def gate_draft(item: dict[str, Any], gid: str = "", saved: dict[str, Any] | None = None) -> None:
     """The draft guard (draft.py): an item this write leaves in state your-step with the owner as the mover, whose step names text to post, send or paste, carries the text as a draft or
     links the document that holds it. Refused with one line naming the draft field and the link alternative. The caller runs it only for a write that sets the step, the state, the mover
-    or the draft, so an unrelated write to an old item is never held up by it. [model] guards = false skips it, as it does the other write guards."""
+    or the draft, so an unrelated write to an old item is never held up by it. `saved`: the item as the save will leave it, whose draft is the one judged. [model] guards = false skips it,
+    as it does the other write guards."""
+    _refuse_draft(item, gid, lambda: _draft.problem(item, saved))
+
+
+def gate_draft_offer(item: dict[str, Any], gid: str, saved: dict[str, Any]) -> None:
+    """The draft guard on a decision (draft.offer_problem): a write that asks or rewords one whose option offers a text does not leave the item's draft retired. The caller runs it only for a write
+    that changes the question. [model] guards = false skips it."""
+    _refuse_draft(item, gid, lambda: _draft.offer_problem(item, saved))
+
+
+def _refuse_draft(item: dict[str, Any], gid: str, problem: Callable[[], str]) -> None:
     h = _hooks()
     if not h.model_guards_on() or item.get("status") != "open":
         return
-    why = _draft.problem(item)
+    why = problem()
     if why:
         raise ToolError(f"Refused: {_gh.shown(gid) + ': ' if gid else ''}{why}.")
 
@@ -986,7 +997,7 @@ def _list_shape(v: Any) -> Any:
     return sorted(json.dumps({k: x for k, x in w.items() if k != "arrived"}, sort_keys=True, default=str) if isinstance(w, dict) else str(w) for w in v)
 
 
-_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "hourly_audit", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
+_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "draft_closed", "draft_retired", "draft_answered", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "hourly_audit", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
 
 
 _DECISION_AGAIN_S = 3600.0        # a decision is not asked again within this long after the owner's last answer on the item unless the ask line changed
