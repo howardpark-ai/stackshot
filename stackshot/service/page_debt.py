@@ -100,6 +100,11 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
     own = page_agent(key)
     main = _hooks().main_agent(key)
     builder = _hooks().builder_agent(key)
+    if not builder:
+        try:
+            builder = _anc.background_lead(key)      # a project with a background agent and no front: that agent keeps its page, not the scope's general -main agent
+        except Exception:
+            builder = ""
     try:
         marked = _router_live.marked_in(key, _anc.registry())      # a project that marks its keeper: that agent keeps the page, builder or not (the gates answer it)
     except Exception:

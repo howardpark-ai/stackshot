@@ -109,7 +109,7 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
         proj = str(project or "").strip()
         if proj and _anc.front_only(proj):
             builderless = True
-            main = _agents._main_agent(proj)
+            main = _anc.chore_main(proj)      # a project with a background agent and no front: that lead (anchors.background_lead), else its -main agent as before
             if main and not (_handoff.ho_same(main, quiet) or _session_id(main) == (_session_id(quiet) or quiet)):
                 return main, "main", True
     except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the fleet's builder
