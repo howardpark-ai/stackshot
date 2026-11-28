@@ -197,6 +197,21 @@ call(action="undo", number=1)
 check("undo: a second undo goes back to where it was", rec(1)["current"]["sha256"] == before_cur["sha256"], rec(1)["current"])
 refused("undo: a canvas with no version", ("no earlier version",), action="undo", number=2)
 refused("undo: an unknown number", ("no canvas 99",), action="undo", number=99)
+
+# undo takes the record's title and item back with the page
+call(action="add", page=page(11, "<p>one</p>"), title="Old title")
+n_u = int(max(int(p.name) for p in STORE.iterdir() if p.is_dir() and p.name.isdigit()))
+call(action="update", number=n_u, page=page(12, "<p>two</p>"), title="New title")
+check("undo: the revision moved the record to the new item and title", rec(n_u)["item"] == "g12" and rec(n_u)["title"] == "New title", rec(n_u))
+call(action="undo", number=n_u)
+check("undo: the item and the title go back with the page", rec(n_u)["item"] == "g11" and rec(n_u)["title"] == "Old title", rec(n_u))
+call(action="undo", number=n_u)
+check("undo: a second undo brings the newer item and title back", rec(n_u)["item"] == "g12" and rec(n_u)["title"] == "New title", rec(n_u))
+r_u = rec(n_u)
+r_u["versions"] = [{k: v for k, v in x.items() if k not in ("title", "item")} for x in r_u["versions"]]
+(STORE / str(n_u) / "canvas.json").write_text(json.dumps(r_u))
+call(action="undo", number=n_u)
+check("undo: a version with no item saved takes the item its page's link names and keeps the title", rec(n_u)["item"] == "g11" and rec(n_u)["title"] == "New title", rec(n_u))
 (STORE / "2" / "canvas.json").write_text("{nope")
 refused("undo: an unreadable record is refused and left alone", ("not a canvas record",), action="update", number=2, page=page())
 (STORE / "2" / "canvas.json").unlink()
@@ -241,7 +256,7 @@ try:
             call(**kw)
             check(f"standby: {kw['action']} is refused", False)
         except Exception as e:
-            check(f"standby: {kw['action']} is refused", True)
+            check(f"standby: {kw['action']} is refused, as a refusal that says so once", type(e).__name__ == "ToolError" and str(e).startswith("Refused: stackshot here is a read-only standby") and str(e).count("Refused") == 1 and str(e).count("read-only standby") == 1, str(e))
     check("standby: nothing written", files() == before)
     check("standby: list still answers", "canvas/1" in call(action="list"))
 finally:

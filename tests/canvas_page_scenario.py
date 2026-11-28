@@ -127,5 +127,47 @@ check("tip: the text is put in as text, never as markup", "innerHTML" not in js 
 check("tip: no hover rule in the style", ":hover" not in re.search(r"<style[^>]*>(.*?)</style>", out, re.S).group(1))
 check("tip: the script holds no end-of-script sequence of its own", "</script" not in js.lower())
 
+# ---- weak spots of the item link check, the hover rule, dark backgrounds and the head's end
+for what, html in (("a data-href", f'<body><span data-href="{B}/items/5">x</span>'), ("a link element in the head", f'<head><link rel="x" href="{B}/items/5"></head><body>x'),
+                   ("a title", f'<head><title><a href="{B}/items/5">x</a></title></head><body>x'), ("a textarea", f'<body><textarea><a href="{B}/items/5">x</a></textarea>'),
+                   ("a noscript", f'<body><noscript><a href="{B}/items/5">x</a></noscript>'), ("a template", f'<body><template><a href="{B}/items/5">x</a></template>'),
+                   ("a hidden anchor", f'<body><a hidden href="{B}/items/5">x</a>'), ("a display:none anchor", f'<body><a style="display: none" href="{B}/items/5">x</a>'),
+                   ("a link in plain text", f'<body><p>href="{B}/items/5"</p>'), ("a link to another host that holds the board's address", f'<body><a href="https://evil.example/{B}/items/5">x</a>'),
+                   ("a link to a host that starts like the board", f'<body><a href="{B}.evil.example/items/5">x</a>')):
+    check(f"link: {what} does not count", P.item_link(html, B) is None, html)
+check("link: an unquoted href counts", P.item_link(f"<body><a href={B}/items/8>x</a>", B) == 8)
+check("link: a trailing slash after the number counts", P.item_link(f'<body><a href="{B}/items/8/">x</a>', B) == 8)
+check("link: an entity in the href is read", P.item_link(f'<body><a href="{B}/items/8?a=1&amp;b=2">x</a>', B) == 8)
+check("link: a hidden anchor does not hide the one after it", P.item_link(f'<body><a hidden href="{B}/items/5">x</a><a href="{B}/items/6">y</a>', B) == 6)
+check("link: a long head does not push the body's link out of the first part", P.item_link(f"<head><title>t</title>{'<meta name=a content=b>' * 200}</head><body>{LINK}", B) == 42)
+check("link: the item the page names is the first link's, whatever number follows", P.item_link(f'<body><a href="{B}/items/9">x</a><a href="{B}/items/{N}">y</a>', B) == 9)
+check("color: a:hover alone is not a link color", not P.sets_link_color("<style>a:hover{color:#c00}</style><a>x</a>"))
+check("color: a:focus and a:active are not either", not P.sets_link_color("<style>a:focus, a:active { color: red }</style>"))
+check("color: a:hover beside a plain a rule still counts", P.sets_link_color("<style>a, a:hover{color:#c00}</style>"))
+hov = "<head><style>a:hover{color:#c00}</style></head><body><a href='#'>x</a></body>"
+check("served: a page with only a hover color gets the default", "data-canvas-link" in P.served(hov))
+for bg in ("#000", "#121212", "#1e1e1e", "#333", "rgb(30,30,30)", "hsl(0,0%,10%)", "black", "navy"):
+    css = P.link_style(f"<style>body{{background:{bg}}}</style><a href=x>x</a>")
+    color = re.search(r"color:(#[0-9a-f]{6})", css).group(1)
+    check(f"dark: background {bg} gets a link color with contrast 4.5 or more", P.contrast(P._rgb(color), P._background(f"body{{background:{bg}}}")) >= 4.5, (css, color))
+check("dark: a page with no background keeps the default", "#2f72de" in P.link_style("<a href=x>x</a>") and P.LINK_LIGHT not in P.link_style("<a href=x>x</a>"))
+check("dark: a light background keeps the default", P.LINK_LIGHT not in P.link_style("<style>body{background:#fff}</style>"))
+check("dark: the html rule and a shorthand with an image are read", P.LINK_LIGHT in P.link_style("<style>html{background: #111 no-repeat}</style>"))
+check("dark: a gradient or a var is no plain color: the default stays", P.LINK_LIGHT not in P.link_style("<style>body{background:linear-gradient(#000,#111)}</style>") and P.LINK_LIGHT not in P.link_style("<style>body{background:var(--bg)}</style>"))
+check("dark: the body's style attribute is read", P.LINK_LIGHT in P.served('<body style="background:#111"><a href=x>x</a>'))
+check("dark: a dark scheme in a media query gets its own rule, the light one keeps the default",
+      P.link_style("<style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style>").count("color:") == 2
+      and "#2f72de}@media" in P.link_style("<style>body{background:#fff}@media (prefers-color-scheme: dark){body{background:#111}}</style>"))
+check("dark: a media query's background is not the page's own", P.LINK_LIGHT not in P.link_style("<style>@media print{body{background:#000}}</style>"))
+check("dark: served puts the light color in a dark page", P.LINK_LIGHT in P.served("<head><style>body{background:#1e1e1e}</style></head><body><a href=x>x</a></body>"))
+check("dark: the light color reads on #1e1e1e and #121212", all(P.contrast(P._rgb(P.LINK_LIGHT), P._rgb(c)) >= 4.5 for c in ("#1e1e1e", "#121212", "#000000")))
+for tag in ("</head>", "</HEAD>", "</HEAD >", "</Head\n>", "</head foo=bar>"):
+    out = P.served(f"<html><head><title>t</title>{tag}<body><a href=x>x</a></body></html>")
+    check(f"head: {tag!r} is the end of the head", out.index("data-canvas-link") < out.index(tag) and out.index("data-canvas-link") > out.index("</title>"), out)
+out = P.served("<html><head><!-- </head> --><script>var s='</head>'</script><title>t</title></head><body><a href=x>x</a></body></html>")
+check("head: a closing tag in a comment or a script is not the end", out.index("data-canvas-link") > out.index("<title>"), out)
+out = P.served("<!doctype html>\n<html>\n<head>\n<title>t</title>\n<body><a href=x>x</a>")
+check("head: with no closing tag the style goes right after the opening tag, on a page of many lines", "<head><style data-canvas-link>" in out.replace("<head>\n", "<head>", 1) and out.index("data-canvas-link") < out.index("<title>"), out)
+
 print(f"\n{len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

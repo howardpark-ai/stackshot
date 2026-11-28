@@ -7,7 +7,7 @@ The store, `<paths.state>/canvas/` (the board's state folder, outside git; the s
 
     counter                 the highest number ever given here, as text; a new number comes after it and after the highest folder
     <number>/canvas.json    the record: {"schema": 1, "number", "title", "item" (the store's id, or null), "current": {"sha256", "bytes", "modified", "session"} or null,
-                            "versions": [{"id", "sha256", "bytes", "modified", "session"}, ...] oldest first}
+                            "versions": [{"id", "sha256", "bytes", "modified", "session", and for a version a revision or an undo made: "title", "item" (the record's, as the page had them)}, ...] oldest first}
     <number>/<sha256>.html  one page's bytes, written once under their own hash
 
 A file is written whole to a temporary file beside it, flushed to disk and renamed over the old one, and the record is written after the bytes it names, so a reader (which takes no lock) sees a page that is
