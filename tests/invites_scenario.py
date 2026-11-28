@@ -593,7 +593,7 @@ def part_direct():
             invites.admit("new@example.com", "333", True)
             check("web: ... nor after another account has joined", see(sess).status_code == 302, see(sess).status_code)
             r4, _s = callback("no-such-token")
-            check("web: a token that does not hold gets no session", r4.status_code == 403, r4.status_code)
+            check("web: a token that does not hold gets no session, and is told the sign-in was interrupted", r4.status_code == 400 and "interrupted" in r4.text, (r4.status_code, r4.text))
     finally:
         _signin._ui_http, _signin._ui_client_id = real_http, real_cid
 
