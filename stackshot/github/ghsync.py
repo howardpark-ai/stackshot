@@ -873,7 +873,7 @@ def _options_text(opts: Any) -> str:
     labels = [str(o.get("label") or "").strip() for o in rows]
     if isinstance(opts, list) and len(rows) == len(opts):      # a list of options only: the labels as a card shows them (the letter its badge draws is dropped, option_labels.py)
         labels = [lb or chr(65 + i) for i, lb in enumerate(_ol.strip_letters(labels))]
-    return "\n".join(f"- {lb}" + (" (recommended)" if o.get("recommended") else "") + f": {str(o.get('line') or '').strip()}" for lb, o in zip(labels, rows))
+    return "\n".join(f"- {lb}" + (" (recommended)" if o.get("recommended") else "") + (f": {str(o.get('line') or '').strip()}" if str(o.get("line") or "").strip() else "") for lb, o in zip(labels, rows))
 
 
 def refile_words(frm: str, to: str) -> str:

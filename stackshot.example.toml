@@ -857,8 +857,8 @@ rebullet_machines = []                              # the machines whose token m
                                                     # the item turns alive with its post-wake mover, who is told in one line (several items for one recipient in one pass are one message):
                                                     # a time wait at its wake; an item wait when the last `after` item closes; an anchor wait when anchor-hub's notice for the anchor reaches
                                                     # the server (a date beside an item or anchor wait is its backstop: the item comes back anyway, with the note that the item is still
-                                                    # open or the anchor stayed silent); a relay wait on its ask-by day, when it comes to the owner as a question (arrived / ask again in a
-                                                    # week, two weeks or a month / not yet, ask again on a date / drop). A relay or anchor wait that an older write logged two chases on comes to him at its next end as "drop it?"
+                                                    # open or the anchor stayed silent); a relay wait on its ask-by day, when it comes to the owner as a question (it happened / wait 1
+                                                    # more week / stop waiting; any other wait is a note in the box). A relay or anchor wait that an older write logged two chases on comes to him at its next end as the "stop waiting?" question
 pause = false                                       # true: the board-wide pause (after an outage or a limit stop): no wait ends and no wake fires (today's wake pass included); set it back
                                                     # to false and every one that came due fires in one pass, one message per recipient. Live
 # The hand-off (stackshot/waits/handoff.py): an alive item whose mover changes to another session is handed over, and the hand-over is recorded on the item

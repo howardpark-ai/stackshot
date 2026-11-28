@@ -188,7 +188,7 @@ check("3 update: …no note", "(note: the ask's Recommend" not in (out or ""), o
 
 # ================================================================ 4. the asks the server writes itself
 ev = {"wait_event": "countersigned NDA"}
-for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options(dt.date(2026, 11, 16))), ("the drop question", wk.drop_ask(ev), wk.drop_options(dt.date(2026, 11, 16)))):
+for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.options()), ("the drop question", wk.drop_ask(ev), wk.options())):
     m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
     check(f"4 watcher: {what} is no open question and its Recommend part is not judged", _dg._open_question(m) == "" and _dg._recommend_missing(m) == "", (ask, _dg._open_question(m)))
     passes(f"4 watcher: {what} passes the open-question gate and names its recommended label", lambda m=m: (_dg._gate_open_question(m), _dg._recommend_missing(m)))

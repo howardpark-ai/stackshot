@@ -6,9 +6,9 @@ An item that stores a wait_kind (time | item | anchor | relay | event) is watche
   * item: the last `after` item closes → alive, the post-wake mover; an `after` item still open keeps the wait; the backstop (ask_by) passing first → alive, with the note that the item is still open.
   * anchor: a notice for the anchor (the keeper passed it, or nobody rules the project) → alive, the post-wake mover, the notice's gist on the item; an older notice, another anchor, another project
     and a routine CI line do not count; the backstop → "the anchor stayed silent"; at wait-set the reply says what anchor-hub already recorded on the anchor, and when it does not watch it.
-  * relay: the ask-by day → alive with the owner as mover and the fixed ask with its six buttons (arrived, a week, two weeks, a month, not yet, drop; none recommended); each answer's effect: arrived → the post-wake mover, not yet → the wait again on the date he gave
+  * relay: the ask-by day → alive with the owner as mover and the fixed ask with its six buttons (it happened, a week, two weeks, a month, not yet, stop waiting; none recommended); each answer's effect: arrived → the post-wake mover, not yet → the wait again on the date he gave
     (no readable date: the note is kept as his comment, no date is set and the item asks him back with the same buttons), drop → closed as not planned.
-  * chases (stored on the item: no tool logs one any more, so a fixture holds them): get shows them; a moved ask_by resets them; two on a wait bring it to the owner at its next end as "drop it?" (drop / keep waiting
+  * chases (stored on the item: no tool logs one any more, so a fixture holds them): get shows them; a moved ask_by resets them; two on a wait bring it to the owner at its next end as "stop waiting?" (stop / keep waiting
     until a date), and a wait with fewer comes back as before.
   * pause: [model] pause holds the watchers and the wake pass alike; when it is false again the due ones fire in one pass, one message per recipient; in normal running several items for one
     recipient in one pass are one message too.
@@ -16,7 +16,7 @@ An item that stores a wait_kind (time | item | anchor | relay | event) is watche
   * get shows `chases: n` and `woke: <what> → <mover>` (until a session writes), the brief lists the relay waits as "waiting on the world".
 
     tests/run-suite watchers        → exit 0 / 1"""
-import contextlib, datetime, importlib.util, io, json, os, re, sys, pathlib, tempfile, time, logging
+import contextlib, datetime, html, importlib.util, io, json, os, re, sys, pathlib, tempfile, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="watcherstest-"); T = pathlib.Path(tmp)
@@ -136,22 +136,39 @@ check("due: anchor only at its backstop (an arrival is an event)", wk.due(I(wait
 check("next_moment: the wake, the ask-by day, the earlier backstop",
       wk.next_moment({"wait_kind": "time", "wake": day(2)}) == wk.day_epoch(day(2)) and wk.next_moment({"wait_kind": "relay", "ask_by": day(3)}) == wk.day_epoch(day(3))
       and wk.next_moment({"wait_kind": "anchor", "ask_by": day(5), "wake": day(2)}) == wk.day_epoch(day(2)) and wk.next_moment({}) is None, None)
-check("ask: the relay question is the fixed text, the party's own event named", wk.relay_ask({"wait_event": "countersigned NDA"}) == "Decide: has countersigned NDA arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
-      and wk.relay_ask({"wait_event": "signature", "party": "Acme legal"}) == "Decide: has Acme legal's signature arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
+ARR, WEEK, STOP = "It happened: continue the work", "Wait 1 more week: next check in a week", "Stop waiting: close the item"      # the three buttons of every question, as stored
+RQ = lambda ev: f"Decide: Has what this item is waiting for happened? Waiting for: {ev} · Options: {ARR} / {WEEK} / {STOP}"
+DQ = lambda ev, n=2: f"Decide: No news after {n} follow-ups. Stop waiting? Waiting for: {ev} · Options: {ARR} / {WEEK} / {STOP}"
+check("ask: the question is a whole sentence whatever shape the event has (a noun, a sentence, a question), the event on its own after it, the party named when the event does not name it",
+      all(wk.relay_ask({"wait_event": ev}) == RQ(ev) for ev in ("countersigned NDA", "the vendor replies with the signed copy.", "Has Kim answered?"))
+      and wk.relay_ask({"wait_event": "signature", "party": "Acme legal"}) == RQ("Acme legal: signature") and wk.relay_ask({"wait_event": "Acme legal signs", "party": "Acme legal"}) == RQ("Acme legal signs")
+      and wk.relay_ask({}) == RQ("x").replace(" Waiting for: x", "") and wk.drop_ask({"wait_event": "the form", "chases": [{}, {}]}) == DQ("the form")
       and wk.is_watcher_ask(wk.relay_ask({"wait_event": "x"})) and wk.is_watcher_ask(wk.drop_ask({"wait_event": "x"})) and not wk.is_watcher_ask("Decide: a · Recommend: b · Stakes: c · By: d"), wk.relay_ask({"wait_event": "x"}))
 D0 = datetime.date(2026, 11, 16)
-WHEN = [wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=7), D0), wk.ASK_AGAIN + wk.day_words(D0 + datetime.timedelta(days=14), D0), wk.ASK_AGAIN + wk.day_words(wk._add_months(D0, 1), D0)]      # the three date buttons: a week, two weeks, a month
-RELAY_LABELS = ["arrived", *WHEN, "not yet, ask again on <date>", "drop"]; DROP_LABELS = ["drop", *WHEN, "keep waiting until <date>"]
-wrelay, wdrop = {"metadata": {"ask": wk.relay_ask({"wait_event": "x"}), "watch": {"asked": "relay"}, "options": wk.relay_options(D0)}}, {"metadata": {"ask": wk.drop_ask({"wait_event": "x"}), "watch": {"asked": "dropit"}, "options": wk.drop_options(D0)}}
-check("options: relay arrived / the three dates / not yet / drop; drop-it: drop / the three dates / keep waiting; the date buttons carry their day, no option is recommended",
-      [o["label"] for o in wk.relay_options(D0)] == RELAY_LABELS and [o["label"] for o in wk.drop_options(D0)] == DROP_LABELS
-      and [o.get("date") for o in wk.relay_options(D0)] == [None, "2026-11-23", "2026-11-30", "2026-12-16", None, None] and [o.get("date") for o in wk.drop_options(D0)] == [None, "2026-11-23", "2026-11-30", "2026-12-16", None]
-      and not any(o["recommended"] for o in wk.relay_options(D0) + wk.drop_options(D0)), None)
-check("options: the page reads both (6 and 5 buttons) although none is recommended, and only for a watcher's own ask",
-      [o["label"] for o in render.options_of(wrelay)] == RELAY_LABELS and [o["label"] for o in render.options_of(wdrop)] == DROP_LABELS
-      and render.options_of({"metadata": {"options": wk.relay_options(D0)}}) == [] and render.options_of({"metadata": {"ask": "Decide: a · Recommend: b · Stakes: c · By: d", "options": wk.relay_options(D0)}}) == []
-      and all(len(o["label"]) <= render.OPTION_LABEL_MAX and len(o["line"]) <= render.OPTION_LINE_MAX for o in wk.relay_options(D0) + wk.drop_options(D0)), None)
-check("options: the ask names the buttons it carries", wk.WHEN_WORDS in wk.relay_ask({}) and wk.WHEN_WORDS in wk.drop_ask({}) and wk.relay_ask({}).endswith(wk.RELAY_TAIL) and wk.drop_ask({}).endswith(wk.DROP_TAIL), None)
+LABELS = [ARR, WEEK, STOP]
+wrelay, wdrop = {"metadata": {"ask": wk.relay_ask({"wait_event": "x"}), "watch": {"asked": "relay"}, "options": wk.options()}}, {"metadata": {"ask": wk.drop_ask({"wait_event": "x"}), "watch": {"asked": "dropit"}, "options": wk.options()}}
+LONG_EV = "the supplier " + "writes back about the delivery " * 12
+check("ask: an event with a middle dot or longer than the question carries stays one clean part: no middle dot of its own, cut at a word",
+      wk.event_of({"wait_event": "part one \u00b7 part two"}) == "part one - part two" and len(wk.event_of({"wait_event": LONG_EV})) <= wk.EVENT_CLIP and wk.event_of({"wait_event": LONG_EV}).endswith("\u2026")
+      and wk.relay_ask({"wait_event": "a \u00b7 b"}).count(" \u00b7 ") == 1, wk.event_of({"wait_event": LONG_EV}))
+check("ask: a page reads the server's question back into its parts, and no other text",
+      wk.read_question(RQ("the form")) == {"kind": "relay", "event": "the form", "n": ""} and wk.read_question(DQ("the form", 3))["n"] == "3"
+      and wk.read_question("Decide: ship it? \u00b7 Recommend: yes") is None, None)
+OLD_WAS = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease"}}
+def head_of(head): return (wk.refreshed({"ask": head + " \u00b7 Options: arrived / drop", "watch": OLD_WAS, "options": [{"label": "drop", "line": "x"}]}, D0W) or ("",))[0].split(" \u00b7 Options: ")[0]
+D0W = datetime.date(2026, 11, 16)
+OLD_BACK = ("Decide: when should the lease come back? I kept your note (\u201clater please\u201d) but could not read a date from it. Pick a day, or write a date in the box",
+            "Decide: when should the news come back? I kept your answer but it holds no date. Pick a day, or write a date in the box")
+check("reword: the question an earlier version put back (after a date no one could read) is asked again as the plain question, or as the stop-waiting one on an item chased out",
+      all(head_of(h) == "Decide: " + wk.Q_RELAY + " Waiting for: the lease" for h in OLD_BACK)
+      and (wk.refreshed({"ask": OLD_BACK[0] + " \u00b7 Options: x", "watch": {**OLD_WAS, "asked": "dropit"}, "chases": [{}, {}], "options": [{"label": "x", "line": "x"}]}, D0W) or ("",))[0].startswith("Decide: " + wk.Q_DROP.format(n=2) + " Waiting for: the lease"), None)
+check("options: every question offers exactly the three: it happened, wait 1 more week, stop waiting; none is recommended and none carries a date",
+      [o["label"] for o in wk.options()] == LABELS == list(wk.CHOICES) and not any(o["recommended"] or "date" in o for o in wk.options()), None)
+check("options: the page reads both questions' three buttons although none is recommended, and only for a watcher's own ask",
+      [o["label"] for o in render.options_of(wrelay)] == LABELS and [o["label"] for o in render.options_of(wdrop)] == LABELS
+      and render.options_of({"metadata": {"options": wk.options()}}) == [] and render.options_of({"metadata": {"ask": "Decide: a \u00b7 Recommend: b \u00b7 Stakes: c \u00b7 By: d", "options": wk.options()}}) == []
+      and all(len(o["label"]) <= render.OPTION_LABEL_MAX and len(o["line"]) <= render.OPTION_LINE_MAX for o in wk.options()), None)
+check("options: the ask names the buttons it carries, in their order", wk.relay_ask({}).endswith(wk.TAIL) and wk.drop_ask({}).endswith(wk.TAIL) and wk.TAIL == f"{ARR} / {WEEK} / {STOP}", None)
 today = datetime.date(2026, 10, 26)
 pd = lambda t: wk.parse_date(t, today)
 check("date: ISO, month and day (weekday, suffix, either order), tomorrow, next week, in N days or weeks",
@@ -274,13 +291,13 @@ rel = wakes_svc.anchor_release("projects/alpha", notice("older than the wait", t
 check("anchor: a notice from before the wait was set is not its arrival", mt(47).get("wait_kind") == "anchor", mt(47))
 
 # ================================================================ relay
-RASK = "Decide: has countersigned NDA arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
+RASK = RQ("countersigned NDA")
 item(50, wait_kind="relay", wait_event="countersigned NDA", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay wait")
 item(51, wait_kind="relay", wait_event="the lease", ask_by=day(4), post_wake_mover=BACK, needs=[], subject="[home] relay wait not yet due")
 reset(); woke = wakes_svc.wake_pass()
 m = mt(50)
 check("relay: the ask-by day turns the item to the owner with the fixed ask", "a50" in woke and m.get("ask") == RASK and m.get("needs") == ["decision"] and m.get("then") == BACK and "wait_kind" not in m, m)
-check("relay: …its options map to the board's buttons: arrived, the three dates, not yet, drop; none recommended", [o["label"] for o in render.options_of(rd(50))][0::5] == ["arrived", "drop"] and [o["label"] for o in render.options_of(rd(50))][4] == "not yet, ask again on <date>" and len(render.options_of(rd(50))) == 6 and not any(o["recommended"] for o in render.options_of(rd(50))), m.get("options"))
+check("relay: …its options map to the board's buttons: exactly three (it happened, wait 1 more week, stop waiting); none recommended", [o["label"] for o in render.options_of(rd(50))] == LABELS and not any(o["recommended"] for o in render.options_of(rd(50))), m.get("options"))
 check("relay: …the item reads alive with the owner as mover, then the post-wake mover", _item_read._model_of({**rd(50), "gid": "a50"}).owner_moves and _item_read._model_of({**rd(50), "gid": "a50"}).then == BACK, _item_read._model_of({**rd(50), "gid": "a50"}))
 check("relay: …nobody is messaged (his queue is the board)", not sent("watch"), sent())
 g = _wt_get.stackshot_get("a50")
@@ -293,53 +310,46 @@ check("relay: the brief lists the relay waits as waiting on the world: what, ask
 reset()
 TODAY = _pages.zone_now().date()
 def ymd(n): return (TODAY + datetime.timedelta(days=n)).isoformat()
-out = answer_svc._answer("a50", "not yet, ask again on <date>", "later please", "answer")
+def reask(i, event="countersigned NDA", **was):      # the item as a due wait left it, his move and the question up (the stored fields, so a pick is read from them)
+    it = rd(i); m = it["metadata"]
+    m.pop("wait_kind", None); m.pop("ask_by", None); m.pop("woke", None); m["needs"] = ["decision"]
+    m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": event, "post_wake_mover": BACK, **was}}; m["ask"] = RQ(event); m["options"] = wk.options()
+    (T / f"store/a/{i}.json").write_text(json.dumps(it))
+out = answer_svc._answer("a50", "Not yet: wait until a typed date", "later please", "answer")      # a button an earlier version offered, from a page drawn before
 m = mt(50)
-check("relay answer: not yet with a note that holds no date keeps the note as his comment, sets no date and asks back",
-      out == "askedback" and [(a["kind"], a["text"]) for a in m["answers"]] == [("comment", "later please")] and "ask_by" not in m and "wait_kind" not in m and m.get("needs") == ["decision"], m)
-check("relay answer: …the ask-back quotes the note and offers three days counted from today (a week, two weeks, a month), then the first question's own buttons (which carry the same three days)",
-      "later please" in m["ask"] and wk.is_watcher_ask(m["ask"]) and wk.asked_of(m) == "relay"
-      and [o["label"] for o in render.options_of(rd(50))] == ["arrived", wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=7)), wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), wk.ASK_AGAIN + wk.day_words(wk._add_months(TODAY, 1)), "not yet, ask again on <date>", "drop"]
-      and not any(o["recommended"] for o in render.options_of(rd(50))), (m["ask"], m.get("options")))
-check("relay answer: …it is his move still, and the page has lines for it",
-      _item_read._model_of({**rd(50), "gid": "a50"}).owner_moves and '"askedback":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read()
-      and "askedback" in render.Board._SENT and "stalenote" in render.Board._SENT and "closednote" in render.Board._SENT and "needdate" not in render.Board._SENT, (m, sent()))
-out = answer_svc._answer("a50", wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), "", "answer")
+check("relay answer: a pick of a button that is gone (a typed date) is late: his note is kept as a comment, no date is set and the question stands",
+      out == "stalenote" and "ask_by" not in m and "wait_kind" not in m and m.get("needs") == ["decision"] and m.get("ask") == RASK and [o["label"] for o in render.options_of(rd(50))] == LABELS
+      and [a["text"] for a in m.get("answers") or []] == ["(late, the item no longer asks this: Not yet: wait until a typed date) later please"], (out, m.get("answers")))
+check("relay answer: …the page has lines for a late pick", "stalenote" in render.Board._SENT and "closednote" in render.Board._SENT, None)
+out = answer_svc._answer("a50", WEEK, "", "answer")
 m = mt(50)
-check("relay answer: a day picked from the ask-back puts the wait back on that day", out == "decision" and m.get("wait_kind") == "relay" and ab_(m) == ymd(14) and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []), (out, m))
-# the same question again, and a date typed in the box over a pick
-it = rd(50); m = it["metadata"]
-m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "ask_by": ymd(20), "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options(TODAY)
-(T / "store/a/50.json").write_text(json.dumps(it))
-out = answer_svc._answer("a50", "not yet, ask again on <date>", "one more week", "answer")
-check("relay answer: one more week counts from the date the wait already ended on", out == "decision" and ab_(mt(50)) == ymd(27), (out, mt(50)))
-it = rd(50); m = it["metadata"]
-m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options(TODAY)
-(T / "store/a/50.json").write_text(json.dumps(it))
-check("relay answer: …and from today when the wait had no date", answer_svc._answer("a50", "not yet, ask again on <date>", "park it for a week", "answer") == "decision" and ab_(mt(50)) == ymd(7), mt(50))
-it = rd(50); m = it["metadata"]
-m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options(TODAY)
-(T / "store/a/50.json").write_text(json.dumps(it))
-answer_svc._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer")
+check("relay answer: wait 1 more week puts the wait back a week from today, the same wait with its mover", out == "decision" and m.get("wait_kind") == "relay" and ab_(m) == ymd(7) and m.get("wait_event") == "countersigned NDA" and m.get("mover") == BACK
+      and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "then" not in m and "post_wake_mover" not in m, (out, m))
+check("relay answer: …and the loop's next moment is that date", wakes_svc.next_wake().strftime("%Y-%m-%d") <= ymd(7), wakes_svc.next_wake())
+reask(50, ask_by=ymd(-3))
+out = answer_svc._answer("a50", WEEK, "", "answer")
+check("relay answer: …a week from the day he picks it, whatever date the wait had ended on", out == "decision" and ab_(mt(50)) == ymd(7), (out, mt(50)))
+reask(50)
+out = answer_svc._answer("a50", "", "wait two more weeks please", "answer")
 m = mt(50)
-check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and ab_(m) == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("mover") == BACK and "post_wake_mover" not in m
-      and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "then" not in m, m)
-check("relay answer: …and the loop's next moment is that date", wakes_svc.next_wake().strftime("%Y-%m-%d") <= day(10), wakes_svc.next_wake())
+check("relay answer: any other wait (two weeks, a date) is a note in the box: it goes to the post-wake mover with his words, who judges it; no date is read, none is set",
+      out == "decision" and m.get("mover") == BACK and "wait_kind" not in m and "ask_by" not in m and "ask" not in m and "options" not in m and "wait two more weeks please" in m["woke"]["what"]
+      and [(a["kind"], a.get("text")) for a in m["answers"]][-1] == ("decision", "wait two more weeks please"), (out, m))
 item(52, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to arrive")
 wakes_svc.wake_pass(); reset()
-answer_svc._answer("a52", "arrived", "", "answer")
+answer_svc._answer("a52", ARR, "", "answer")
 m = mt(52)
-check("relay answer: arrived puts it with the post-wake mover, alive", m.get("mover") == BACK and m.get("needs") == [BACK] and "ask" not in m and "options" not in m and "wait_kind" not in m and "arrived" in m["woke"]["what"], m)
+check("relay answer: arrived puts it with the post-wake mover, alive", m.get("mover") == BACK and m.get("needs") == [BACK] and "ask" not in m and "options" not in m and "wait_kind" not in m and m["woke"]["what"] == f"{_core_instance.OWNER} says it happened (waiting for: the parcel)", m)
 check("relay answer: …the mover is told through the answer's own notice", any(x[1] == UB and x[3] == "answer" for x in SENT), sent())
 item(53, wait_kind="relay", wait_event="the quote", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to drop")
 item(54, wait_kind="item", after=["a53"], post_wake_mover=OTHER, ask_by=day(9), needs=[], subject="[home] waits on the one dropped")
 wakes_svc.wake_pass(); reset()
-answer_svc._answer("a53", "drop", "", "answer")
-check("relay answer: drop closes it as not planned (dropped), the items that waited on it turn", rd(53)["status"] == "completed" and mt(53).get("outcome") == "dropped" and "dropped on" in mt(53).get("reason", "")
+answer_svc._answer("a53", STOP, "", "answer")
+check("relay answer: drop closes it as not planned (dropped), the items that waited on it turn", rd(53)["status"] == "completed" and mt(53).get("outcome") == "dropped" and "dropped on" in mt(53).get("reason", "") and "no longer waited for (waiting for: the quote)" in mt(53).get("reason", "")
       and "ask" not in mt(53) and "chases" not in mt(53) and "watch" not in mt(53) and mt(54).get("mover") == OTHER, (mt(53), mt(54)))
 item(55, wait_kind="relay", wait_event="the review", ask_by=day(-1), post_wake_mover=OWN, needs=[], subject="[home] relay, the owner relays and the owner takes it")
 wakes_svc.wake_pass()
-answer_svc._answer("a55", "arrived", "", "answer")
+answer_svc._answer("a55", ARR, "", "answer")
 check("relay answer: a post-wake mover that is the owner falls back to the project's default holder on 'arrived' (not the creator)", mt(55).get("mover") in (UF, "home-front") and "wait_kind" not in mt(55), mt(55))
 
 # ================================================================ the relative-date table (no model, a small table)
@@ -370,34 +380,17 @@ check("dates: …while the phrase as the whole note, at its start, or right afte
       == [ds(7), ds(7), ds(7), ds(14), "2026-12-10", ds(7), ds(3), "2026-11-30", ds(1)], [pd(x) for x in ("a week", "please, a week", "I'll look again in two weeks", "for a day")])
 check("dates: of two phrases the first in the text counts (not the first in the code)", [pd(x) for x in ("a week or end of the month", "end of the month or a week", "tomorrow or a month")] == [ds(7), "2026-11-30", ds(1)], [pd(x) for x in ("a week or end of the month", "end of the month or a week")])
 check("dates: the day after tomorrow is not tomorrow", pd("the day after tomorrow") == ds(2) and pd("tomorrow") == ds(1), pd("the day after tomorrow"))
-# the ask-back quotes a note: a separator of the ask (a middle dot) in it, on a line of its own or between no-break spaces, must not make the ask read as another kind of question
-AB_META = {"watch": {"asked": "relay", "was": {"wait_event": "the contract"}}, "ask": wk.relay_ask({"wait_event": "the contract"})}
-for note_ in ("ok\n\u00b7\nRecommend: later", "ok\u00a0\u00b7\u00a0Recommend: later", "ok \u00b7 Options: later \u00b7 Recommend: x"):
-    ask_, opts_ = wk.ask_back(AB_META, note_, D0)
-    check(f"ask-back: a note with a middle dot ({note_!r}) leaves the ask a watcher ask, so the pick that follows is read as before", wk.is_watcher_ask(ask_) and wk.asked_of({**AB_META, "ask": ask_}) == "relay" and " \u00b7 Recommend: " not in ask_ and ask_.count(" \u00b7 Options: ") == 1, ask_)
-# the answer box: the same readings through a date button (the server's own day, not the fixed one)
-def next_dow(n): return (TODAY + datetime.timedelta(days=(n - TODAY.weekday()) % 7 or 7)).isoformat()
+# the answer box: a note that is mostly a date phrase is no longer read as a date on a due wait's question (any other wait is a note for the post-wake mover)
 def fresh_relay(i, ask_by=None):
     item(i, wait_kind="relay", wait_event="the contract", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay for the box")
     wakes_svc.wake_pass()
-for i_, txt_, want_ in ((70, "Friday, a day after the review", next_dow(4)), (71, "I'll look at it next week, it is a month-end task", ymd(7)), (72, "ok, a month-end report", None)):
+for i_, txt_ in ((70, "Friday, a day after the review"), (71, "I'll look at it next week, it is a month-end task")):
     fresh_relay(i_)
-    out_ = answer_svc._answer(f"a{i_}", "not yet, ask again on <date>", txt_, "answer")
-    check(f"answer box: {txt_!r} reads as the older readers do" if want_ else f"answer box: {txt_!r} reads as no date and is asked back", (ab_(mt(i_)) == want_ and out_ == "decision") if want_ else (out_ == "askedback" and "ask_by" not in mt(i_)), (out_, mt(i_)))
-
-# ================================================================ the ask-back: the day is stored, the subject is the wait's
-fresh_relay(73)
-answer_svc._answer("a73", "not yet, ask again on <date>", "later please", "answer")
-m = mt(73)
-check("ask-back: each day button stores its ISO day, and the ask names the wait (watch.was holds its event)", [o.get("date") for o in m["options"][1:4]] == [ymd(7), ymd(14), wk._add_months(TODAY, 1).isoformat()] and "the contract" in m["ask"] and "the news" not in m["ask"], m["ask"])
-it = rd(73); it["metadata"]["options"][1]["label"] = "Ask again on Mon Jan 1st"; it["metadata"]["options"][1]["date"] = ymd(5); it["metadata"]["ask"] = it["metadata"]["ask"].replace(wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=7)), "Ask again on Mon Jan 1st")
-(T / "store/a/73.json").write_text(json.dumps(it))
-check("ask-back: a pick is read from the stored day, never from the label (a label that names a month-day already past would roll to next year)", answer_svc._answer("a73", "Ask again on Mon Jan 1st", "", "answer") == "decision" and ab_(mt(73)) == ymd(5), mt(73))
-fresh_relay(74)
-answer_svc._answer("a74", "not yet, ask again on <date>", "later please", "answer")
-it = rd(74); lab = it["metadata"]["options"][2]["label"]; it["metadata"]["options"][2]["date"] = ymd(-1); (T / "store/a/74.json").write_text(json.dumps(it))
-out = answer_svc._answer("a74", lab, "", "answer")
-check("ask-back: a pick that arrives after its day has passed asks again with new days; no wait is set", out == "askedback" and "ask_by" not in mt(74) and "wait_kind" not in mt(74) and mt(74)["options"][1]["date"] == ymd(7), (out, mt(74)))
+    out_ = answer_svc._answer(f"a{i_}", "", txt_, "answer")
+    check(f"answer box: {txt_!r} with no pick is a note for the post-wake mover, never a date", out_ == "decision" and mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) and "ask_by" not in mt(i_) and txt_ in mt(i_)["woke"]["what"], (out_, mt(i_)))
+fresh_relay(72)
+out_ = answer_svc._answer("a72", WEEK, "park it until the 9th of March", "answer")
+check("answer box: wait 1 more week with a date typed beside it is still one more week (the note is kept)", out_ == "decision" and ab_(mt(72)) == ymd(7) and [a.get("text") for a in mt(72)["answers"]] == ["park it until the 9th of March"], (out_, mt(72)))
 
 # ================================================================ chases
 item(60, wait_kind="relay", wait_event="the signed copy", ask_by=day(4), post_wake_mover=BACK, needs=[], subject="[home] chased relay", chases=[{"at": now0, "by": BACK, "note": "mailed Robin a reminder"}])      # a stored chase: fixture data (no tool logs one any more)
@@ -409,27 +402,24 @@ check("chase: a moved ask_by resets the backstop and the chases (they were about
 it = rd(60); it["metadata"].pop("until", None); it["metadata"]["ask_by"] = day(-1); it["metadata"]["chases"] = [{"at": 1.0, "by": BACK, "note": "one"}, {"at": 2.0, "by": BACK, "note": "two"}]; (T / "store/a/60.json").write_text(json.dumps(it))
 reset(); woke = wakes_svc.wake_pass()
 m = mt(60)
-check("chase: two chases and no arrival: at the wait's end the item comes to the owner as drop it?", "a60" in woke and m["ask"].startswith("Decide: drop it?") and "· Options: drop / ask again in a week, two weeks or a month / keep waiting until <date>" in m["ask"] and m.get("needs") == ["decision"]
-      and [o["label"] for o in render.options_of(rd(60))][0::4] == ["drop", "keep waiting until <date>"] and len(render.options_of(rd(60))) == 5 and len(m.get("chases") or []) == 2 and m.get("then") == BACK, m)
+check("chase: two chases and no arrival: at the wait's end the item comes to the owner as stop waiting?", "a60" in woke and m["ask"] == DQ("the signed copy") and m.get("needs") == ["decision"]
+      and [o["label"] for o in render.options_of(rd(60))] == LABELS and len(m.get("chases") or []) == 2 and m.get("then") == BACK, m)
 check("chase: …nobody is messaged", not sent("watch"), sent())
-answer_svc._answer("a60", "keep waiting until <date>", "", "answer")
-check("chase: keep waiting with no date keeps the note and asks back, the wait is not put back", mt(60).get("needs") == ["decision"] and "wait_kind" not in mt(60) and mt(60)["ask"].startswith("Decide: when should") and wk.asked_of(mt(60)) == "dropit"
-      and [o["label"] for o in render.options_of(rd(60))][0::4] == ["drop", "keep waiting until <date>"], mt(60))
-answer_svc._answer("a60", "keep waiting until <date>", f"until {day(12)}", "answer")
+answer_svc._answer("a60", WEEK, "", "answer")
 m = mt(60)
-check("chase: keep waiting until a date puts the wait back on it and starts the chases over", m.get("wait_kind") == "relay" and ab_(m) == day(12) and "chases" not in m and "ask" not in m, m)
+check("chase: wait 1 more week puts the wait back a week from today and starts the chases over", m.get("wait_kind") == "relay" and ab_(m) == ymd(7) and "chases" not in m and "ask" not in m, m)
 item(61, wait_kind="relay", wait_event="the schedule", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] chased then dropped", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
 wakes_svc.wake_pass()
-answer_svc._answer("a61", "drop", "", "answer")
-check("chase: drop it? answered drop closes the item", rd(61)["status"] == "completed" and mt(61).get("outcome") == "dropped", mt(61))
+answer_svc._answer("a61", STOP, "", "answer")
+check("chase: stop waiting? answered stop closes the item", rd(61)["status"] == "completed" and mt(61).get("outcome") == "dropped", mt(61))
 item(62, wait_kind="relay", wait_event="the form", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] one chase only", chases=[{"at": 1.0, "by": BACK, "note": "a"}])
 wakes_svc.wake_pass()
-check("chase: one chase is not enough: the usual relay question comes", mt(62).get("ask") == "Decide: has the form arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop", mt(62))
+check("chase: one chase is not enough: the usual relay question comes", mt(62).get("ask") == RQ("the form"), mt(62))
 item(63, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] anchor chased twice", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
 reset(); wakes_svc.wake_pass()
-check("chase: an anchor that stayed silent after two chases comes to the owner as drop it?, not to the post-wake mover", mt(63).get("ask", "").startswith("Decide: drop it?") and not sent("watch") and "mover" not in mt(63), mt(63))
-answer_svc._answer("a63", "keep waiting until <date>", f"{day(7)}", "answer")
-check("chase: …keep waiting restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and ab_(mt(63)) == day(7), mt(63))
+check("chase: an anchor that stayed silent after two chases comes to the owner as stop waiting?, not to the post-wake mover", mt(63).get("ask", "").startswith("Decide: No news after 2 follow-ups. Stop waiting?") and not sent("watch") and "mover" not in mt(63), mt(63))
+answer_svc._answer("a63", WEEK, "", "answer")
+check("chase: …wait 1 more week restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and ab_(mt(63)) == ymd(7), mt(63))
 item(64, subject="[home] closes with chases", chases=[{"at": 1.0, "by": BACK, "note": "a"}], woke={"what": "x", "to": BACK, "at": 1.0}, watch={"set_at": 1.0}, needs=[BACK])
 _update_svc._update("a64", sender=BACK, status="completed", outcome="dropped", reason="not wanted any more", description="- Dropped: it was not wanted any more")
 check("chase: a close drops the chases, the arrival and the wait's record", not any(k in mt(64) for k in ("chases", "woke", "watch")), mt(64))
@@ -538,7 +528,7 @@ item(66, wait_kind="relay", wait_event="the card", ask_by=day(-1), post_wake_mov
 wakes_svc.wake_pass()
 spy = _Spy(_web_answers._ANSWER_LOCK); _web_answers._ANSWER_LOCK = spy
 try:
-    answer_svc._answer("a58", "arrived", "", "answer"); answer_svc._answer("a59", "drop", "", "answer"); answer_svc._answer("a66", "not yet, ask again on <date>", f"on {day(6)}", "answer")
+    answer_svc._answer("a58", ARR, "", "answer"); answer_svc._answer("a59", STOP, "", "answer"); answer_svc._answer("a66", WEEK, "", "answer")
 finally:
     _web_answers._ANSWER_LOCK = spy.inner
 check("review 2: _answer takes the item lock before the answer lock, on arrived, on drop (its after releases run inside) and on not yet", spy.n == 3 and not spy.bad, (spy.n, spy.bad))
@@ -560,10 +550,10 @@ check("review 2: an answer and an update on one item at once do not deadlock", n
 
 # --- 4. an answer in the box with no button: he took it up
 item(16, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-only answer, relay ask")
-item(17, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-only answer, drop it? ask", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
+item(17, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-only answer, stop-waiting ask", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
 item(18, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] a comment on a watcher ask")
 wakes_svc.wake_pass(); reset()
-check("review 4: the fixtures are up: the relay ask, and the drop it? ask after two chases", mt(16).get("ask", "").startswith("Decide: has") and mt(17).get("ask", "").startswith("Decide: drop it?"), (mt(16), mt(17)))
+check("review 4: the fixtures are up: the relay ask, and the stop-waiting ask after two chases", mt(16).get("ask", "") == RQ("the lease") and mt(17).get("ask", "") == DQ("the lease"), (mt(16), mt(17)))
 answer_svc._answer("a16", "", "not yet, try next Friday", "answer")
 m = mt(16)
 check("review 4: a box-only answer on the relay ask hands the item to the post-wake mover, alive", m.get("mover") == BACK and m.get("needs") == [BACK] and "then" not in m, m)
@@ -573,10 +563,10 @@ check("review 4: …the wait's record stays in watch.was, so the mover can put t
 check("review 4: …the arrival line is neutral: his words, and nothing claims an arrival", m["woke"]["what"] == f'{_core_instance.OWNER} answered in words: "not yet, try next Friday"' and "arrived" not in m["woke"]["what"].replace("answered", "") and m["woke"]["to"] == BACK, m.get("woke"))
 check("review 4: …and the mover is told with his words", any(x[1] == UB and x[3] == "answer" and "not yet, try next Friday" in x[2] for x in SENT), sent("answer"))
 answer_svc._answer("a17", "", "drop it, not needed", "answer")
-check("review 4: the same on the drop it? ask: the item is not closed, it goes to the mover with his words", rd(17)["status"] == "open" and mt(17).get("mover") == BACK and "ask" not in mt(17) and "options" not in mt(17) and "then" not in mt(17)
+check("review 4: the same on the stop-waiting ask: the item is not closed, it goes to the mover with his words", rd(17)["status"] == "open" and mt(17).get("mover") == BACK and "ask" not in mt(17) and "options" not in mt(17) and "then" not in mt(17)
       and mt(17)["woke"]["what"] == f'{_core_instance.OWNER} answered in words: "drop it, not needed"' and (mt(17).get("watch") or {}).get("was", {}).get("wait_kind") == "relay" and "asked" not in (mt(17).get("watch") or {}), mt(17))
 answer_svc._answer("a18", "", "which lease is this?", "comment")
-check("review 4: a comment (not an answer) on a watcher ask leaves the ask up", mt(18).get("ask", "").startswith("Decide: has") and mt(18).get("needs") == ["decision"], mt(18))
+check("review 4: a comment (not an answer) on a watcher ask leaves the ask up", mt(18).get("ask", "") == RQ("the lease") and mt(18).get("needs") == ["decision"], mt(18))
 
 # --- 5. a wait stored before the stamp existed: no week-old notice wakes it
 item(19, wait_kind="anchor", wait_anchor=A4, wait_event="PR merged", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] stored before the stamp existed")
@@ -706,7 +696,7 @@ finally:
 check("review 2nd: one bad stamp does not abort the minute pass: the other waits are stamped", mt(183).get("watch", {}).get("set_at", 0) >= now0 and "set_at" not in (mt(25).get("watch") or {}), (mt(25), mt(183)))
 
 # --- 11. the exemption for a watcher's ask holds only while the item's watch says it is up
-RA = "Decide: has the parcel arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"
+RA = RQ("the parcel")
 check("review 11: a needs=decision item whose ask only looks like a watcher's is nagged for the ask's shape", asks_svc._ask_owed({"needs": ["decision"], "ask": RA}) != "", asks_svc._ask_owed({"needs": ["decision"], "ask": RA}))
 check("review 11: …one the watchers put up is not", asks_svc._ask_owed({"needs": ["decision"], "ask": RA, "watch": {"asked": "relay"}}) == "", None)
 LINE = "Decide: ship it · Recommend: yes · Stakes: low · By: Mon Nov 2nd"
@@ -724,8 +714,8 @@ reset(); wakes_svc.release_after("a37", "superseded", "a38", "home-front")
 check("review 12: a superseded blocker whose replacement is closed too: the arrival names the replacement", mt(190).get("mover") == BACK and "a38" in mt(190)["woke"]["what"] and "superseded" in mt(190)["woke"]["what"], mt(190).get("woke"))
 item(93, wait_kind="relay", wait_event="the draft", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] one chase, then not yet", chases=[{"at": 1.0, "by": BACK, "note": "a"}])
 wakes_svc.wake_pass()
-answer_svc._answer("a93", "not yet, ask again on <date>", f"on {day(8)}", "answer")
-check("review 12: not yet with a new date resets the chases as well", ab_(mt(93)) == day(8) and "chases" not in mt(93) and mt(93).get("wait_kind") == "relay", mt(93))
+answer_svc._answer("a93", WEEK, "", "answer")
+check("review 12: one more week resets the chases as well", ab_(mt(93)) == ymd(7) and "chases" not in mt(93) and mt(93).get("wait_kind") == "relay", mt(93))
 _anc.save({"projects/alpha": [{"url": A5, "items": ["a39", "a49"], "added": now0, "by": "x"}]})
 item(39, wait_kind="anchor", wait_anchor=A5, wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] route: watched", watch=WATCHED())
 item(49, hold=True, wake=day(9), needs=[BACK], subject="[home] route: held")
@@ -744,7 +734,7 @@ finally:
 check("review 12: the minute pass reads the routing log from the oldest floor of the watched waits, not a week back", any(p == "projects/beta" and s >= now0 - 56 - 1 for p, s in _since) and not any(p == "projects/beta" and s < now0 - 56 - 1 for p, s in _since), _since)
 _anc.save({"projects/alpha": [{"url": AURL, "items": None, "added": now0, "by": "x"}]})
 
-# ================================================================ a question put before the date buttons is rebuilt with them (watch_refresh_asks)
+# ================================================================ a question put with other buttons is rebuilt with the three (watch_refresh_asks)
 OLD_RELAY_OPTS = [{"label": "arrived", "line": "It came.", "recommended": False}, {"label": "not yet, ask again on <date>", "line": "Give the date in the box.", "recommended": True}, {"label": "drop", "line": "No longer wanted.", "recommended": False}]
 OLD_DROP_OPTS = [{"label": "drop", "line": "No longer wanted.", "recommended": True}, {"label": "keep waiting until <date>", "line": "Give the date in the box.", "recommended": False}]
 OLD_R = "Decide: has the old quote arrived? · Options: arrived / not yet, ask again on <date> / drop"
@@ -756,47 +746,126 @@ item(313, needs=["decision"], ask="Decide: which way? · Recommend: A · Stakes:
 before_closed, before_agent = raw(312), raw(313)
 moved_ = watching_svc.watch_refresh_asks(now0)
 r310, r311 = rd(310)["metadata"], rd(311)["metadata"]
-D_ = datetime.datetime.fromtimestamp(now0, datetime.timezone(datetime.timedelta(hours=ZONE_HOURS))).date()      # the instance's day: the one the buttons count from
-check("refresh: an open relay question put before the date buttons is rebuilt: its ask's options part and its buttons, the head as stored; none recommended",
-      sorted(moved_) == ["a310", "a311"] and r310["ask"] == "Decide: has the old quote arrived? · Options: " + wk.RELAY_TAIL and [o["label"] for o in render.options_of(rd(310))][0::5] == ["arrived", "drop"]
-      and [o.get("date") for o in r310["options"]][1:4] == [(D_ + datetime.timedelta(days=7)).isoformat(), (D_ + datetime.timedelta(days=14)).isoformat(), wk._add_months(D_, 1).isoformat()]
+check("refresh: an open relay question put with other buttons is rebuilt: worded as today's, with its options part and exactly the three buttons; none recommended",
+      sorted(moved_) == ["a310", "a311"] and r310["ask"] == RQ("the old quote") and [o["label"] for o in render.options_of(rd(310))] == LABELS
       and not any(o["recommended"] for o in r310["options"]) and wk.asked_of(r310) == "relay" and wk.is_watcher_ask(r310["ask"]), r310)
-check("refresh: …and the open drop-it question the same", r311["ask"] == "Decide: drop it? the old quote did not arrive after 2 chases · Options: " + wk.DROP_TAIL and len(render.options_of(rd(311))) == 5 and wk.asked_of(r311) == "dropit", r311)
+check("refresh: …and the open drop-it question the same", r311["ask"] == DQ("the old quote") and [o["label"] for o in render.options_of(rd(311))] == LABELS and wk.asked_of(r311) == "dropit", r311)
 check("refresh: a closed item and an agent's own ask are left alone", raw(312) == before_closed and raw(313) == before_agent, None)
 r_before = (raw(310), raw(311)); again = watching_svc.watch_refresh_asks(now0 + 3 * DAY)
-check("refresh: a second run writes nothing (idempotent: the date buttons are the mark)", again == [] and (raw(310), raw(311)) == r_before, again)
+check("refresh: a second run writes nothing (idempotent: the three buttons are the mark)", again == [] and (raw(310), raw(311)) == r_before, again)
 SENT.clear(); r_ = rd(310); r_["metadata"]["answers"] = []; (T / "store/a/310.json").write_text(json.dumps(r_))
-out_ = answer_svc._answer("a310", wk.ASK_AGAIN + wk.day_words(D_ + datetime.timedelta(days=7), D_), "", "answer")
-check("refresh: a day button of the rebuilt question puts the wait back on that day, as on the follow-up", out_ != "askedback" and mt(310).get("wait_kind") == "relay" and ab_(mt(310)) == (D_ + datetime.timedelta(days=7)).isoformat() and "ask" not in mt(310), mt(310))
+out_ = answer_svc._answer("a310", WEEK, "", "answer")
+check("refresh: the week button of the rebuilt question puts the wait back a week from today", out_ == "decision" and mt(310).get("wait_kind") == "relay" and ab_(mt(310)) == ymd(7) and "ask" not in mt(310), mt(310))
+out_ = answer_svc._answer("a311", "keep waiting until <date>", "until March", "answer")
+check("refresh: a pick of a button the rebuilt question no longer has is late: kept as a note, the question stands", out_ == "stalenote" and mt(311).get("ask") == DQ("the old quote"), (out_, mt(311)))
 
-# stale day buttons (a question that sat past its first button's day) are counted again from today; a fresh one is left alone
-def _stale(i, asked, days_ago, head):
-    base = D_ - datetime.timedelta(days=days_ago)
-    opts = wk.relay_options(base) if asked == "relay" else wk.drop_options(base)
-    tail = wk.RELAY_TAIL if asked == "relay" else wk.DROP_TAIL
-    item(i, needs=["decision"], mover=None, ask=head + " · Options: " + tail, options=opts, watch={"asked": asked, "was": {"wait_kind": "relay", "wait_event": "the stale quote", "ask_by": day(-1)}}, subject=f"[home] {asked} with stale day buttons")
-_stale(320, "relay", 8, "Decide: has the stale quote arrived?")
-_stale(321, "dropit", 15, "Decide: drop it? the stale quote did not arrive after 2 chases")
-_stale(322, "relay", 7, "Decide: has the edge quote arrived?")      # its first button's day is today: stale
-_stale(323, "relay", 1, "Decide: has the fresh quote arrived?")     # first button 6 days ahead: untouched
-before_fresh = raw(323)
-moved2 = watching_svc.watch_refresh_asks(now0)
-r320, r321 = rd(320)["metadata"], rd(321)["metadata"]
-fut = lambda m: [o.get("date") for o in m["options"] if o.get("date")]
-check("stale: day buttons whose first day has come or passed are counted again from today, the head as stored, in the same shape",
-      sorted(moved2) == ["a320", "a321", "a322"] and fut(r320) == [(D_ + datetime.timedelta(days=7)).isoformat(), (D_ + datetime.timedelta(days=14)).isoformat(), wk._add_months(D_, 1).isoformat()]
-      and fut(rd(322)["metadata"]) == fut(r320) and fut(r321) == fut(r320)
-      and r320["ask"] == "Decide: has the stale quote arrived? · Options: " + wk.RELAY_TAIL and r321["ask"] == "Decide: drop it? the stale quote did not arrive after 2 chases · Options: " + wk.DROP_TAIL
-      and len(r320["options"]) == 6 and len(r321["options"]) == 5 and not any(o["recommended"] for o in r320["options"] + r321["options"]) and wk.asked_of(r320) == "relay" and wk.asked_of(r321) == "dropit", (moved2, r320))
-check("stale: a question whose buttons are still ahead is left untouched", "a323" not in moved2 and raw(323) == before_fresh, moved2)
-after2 = (raw(320), raw(321), raw(322), raw(323)); again2 = watching_svc.watch_refresh_asks(now0 + 3600)
-check("stale: a second run the same day writes nothing", again2 == [] and (raw(320), raw(321), raw(322), raw(323)) == after2, again2)
-later = watching_svc.watch_refresh_asks(now0 + 8 * DAY)
-check("stale: a week later the rebuilt buttons are stale again and are counted again", {"a320", "a321", "a322", "a323"} <= set(later), later)
-SENT.clear(); r_ = rd(320); r_["metadata"]["answers"] = []; (T / "store/a/320.json").write_text(json.dumps(r_))
-D2_ = D_ + datetime.timedelta(days=8)
-out2_ = answer_svc._answer("a320", wk.ASK_AGAIN + wk.day_words(D2_ + datetime.timedelta(days=7), D2_), "", "answer")
-check("stale: a day button of a re-based question puts the wait back on that day (no refusal as for a past day)", out2_ != "askedback" and mt(320).get("wait_kind") == "relay" and ab_(mt(320)) == (D2_ + datetime.timedelta(days=7)).isoformat(), (out2_, mt(320)))
+# ================================================================ an open question in an earlier version's words is worded again where it stands, and what was posted from the old page still counts
+from stackshot.model import ask_leaves as _askl, owner_steps as _osteps
+from stackshot.web.ui import render as ui_render
+from stackshot.web import i18n as _i18n, wait_words as _ww
+def old_worded(i, event):
+    """The stored question of a relay item the watchers turned to the owner, put back into an earlier version's words and buttons. → the item as it read before the rewording."""
+    answer_svc._answer(f"a{i}", "", "which one is this?", "comment")
+    it = rd(i); m = it["metadata"]
+    old = f"Decide: has {event} arrived? · Options: arrived / not yet, ask again on <date> / drop"
+    new_head, old_head = _osteps.decide_of(m["ask"]), _osteps.decide_of(old)
+    m = json.loads(json.dumps(m, ensure_ascii=False).replace(new_head, old_head))      # the server's step, next and the ask record say what was asked
+    m["ask"] = old
+    m["options"] = json.loads(json.dumps(OLD_RELAY_OPTS))
+    if _askl.REC in m: m[_askl.REC] = {**m[_askl.REC], "text": old}
+    it["metadata"] = m; (T / f"store/a/{i}.json").write_text(json.dumps(it))
+    return rd(i)
+OLDS = ((330, "the north lease"), (331, "the south lease"), (332, "the east lease"))
+cfg(guards=True)             # the default: the server keeps the owner's step, which is worded again too
+for i_, ev_ in OLDS: item(i_, wait_kind="relay", wait_event=ev_, ask_by=day(-1), post_wake_mover=BACK, needs=[], subject=f"[home] {i_}: asked in the old words")
+wakes_svc.wake_pass()      # once for all of them, before any is put back: the pass words old questions again
+was330, was331, was332 = [old_worded(i_, ev_) for i_, ev_ in OLDS]
+b = was330["metadata"]
+check("reword fixture: the open question stands in the old words, with its comment, its record and the server's step",
+      b["ask"].startswith("Decide: has the north lease arrived?") and b["answers"] and _askl.REC in b and "has the north lease arrived?" in str(b.get(_osteps.KEY)), b)
+SENT.clear(); moved = watching_svc.watch_refresh_asks(now0); now330 = rd(330); a = now330["metadata"]
+check("reword: the question is today's, its buttons are the three, none of the old lines is left",
+      {"a330", "a331", "a332"} <= set(moved) and a["ask"] == RQ("the north lease") and [o["label"] for o in a["options"]] == LABELS and "It came." not in json.dumps(a["options"]), (moved, a))
+check("reword: …answers, notes, the wait's record, who takes it next and the item's clock are kept, and nobody is told",
+      a["answers"] == b["answers"] and a["watch"]["was"] == b["watch"]["was"] and a.get("then") == b.get("then") and a.get("needs") == b.get("needs") and now330.get("state_updated") == was330.get("state_updated")
+      and not SENT, (a, SENT))
+check("reword: …the ask record and the server's step are the same ones with the new words, nothing added or dropped",
+      a[_askl.REC] == {**b[_askl.REC], "text": " ".join(a["ask"].split())} and "Has what this item is waiting for happened?" in str(a.get(_osteps.KEY))
+      and "has the north lease arrived?" not in json.dumps({k: v for k, v in a.items() if k != "watch"}) and str(a.get("next")).count("\n") == str(b.get("next")).count("\n"), a)
+raw330 = raw(330); check("reword: …a second run writes nothing", "a330" not in watching_svc.watch_refresh_asks(now0) and raw(330) == raw330, None)
+ref330 = _web_answers._question_ref(was330)
+out = answer_svc._answer("a330", "arrived", "", "answer", ref=ref330)
+check("reword: a pick sent from the page drawn before the rewording, with its old label, counts as the button that replaced it", out == "decision" and mt(330).get("mover") == BACK and "ask" not in mt(330) and mt(330)["answers"][-1]["choice"] == ARR, (out, mt(330)))
+ref331 = _web_answers._question_ref(was331)
+out = answer_svc._answer("a331", "not yet, ask again on <date>", f"on {day(9)}", "answer", ref=ref331)
+check("reword: the old page's date button has no successor: a late pick, his note kept, no date read, the question stands", out == "stalenote" and "ask_by" not in mt(331) and mt(331).get("ask") == RQ("the south lease"), (out, mt(331)))
+out = answer_svc._answer("a332", "drop", "", "answer")
+check("reword: an old label sent bare is accepted as the button that replaced it", out == "decision" and mt(332).get("wait_kind") != "relay" and "ask" not in mt(332), (out, mt(332)))
+
+# ================================================================ a page in another language: the question, its buttons, lines, step and history are the string table's; what is stored and posted is not
+item(340, wait_kind="relay", wait_event="the north permit", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] drawn in another language")
+item(341, wait_kind="relay", wait_event="the south permit", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] answered, then drawn")
+wakes_svc.wake_pass(); answer_svc._answer("a341", WEEK, "", "answer")
+LOC = T / "locales"; LOC.mkdir(exist_ok=True)
+MARK = lambda k, **f: "[x:" + _i18n.EN[k].format(**f) + "]"
+(LOC / "ko.json").write_text(json.dumps({k: f"[x:{v}]" for k, v in _i18n.EN.items() if k.startswith("wait_ask.")}), encoding="utf-8")
+_cfg.CFG.setdefault("ui", {})["locale_dir"] = str(LOC); _i18n._LOADED.clear(); _i18n._WARNED.clear()
+check("language: the wait_ask keys' English is the stored wording", [_i18n.EN[f"wait_ask.q.{k}"] for k in ("relay", "drop")] == [wk.Q_RELAY, wk.Q_DROP]
+      and [_i18n.EN[f"wait_ask.opt.{k}"] for k in ("arrived", "week", "drop")] == LABELS and not [k for k in _i18n.EN if k.startswith("wait_ask.line.")], None)
+bd = ui_render.Board(f"{tmp}/store"); box = {"action": "/items/a340/answer", "token": "TOKEN", "sent": ""}
+plain = lambda h: html.unescape(h)
+en_page = plain(bd.item_html("a340", answer=box))
+with _i18n.use("ko"):
+    ko_page = plain(bd.item_html("a340", answer=box)); ko_done = plain(bd.item_html("a341")); ko_row = plain(" ".join(bd.home_ask(bd.item("a340"))))
+def unmarked(h): return re.sub(r"\[x:(?:[^\[\]]|\[[^\[\]]*\])*\]", "", re.sub(r'value="[^"]*"', "", h))
+ENGLISH = ("Has what this item", ARR, WEEK, STOP, wk.LINE_ARRIVED, wk.LINE_WEEK, wk.LINE_DROP)
+for where, h in (("the item page", ko_page), ("the home row", ko_row)):
+    want = [MARK("wait_ask.q.relay"), MARK("wait_ask.event", event="the north permit"), MARK("wait_ask.opt.arrived"), MARK("wait_ask.opt.week"), MARK("wait_ask.opt.drop"),
+            f'value="A · {ARR}"', f'value="B · {WEEK}"', f'value="C · {STOP}"']      # three cards, no line under any: the value is the card's letter and the stored label
+    check(f"language: {where} draws the question, what is waited for and the three buttons from the table, with no English line left, and posts the stored labels",
+          not [w for w in want if w not in h] and not [w for w in ENGLISH if w in unmarked(h)], ([w for w in want if w not in h], [unmarked(h)[max(0, unmarked(h).find(w) - 300):unmarked(h).find(w) + 80] for w in ENGLISH if w in unmarked(h)][:3]))
+check("language: after the answer, the History's question and pick and the ticked step are the table's",
+      "[x:picked [x:" + WEEK + "]]" in ko_done and MARK("wait_ask.q.relay") in ko_done and not [w for w in ENGLISH if w in unmarked(ko_done)],
+      [unmarked(ko_done)[max(0, unmarked(ko_done).find(w) - 300):unmarked(ko_done).find(w) + 80] for w in ENGLISH if w in unmarked(ko_done)][:3])
+with _i18n.use("ko"):
+    m340 = mt(340)
+    said = [_ww.one_line(m340["ask"]), _ww.steps(m340["next"]), json.dumps(_ww.worded(m340["ask"], m340["options"])), _ww.step(f"{OWN}: a step of a session's own"), _ww.one_line("Decide: ship it?")]
+check("language: the History's texts of a change (the question, the next lines, the options) are the table's; a session's own words stay",
+      MARK("wait_ask.q.relay") in said[0] and MARK("wait_ask.q.relay") in said[1] and MARK("wait_ask.opt.drop") in said[2] and not any(w in unmarked(said[1]) or w in unmarked(said[2]) for w in ENGLISH)
+      and said[3] == f"{OWN}: a step of a session's own" and said[4] == "Decide: ship it?", said)
+check("language: an English page reads the stored words, the event after the question", "Has what this item is waiting for happened?" in en_page and "Waiting for: the north permit" in en_page and ARR in en_page and "[x:" not in en_page, None)
+_cfg.CFG["ui"].pop("locale_dir", None); _i18n._LOADED.clear(); _i18n._WARNED.clear()
+cfg(guards=False)
+
+# ================================================================ every question a due wait puts to the owner offers exactly the three choices, unfolded, and each does what it says
+OLD_BACK = "Decide: when should the lab report come back? I kept your answer but it holds no date it could read. Pick a day, or write a date in the box · Options: arrived / not yet, ask again on <date> / drop"
+def three_kinds(base):
+    """The three questions a due wait can put, one item each: the plain relay question, the question after chases with no answer, and the ask-back an earlier version put after a date no one could read."""
+    for i, kind in ((base, "relay"), (base + 1, "dropit"), (base + 2, "back")):
+        chased = [{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}] if kind == "dropit" else None
+        item(i, wait_kind="relay", wait_event="the lab report", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject=f"[home] three choices: {kind}", **({"chases": chased} if chased else {}))
+    wakes_svc.wake_pass()
+    it = rd(base + 2); m = it["metadata"]      # the third is put back into an earlier version's ask-back and its buttons, then refreshed
+    m["ask"], m["options"] = OLD_BACK, json.loads(json.dumps(OLD_RELAY_OPTS)); it["metadata"] = m; (T / f"store/a/{base + 2}.json").write_text(json.dumps(it))
+    watching_svc.watch_refresh_asks(now0)
+three_kinds(350)
+for i_, kind_ in ((350, "relay"), (351, "dropit"), (352, "back")):
+    m_ = mt(i_); opts_ = render.options_of(rd(i_))
+    check(f"three choices: the {kind_} question offers exactly three choices, in this order, none folded and none recommended, each with its own stored label",
+          [o["label"] for o in opts_] == LABELS and len(opts_) == 3 and not any(o["recommended"] for o in opts_) and m_["ask"].endswith(" · Options: " + wk.TAIL) and "<date>" not in json.dumps([m_["ask"], m_["options"]]) and "date" not in " ".join(LABELS).lower(), (m_["ask"], opts_))
+    check(f"three choices: …the {kind_} question names the wait, in a whole sentence", "Waiting for: the lab report" in m_["ask"] and "Decide: " + (wk.Q_RELAY if kind_ != "dropit" else wk.Q_DROP.format(n=2)) in m_["ask"], m_["ask"])
+for i_, pick_ in ((350, ARR), (351, ARR), (352, ARR)):
+    answer_svc._answer(f"a{i_}", pick_, "", "answer")
+check("three choices: arrived, on each of the three questions, ends the wait and hands the item to the mover", all(mt(i).get("mover") == BACK and "wait_kind" not in mt(i) and "ask" not in mt(i) and "options" not in mt(i) and rd(i)["status"] != "completed" for i in (350, 351, 352)), [mt(i) for i in (350, 351, 352)])
+three_kinds(355)
+for i_ in (355, 356, 357): answer_svc._answer(f"a{i_}", WEEK, "", "answer")
+check("three choices: wait 1 more week, on each of the three, puts the same wait back a week from today and drops the question and the chases", all(mt(i).get("wait_kind") == "relay" and ab_(mt(i)) == ymd(7) and mt(i).get("wait_event") == "the lab report" and "ask" not in mt(i) and "chases" not in mt(i) for i in (355, 356, 357)), [mt(i) for i in (355, 356, 357)])
+three_kinds(360)
+for i_ in (360, 361, 362): answer_svc._answer(f"a{i_}", STOP, "", "answer")
+check("three choices: drop, on each of the three, closes the item as dropped", all(rd(i)["status"] == "completed" and mt(i).get("outcome") == "dropped" and "ask" not in mt(i) for i in (360, 361, 362)), [mt(i) for i in (360, 361, 362)])
+three_kinds(365)
+for i_ in (365, 366, 367): answer_svc._answer(f"a{i_}", "", "wait until the lab reopens in March", "answer")
+check("three choices: a free-text note, on each of the three, still goes to the mover with his words, reads no date and sets none", all(mt(i).get("mover") == BACK and "ask_by" not in mt(i) and "wait_kind" not in mt(i) and "wait until the lab reopens in March" in mt(i)["woke"]["what"] for i in (365, 366, 367)), [mt(i) for i in (365, 366, 367)])
 
 # ================================================================ the example config documents the switches
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")

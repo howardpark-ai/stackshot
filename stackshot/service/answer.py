@@ -286,8 +286,7 @@ def _release_dropped(gid: str, drop: list[bool]) -> Iterator[None]:
 
 
 def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail: dict[str, Any] | None = None, by: str = "", ref: str = "", files: list[str] | None = None) -> str:
-    """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
-    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover | notyours | askwaits (nothing written; `emptynote` is a Send note on a blank box, `notyours` a card another member was asked to pick, `askwaits` the Done of a member with a part in the step while a question on the item holds it back). A step form has two buttons and an optional note box.
+    """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | emptynote | toolong | nostep | nomover | notyours | askwaits (nothing written; `emptynote` is a Send note on a blank box, `notyours` a card another member was asked to pick, `askwaits` the Done of a member with a part in the step while a question on the item holds it back). A step form has two buttons and an optional note box.
     Done (act=done) is his word that the step is finished (`done`: the item goes to its then-mover, recorded as his answer "Done"); a note in the box stays on that record (`text`) and goes with the Done to the then-mover,
     which is told the step is done and shown the note (`donenote`: the same, and the notice says the note went along). `via` is where the answer came from: "board" for his click, "mail" when the server settles
     his send step because a mail he sent fits it (service/sent_match.py; the answer then reads Done by a mail, and is no word of his for a wait or a date). A mail tick passes `mail` = {"step": the step it was asked about, "since": the item's state clock then, "note": the server's
@@ -329,6 +328,9 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                 return "changed"
             if meta.get("ask") or meta.get("options") or "decision" in _needs_kinds(meta):
                 return "beside"         # a question for him stands beside the step: a mail is no answer to it, and a Done would take his decision need off
+        earlier = _watch.before_rewording(meta)      # the server worded its own question again (an earlier version's words, the same buttons): a page that showed it before asked this very question
+        if ref and earlier and ref == _answers()._question_ref({**item, "metadata": earlier}):
+            ref = _answers()._question_ref(item)
         if ref and "decision" in _needs_kinds(meta) and (choice or (act == "answer" and text)) and ref != _answers()._question_ref(item):      # the question was rewritten after the page showed it: a label it kept is no pick of the new one
             late = "late, the question was rewritten after the page showed it"      # said in front of a note with no pick too: its reader must not take it for an answer to the new question
             pick = _answers()._posted_name(choice)      # never split against the item's options: they may stand in another order now
@@ -336,7 +338,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         stepped, then, handed, letter, until = False, "", "", "", ""
         pressed = choice      # the button he pressed, if any, whatever the branches below make of it
         if choice:
-            choice, letter = _answers()._split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it
+            choice, letter = _answers()._split_letter(item, _watch.current_choice(meta, choice))      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it (a label an earlier version gave a watcher's button reads as the button's own)
         if choice:                      # an option's button: only while the item needs his decision, and only one of the item's stored options (Approve and Decline are no fallback); with none stored, Yes or No (the same two the page draws)
             valid = [f[0] for f in _answers()._option_forms(item)] or [o["label"] for o in _hooks().yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
@@ -383,9 +385,6 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         shared = bool(member) and (member != _steps.member_for(meta.get("step"), meta) or any(m != member for m in _steps.open_members(meta)))      # another member has a part in it too
         stays, done, moved = "", False, False      # of a shared step: who it is with after this answer, whether the answer finished the member's part, and whether the step passed on
         eff = _watch.answer_effect(meta, choice, text, _pages.zone_now().date()) if kind == "decision" and not stepped else {"do": ""}     # a pick on a watcher ask, or his words in the box, acts on the item
-        askback = eff["do"] == _watch.NEEDS_DATE      # a date button, and no date he gave can be read: the answer and the note are kept below, and the item asks him back with dates
-        if askback:
-            asked_note, kind, text, choice, eff = text, "comment", text or f"(pressed: {choice})", "", {"do": ""}      # `asked_note`: the note as he wrote it
         now = time.time()
         asks = _question_fields(item, text) if kind in ("decision", "comment") and not stepped and not pressed and via != "mail" else {}      # nothing but a question, typed with no pick: no call of his
         if asks and eff["do"] == "words":
@@ -490,8 +489,6 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
                 handed = _handover._decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
                                     waiting=_item_read._model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
-        if askback:                     # the question put back: three days to pick from (watchers.ask_back); the item stays his, needs still names his decision
-            meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta
         item["updated"] = now
         _writes.save(gid, item, note=_answers()._answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(NAME, "mail") if via == "mail" else (who, "board"))
@@ -522,7 +519,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         kind = "partdone" if done else "comment"
     print(f"answer: {gid} {kind} from {'a sent mail' if via == 'mail' else 'the board'}" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _hooks().publish()
-    return "askedback" if askback else kind
+    return kind
 
 
 def _answer_tick(now: float | None = None) -> list[str]:

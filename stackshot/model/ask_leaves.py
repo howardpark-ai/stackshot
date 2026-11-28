@@ -107,12 +107,13 @@ def changed(meta: dict[str, Any], before_meta: dict[str, Any] | None) -> bool:
 
 
 def stamp(meta: dict[str, Any], before_meta: dict[str, Any] | None, who: str, now: float) -> None:
-    """Keep who wrote the ask and when, on a save that changes it (`who` "" for a server save). A save that leaves the ask as it was keeps the record; one that removes the ask drops it."""
+    """Keep who wrote the ask and when, on a save that changes it (`who` "" for a server save). A save that leaves the ask as it was keeps the record; one that removes the ask drops it. A save that brings
+    the record along under the new words (the server wording its own question again: waits/watchers.py apply_refresh) asks nothing new, so the record's author and time stand."""
     ask = " ".join(str(meta.get("ask") or "").split())
     if not ask:
         meta.pop(REC, None)
         return
-    if changed(meta, before_meta):      # an ask stored before this record stays without one: its author is not guessed from a later save
+    if changed(meta, before_meta) and not rec_of(meta):      # an ask stored before this record stays without one: its author is not guessed from a later save
         meta[REC] = {"by": who, "at": now, "text": ask}
         meta.pop(LEFT, None)      # a new ask is a new question: a late pick on the one taken off reads stale from now on
 

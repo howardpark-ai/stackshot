@@ -75,7 +75,6 @@ from stackshot.core import config as _cfg
 from stackshot.core import datewords, readonly
 from stackshot.audit import audit as _audit
 from stackshot.audit import audit_overview as _ov
-from stackshot.model import states as _states
 from stackshot.service import job_alert
 from stackshot.waits import waiting as _waiting
 from stackshot.waits import watchers
@@ -205,14 +204,6 @@ check("…and the same month and day of last year is a date with its year, not a
 with clock(AFTER):
     got = [_waiting.when_words(at(2026, 12, 31, 23, 30).timestamp()), _waiting.when_words(at(2027, 3, 5, 18, 30).timestamp()), watchers.day_words(D(2026, 12, 31)), watchers.day_words(D(2027, 3, 5))]
 check("the waiting notes and the watchers' day words by the clock", got == ["Thu Dec 31st 2026 23:30", "Fri Mar 5th 18:30", "Thu Dec 31st 2026", "Fri Mar 5th"], got)
-labels = {t_: [o["label"] for o in watchers.date_options(t_)] for t_ in (D(2026, 11, 26), D(2026, 12, 20), D(2027, 1, 1))}
-check("a watcher's date buttons, counted from today: the ones that fall in next year say it, no other does",
-      labels == {D(2026, 11, 26): ["Ask again on Thu Dec 3rd", "Ask again on Thu Dec 10th", "Ask again on Sat Dec 26th"],
-                 D(2026, 12, 20): ["Ask again on Sun Dec 27th", "Ask again on Sun Jan 3rd 2027", "Ask again on Wed Jan 20th 2027"],
-                 D(2027, 1, 1): ["Ask again on Fri Jan 8th", "Ask again on Fri Jan 15th", "Ask again on Mon Feb 1st"]}, labels)
-opts = watchers.date_options(D(2026, 12, 20))
-check("…and each button still names the day it stores, read by the board's date parser",
-      all([d for _w, d in _states.named_dates(o["label"], D(2026, 12, 20))] == [D.fromisoformat(o["date"])] for o in opts), [(o["label"], o["date"]) for o in opts])
 real_now = job_alert._jobalert_now
 try:
     job_alert._jobalert_now = lambda: AFTER.astimezone(UTC)

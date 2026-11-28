@@ -199,7 +199,7 @@ check("the Background shows the stored description (the field keeps its name) an
 wt5, wt6, wt3 = wt(p5), wt(p6), wt(p3)
 check("the wait block of an anchor wait: the anchor linked, the event, who watches, the backstop, then, the chases (count, when, who, note)",
       '<a href="https://github.com/o/r/pull/9"' in p5 and "the review lands" in wt5 and "Watched by" in wt5 and "the anchor module" in wt5 and "Backstop" in wt5 and "Picks it up" in wt5
-      and "Chases" in wt5 and "2 " in wt5 and "asked in the PR" in wt5 and "pinged the reviewer" in wt5 and 'drop it?' in wt5, wt5)
+      and "Chases" in wt5 and "2 " in wt5 and "asked in the PR" in wt5 and "pinged the reviewer" in wt5 and "whether to stop waiting" in wt5, wt5)
 check("a relay wait: the party's event, ask by, none chased yet", "Acme" in wt6 and "Ask by" in wt6 and "none yet" in wt6, wt6)
 check("a time wait: his reason and no chases row; an alive or closed item has no wait block", "the vendor's holiday" in wt3 and "Chases" not in wt3 and all('class="iwait"' not in p for p in (p1, p2, p7)))
 check("an item wait names the item and whether it is open", 'href="/items/a2"' in p4 and "(open)" in p4)

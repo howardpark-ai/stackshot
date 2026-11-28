@@ -15,12 +15,12 @@ reading of the owner's answer to those asks, the date he gives. The server (serv
           first → alive, the post-wake mover, "the anchor stayed silent"
   event   the server is told of the fleet event the wait names (event_waits.py: a PR merged or released, a recycle, a fleet op's result, a job's run) → alive, the post-wake mover, with what
           happened; the backstop passes first → alive, the post-wake mover, "the event did not come". The stall pass does not run for it (a waiting item has no mover to nag)
-  relay   the ask-by day comes → alive with the owner as mover, a ready question: has <party>'s <event> arrived? arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop
+  relay   the ask-by day comes → alive with the owner as mover, a ready question: Q_RELAY, with what is waited for after it on its own, and three choices: it happened / wait 1 more week / stop waiting (any other wait is a note in the box)
   list    several waits of any of the kinds above at once (waits/wait_list.py): each line is marked when it arrives, and the item comes back when every line has (`all`) or the first has (`any`) → alive,
           the post-wake mover, with what arrived and what did not; the backstop day passing first → the same (an open relay line then asks the owner, as a relay's ask-by day does). No chases on a list
 
   Chases (a relay or anchor wait): a follow-up an older item logged is only read (no call logs one now). With two on the item, the wait's next end (the ask-by day or the
-  backstop) brings the item to the owner as "drop it?" (drop / ask again in a week, two weeks or a month / keep waiting until <date>) instead of the usual arrival. Reading taken: "after two chases with no reply"
+  backstop) brings the item to the owner as the "stop waiting?" question (Q_DROP, the same three choices) instead of the usual arrival. Reading taken: "after two chases with no reply"
   is judged when the wait comes due, since only then has the last chase had its time to be answered.
 
 [model] pause = true holds every transition here (and the wake pass beside them); when it turns false the due ones fire in one pass, one message per recipient."""
@@ -34,6 +34,9 @@ from typing import Any, Callable
 from stackshot.core import config as _cfg
 from stackshot.core import datewords as _datewords
 from stackshot.core import runner_files as _files
+from stackshot.model import ask_leaves as _ask_leaves
+from stackshot.model import bullet_text as _bt
+from stackshot.model import owner_steps as _owner_steps
 from stackshot.waits import event_waits as _ew
 from stackshot.model import model as _model
 from stackshot.model import step_proof as _sp
@@ -42,16 +45,26 @@ from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
 CHASE_KINDS = ("relay", "anchor")          # the waits a chase goes with
-CHASES_MAX = 2                             # this many chases, no arrival: the next end of the wait asks the owner "drop it?"
+CHASES_MAX = 2                             # this many chases, no arrival: the next end of the wait asks the owner whether to stop waiting
 DROP_ON_CLOSE = ("chases", "woke", "watch")
-ARRIVED, NOT_YET, DROP, KEEP = "arrived", "not yet, ask again on <date>", "drop", "keep waiting until <date>"      # the buttons; the date is the one the owner gives in the box
-NEEDS_DATE = "needdate"                    # what answer_effect says when "not yet" came with no readable date: the answer and the note are kept, the item asks him back with dates (ask_back)
-ASK_AGAIN = "Ask again on "                # the label of an ask-back button; the date follows ("Ask again on Tue Nov 17th")
+ARRIVED = "It happened: continue the work"      # the three buttons of every question a due wait asks: a label says what a pick does without the question beside it (and stays within render.OPTION_LABEL_MAX)
+WEEK = "Wait 1 more week: next check in a week"      # the new end date is a week from the day he picks it
+DROP = "Stop waiting: close the item"
+WEEK_DAYS = 7
 _ASK_HEAD = "Decide: "
 _OPT_MARK = " · Options: "
-WHEN_WORDS = "ask again in a week, two weeks or a month"      # how the ask names the three date buttons (date_options): their days are counted from the day the question is put, so the ask text stays one fixed line
-RELAY_TAIL = f"arrived / {WHEN_WORDS} / {NOT_YET} / drop"      # the options part of the relay ask, in the order of the buttons
-DROP_TAIL = f"drop / {WHEN_WORDS} / {KEEP}"      # the options part of the "drop it?" ask
+CHOICES = (ARRIVED, WEEK, DROP)
+TAIL = " / ".join(CHOICES)      # the options part of every question, in the order of the buttons; any other wait is a note in the box, which the post-wake mover reads
+# The question is a whole short sentence that holds none of the item's text; what is waited for follows it on its own (EVENT_LEAD), whatever shape that text has. Stored in English (a session reads
+# it, and a button's label is the identity of a pick); a page draws it from the string table (web/wait_words.py, through read_question and option_kind).
+Q_RELAY = "Has what this item is waiting for happened?"
+Q_DROP = "No news after {n} follow-ups. Stop waiting?"
+EVENT_LEAD = " Waiting for: "
+EVENT_CLIP = 200                           # the longest event text a question carries (cut at a word, never inside a link)
+# what each button does, one line each (within render.OPTION_LINE_MAX); the stored options need one, a page draws the label alone, which says it (wait_words.line)
+LINE_ARRIVED = "The wait is over: the item goes to the session that takes it next."
+LINE_WEEK = "The item keeps waiting and this question comes back in a week."
+LINE_DROP = "It is no longer wanted: the item closes as not planned."
 
 
 # ---------------------------------------------------------------------------------------------------------------- the switches
@@ -252,7 +265,7 @@ def chases_of(meta: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def chased_out(meta: dict[str, Any]) -> bool:
-    """A relay or anchor wait with CHASES_MAX chases on it: its next end asks "drop it?"."""
+    """A relay or anchor wait with CHASES_MAX chases on it: its next end asks whether to stop waiting."""
     return stored_kind(meta) in CHASE_KINDS and len(chases_of(meta)) >= CHASES_MAX
 
 
@@ -265,14 +278,110 @@ def subject_of(meta: dict[str, Any], clip: int = 110) -> str:
     return text if len(text) <= clip else text[:clip].rstrip() + "…"
 
 
+def event_of(meta: dict[str, Any]) -> str:
+    """What the question shows as waited for, on its own after the question: the wait's event (a list's open relay line), "<party>: <event>" when the item stores a party the event does not already
+    name; "" when the item names none."""
+    event = _model.clean(meta.get("wait_event")) or (_wl.relay_event(meta) if _wl.stored(meta) else "")      # a list's open relay line is what the owner is asked about at the backstop day
+    if not event:
+        return ""
+    party = _model.clean(meta.get("party"))
+    return _event_line(f"{party}: {event}" if party and party.lower() not in event.lower() else event)
+
+
+def _event_line(text: str) -> str:
+    """An event as a question carries it: one line with no middle dot (the ask's own separator), cut at a whole word within EVENT_CLIP and never inside a link."""
+    t = " ".join(str(text).replace("\u00b7", "-").split())
+    return t if len(t) <= EVENT_CLIP else _bt.cut_words(t, EVENT_CLIP) or t[:EVENT_CLIP - 1].rstrip() + "…"
+
+
+def waited_for(event: str) -> str:
+    """The tail of a server sentence that names what was waited for: the event in its own brackets, never inside the sentence; "" for none."""
+    return f" (waiting for: {event})" if event else ""
+
+
+def _ask_head(question: str, event: str) -> str:
+    return _ASK_HEAD + question + (EVENT_LEAD + event if event else "")
+
+
 def relay_ask(meta: dict[str, Any]) -> str:
-    """The relay question, fixed (the design doc): "Decide: has <party>'s <event> arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop"."""
-    return f"{_ASK_HEAD}has {subject_of(meta)} arrived?{_OPT_MARK}{RELAY_TAIL}"
+    """The relay question, fixed (the design doc): "Decide: <Q_RELAY> Waiting for: <event> · Options: <TAIL>"."""
+    return f"{_ask_head(Q_RELAY, event_of(meta))}{_OPT_MARK}{TAIL}"
 
 
 def drop_ask(meta: dict[str, Any]) -> str:
-    """The question an item chased twice comes with: "Decide: drop it? … · Options: drop / ask again in a week, two weeks or a month / keep waiting until <date>"."""
-    return (f"{_ASK_HEAD}drop it? {subject_of(meta, 80)} did not arrive after {len(chases_of(meta))} chases{_OPT_MARK}{DROP_TAIL}")
+    """The question an item chased twice comes with: "Decide: <Q_DROP> Waiting for: <event> · Options: <TAIL>"."""
+    return f"{_ask_head(Q_DROP.format(n=len(chases_of(meta))), event_of(meta))}{_OPT_MARK}{TAIL}"
+
+
+def _question_rx(template: str) -> "re.Pattern[str]":
+    body = re.escape(template).replace(re.escape("{n}"), r"(?P<n>\d+)").replace(re.escape("{note}"), r"(?P<note>.*?)")
+    return re.compile(r"(?:Decide: )?" + body + r"(?:" + re.escape(EVENT_LEAD) + r"(?P<event>.*))?", re.S)
+
+
+_QUESTIONS = tuple((kind, _question_rx(t)) for kind, t in (("relay", Q_RELAY), ("drop", Q_DROP)))
+
+
+def read_question(text: Any) -> dict[str, str] | None:
+    """The parts of a question the server wrote, for a page that draws it in its reader's language: {kind: relay | drop, event, n} ("" for a part it has none of). `text` is the
+    whole ask line, or its Decide part as the owner's step carries it. None for any other text."""
+    head = str(text or "").split(_OPT_MARK)[0].strip()
+    for kind, rx in _QUESTIONS:
+        m = rx.fullmatch(head)
+        if m:
+            got = m.groupdict()
+            return {"kind": kind, **{k: str(got.get(k) or "") for k in ("event", "n")}}
+    return None
+
+
+# the wording an earlier version stored, which an open question, or a page drawn before the release, still carries
+_OLD_LABELS = {"arrived": ARRIVED, "drop": DROP}
+_OLD_HEADS = (
+    ("relay", re.compile(r"Decide: has (?P<event>.*) arrived\?", re.S)),
+    ("drop", re.compile(r"Decide: drop it\? (?P<event>.*) did not arrive after (?P<n>\d+) chases", re.S)),
+    ("back", re.compile("Decide: when should (?P<event>.*?) come back\\? (?:I kept your note \\(\u201c(?P<note>.*)\u201d\\) but could not read a date from it|I kept your answer but it holds no date[^.]*)"
+                        "\\. Pick a day, or write a date in the box", re.S)),      # the question put back after a date no one could read: no button needs a date now, so it is asked again as the plain question
+)
+
+
+def new_label(label: str) -> str:
+    """A button's label as it reads today: an earlier version's label becomes its successor, any other text is itself."""
+    return _OLD_LABELS.get(label, label)
+
+
+def option_kind(label: str) -> str:
+    """Which button of a watcher ask `label` is: arrived | week | drop, "" for none of them. An earlier version's label is not one."""
+    return {ARRIVED: "arrived", WEEK: "week", DROP: "drop"}.get(label, "")
+
+
+def current_choice(meta: dict[str, Any], choice: str) -> str:
+    """A posted choice named as the item's buttons name it now: the label (bare, or "B · <label>") a button had before it was reworded becomes its new one, when the item offers that one and not
+    the posted one. Anything else comes back as it is."""
+    if not asked_of(meta):
+        return choice
+    labels = [o.get("label") for o in meta.get("options") or [] if isinstance(o, dict)]
+    m = re.fullmatch(r"([A-Z] \u00b7 )?(.*)", choice, re.S)
+    lead, name = (m[1] or "", m[2]) if m else ("", choice)
+    return lead + new_label(name) if name not in labels and new_label(name) in labels else choice
+
+
+def _reworded_head(meta: dict[str, Any], head: str) -> str:
+    """Today's head for a question head an earlier version stored, "" when `head` is none of those. What is waited for comes from the wait's own fields (kept under watch.was while the item is the
+    owner's), else from the words the old head carried."""
+    for kind, rx in _OLD_HEADS:
+        m = rx.fullmatch(head)
+        if not m:
+            continue
+        got = m.groupdict()
+        w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
+        was = w.get("was") if isinstance(w.get("was"), dict) else {}
+        old = str(got.get("event") or "")
+        event = event_of({**was, **{k: meta[k] for k in ("party", "wait_event") if meta.get(k)}}) or ("" if old == "the news" else _event_line(old))
+        if kind == "drop" or (kind == "back" and asked_of(meta) == "dropit"):
+            question = Q_DROP.format(n=got.get("n") or len(chases_of(meta)))
+        else:
+            question = Q_RELAY
+        return _ask_head(question, event)
+    return ""
 
 
 def is_watcher_ask(ask: Any) -> bool:
@@ -281,67 +390,69 @@ def is_watcher_ask(ask: Any) -> bool:
     return t.startswith(_ASK_HEAD) and _OPT_MARK in t and " · Recommend: " not in t
 
 
-def date_options(today: dt.date) -> list[dict[str, Any]]:
-    """The three date buttons, counted from `today`: a week, two weeks, a month ("Ask again on Tue Nov 17th"). No option is marked recommended: only the owner knows whether the news came. The day is stored on the
-    button (`date`): a pick is read from it, never from the label (answer_effect)."""
-    dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
-    return [{"label": ASK_AGAIN + day_words(d, today), "line": "The item waits again until then and the question comes back that day.", "recommended": False, "date": d.isoformat()} for d in dates]
+def options(today: dt.date | None = None) -> list[dict[str, Any]]:
+    """The buttons of every question a due wait asks, in the shape of an option the owner's page offers (label, line, recommended): it happened, one more week, stop waiting. None is marked recommended (the
+    page draws no badge: options_of lets a watcher ask carry none). The week's end is counted when it is picked (answer_effect), not stored."""
+    return [{"label": ARRIVED, "line": LINE_ARRIVED, "recommended": False},
+            {"label": WEEK, "line": LINE_WEEK, "recommended": False},
+            {"label": DROP, "line": LINE_DROP, "recommended": False}]
 
 
-def relay_options(today: dt.date) -> list[dict[str, Any]]:
-    """The relay question's buttons, in the shape of an option the owner's page offers (label, line, recommended): arrived, the three dates counted from `today` (date_options), the date typed in the box, drop.
-    None is marked recommended (the page draws no badge: options_of lets a watcher ask carry none)."""
-    return [{"label": ARRIVED, "line": "It came: the item goes on to the session that takes it after the wait.", "recommended": False},
-            *date_options(today),
-            {"label": NOT_YET, "line": "Give another date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the item waits again and the question comes back then.", "recommended": False},
-            {"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": False}]
+def has_current_buttons(meta: dict[str, Any]) -> bool:
+    """Does the stored question carry exactly today's three buttons? A question an earlier version put (a typed date, three days, "keep waiting") does not."""
+    return [o.get("label") for o in meta.get("options") or [] if isinstance(o, dict)] == list(CHOICES)
 
 
-def drop_options(today: dt.date) -> list[dict[str, Any]]:
-    """The "drop it?" question's buttons: drop, the three dates counted from `today`, the date typed in the box. None is marked recommended."""
-    return [{"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": False},
-            *date_options(today),
-            {"label": KEEP, "line": "Give another date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the wait goes on and the chases start again.", "recommended": False}]
-
-
-def has_date_buttons(meta: dict[str, Any]) -> bool:
-    """Does the stored question already carry the date buttons (a button with a stored `date`)? The mark of the new shape: a question put before the date buttons existed has none."""
-    return any(isinstance(o, dict) and o.get("date") for o in meta.get("options") or [])
-
-
-def stale_date_buttons(meta: dict[str, Any], today: dt.date) -> bool:
-    """Do the stored date buttons reach no further than today (the earliest button's `date` is `today` or before)? A question that sat past its first button's day: a pick of it would find no day to wait until."""
-    days = [str(o["date"]) for o in meta.get("options") or [] if isinstance(o, dict) and o.get("date")]
-    return bool(days) and min(days) <= today.isoformat()
-
-
-def refreshed(meta: dict[str, Any], today: dt.date) -> tuple[str, list[dict[str, Any]]] | None:
-    """The stored relay or "drop it?" question of an open item, in today's shape: (ask, options), or None when it needs nothing (no watcher ask on it, or its date buttons are there and still ahead of `today`, so a second look the same day changes nothing).
-    A question put before the buttons is given them; one whose buttons are stale (its earliest day has come) has them counted again from `today`. The question's own head (what it asks about) is kept as stored; its options part and its buttons are rebuilt."""
+def refreshed(meta: dict[str, Any], today: dt.date | None = None) -> tuple[str, list[dict[str, Any]]] | None:
+    """The stored relay or "stop waiting?" question of an open item, in today's shape: (ask, options), or None when it needs nothing (no watcher ask on it, or its words and its three buttons are today's, so a second
+    look changes nothing). A question an earlier version worded is worded again (the question put back after an unreadable date becomes the plain one); one with other buttons gets the three."""
     asked = asked_of(meta)
-    if not asked or (has_date_buttons(meta) and not stale_date_buttons(meta, today)):
+    if not asked:
         return None
     head = str(meta.get("ask") or "").split(_OPT_MARK)[0]
-    return head + _OPT_MARK + (RELAY_TAIL if asked == "relay" else DROP_TAIL), (relay_options(today) if asked == "relay" else drop_options(today))
+    reworded = _reworded_head(meta, head)
+    if not reworded and has_current_buttons(meta) and str(meta.get("ask") or "").endswith(_OPT_MARK + TAIL):
+        return None
+    return (reworded or head) + _OPT_MARK + TAIL, options()
+
+
+def apply_refresh(meta: dict[str, Any], today: dt.date | None = None) -> bool:
+    """`refreshed` written onto the item's metadata (False: nothing to do), with what goes with a new wording: the server's step on the owner's checklist says the new question where it stood (never dropped and
+    added, so nothing is asked anew), the arrival note stops splicing the event into a sentence, and the question as it read before is kept (watch.reworded), so that a page drawn before still names the
+    question it showed (a button it had that is gone is then a late pick, which the answer path keeps as a note)."""
+    new = refreshed(meta, today)
+    if new is None:
+        return False
+    old_ask, old_options = str(meta.get("ask") or ""), meta.get("options")
+    renamed = bool(_reworded_head(meta, old_ask.split(_OPT_MARK)[0]))
+    meta["ask"], meta["options"] = new
+    w = {k: v for k, v in meta["watch"].items() if k != "reworded"}
+    w["reworded"] = {"ask": old_ask, "options": old_options, "to": new[0]}
+    meta["watch"] = w
+    if renamed:
+        rec = meta.get(_ask_leaves.REC)
+        if isinstance(rec, dict) and " ".join(str(rec.get("text") or "").split()) == " ".join(old_ask.split()):
+            meta[_ask_leaves.REC] = {**rec, "text": " ".join(new[0].split())}      # the same question since the same moment
+        _owner_steps.reword(meta, _owner_steps.decide_of(new[0]), str(meta.get("owner") or ""))
+        woke = meta.get("woke")
+        m = re.fullmatch(r".* is due: (its ask-by day \S+ came)", str(woke.get("what") or ""), re.S) if isinstance(woke, dict) else None
+        if m:
+            meta["woke"] = {**woke, "what": m[1]}
+    return True
+
+
+def before_rewording(meta: dict[str, Any]) -> dict[str, Any] | None:
+    """The item's metadata with the question as it read before apply_refresh worded it again, while the question that stands is that rewording; None otherwise. The answer path takes a form that carries its reference."""
+    w = meta.get("watch")
+    r = w.get("reworded") if isinstance(w, dict) else None
+    if not isinstance(r, dict) or not asked_of(meta) or r.get("to") != meta.get("ask"):
+        return None
+    return {**meta, "ask": r.get("ask"), "options": r.get("options")}
 
 
 def day_words(day: dt.date, today: dt.date | None = None) -> str:
     """A day as a person reads it: "Tue Nov 17th", with the year when it is not the current one (`today`'s, when given; core/datewords)."""
     return _datewords.day_words(day, today)
-
-
-def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:
-    """The question the board puts back when a date button came with a note that holds no date it can read: (ask, options), still the shape of a watcher ask (is_watcher_ask), so the item stays
-    on his move and his next pick is read as before. The first question's own buttons again, which carry the three dates counted from `today` (a week, two weeks, a month),
-    so nothing he could do is taken away and a date typed in the box has its button. The note is quoted short; it is already kept on the item as his comment."""
-    clip = " ".join(str(note or "").split()).replace("\u00b7", "-")      # whitespace first (a line break or a no-break space too), then every middle dot: the ask's own separators must stay the only ones
-    clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
-    opts = (relay_options(today) if asked_of(meta) == "relay" else drop_options(today))      # the first question's own buttons: the three dates (date_options), the date typed in the box, arrived or drop
-    kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date I can use."
-    w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
-    what = subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})      # the wait's fields moved to watch.was when the item turned to him
-    ask = (f"{_ASK_HEAD}when should {what} come back? {kept} Pick a day, or write a date in the box{_OPT_MARK}" + " / ".join(o["label"] for o in opts))
-    return ask, opts
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
@@ -378,6 +489,7 @@ def remember(meta: dict[str, Any], asked: str, now: float) -> None:
     was = _picker_as_mover({k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])})
     w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
     w.update({"asked": asked, "was": was, "at": now})
+    w.pop("reworded", None)      # a new question: no page drawn before it stands for it
     meta["watch"] = w
 
 
@@ -403,7 +515,7 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
     meta["until" if by_until else "ask_by"] = date
     if reset_chases:
         meta.pop("chases", None)
-    meta["watch"] = {k: v for k, v in w.items() if k not in ("asked", "was", "failed_at")}
+    meta["watch"] = {k: v for k, v in w.items() if k not in ("asked", "was", "failed_at", "reworded")}
     if now:
         meta["watch"]["set_at"] = now
 
@@ -434,7 +546,7 @@ def turn_alive(meta: dict[str, Any], mover: str, what: str, now: float) -> None:
     meta["needs"] = [mover]
     meta["woke"] = {"what": what, "to": mover, "at": now}
     if isinstance(meta.get("watch"), dict):
-        meta["watch"] = {k: v for k, v in meta["watch"].items() if k not in ("asked", "was", "failed_at")}
+        meta["watch"] = {k: v for k, v in meta["watch"].items() if k not in ("asked", "was", "failed_at", "reworded")}
         if not meta["watch"]:
             meta.pop("watch")
 
@@ -455,7 +567,7 @@ def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
             meta.pop("cap_ok", None)
     meta["woke"] = {"what": what, "to": to, "at": now}
     if isinstance(meta.get("watch"), dict):
-        meta["watch"] = {k: v for k, v in meta["watch"].items() if k not in ("asked", "was", "failed_at")}
+        meta["watch"] = {k: v for k, v in meta["watch"].items() if k not in ("asked", "was", "failed_at", "reworded")}
         if not meta["watch"]:
             meta.pop("watch")
 
@@ -643,39 +755,22 @@ def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = N
     return best.isoformat() if best is not None and best > today else ""
 
 
-def _wait_end(meta: dict[str, Any]) -> dt.date | None:
-    """The date the wait ended on before it turned to him (its ask-by, else its wake), the date "one more week" counts from. None when it had none or it cannot be read."""
-    w = meta.get("watch")
-    was = w.get("was") if isinstance(w, dict) and isinstance(w.get("was"), dict) else {}
-    for k in ("ask_by", "wake"):
-        try:
-            return dt.date.fromisoformat(str(was.get(k) or "")[:10])
-        except ValueError:
-            continue
-    return None
-
-
 def answer_effect(meta: dict[str, Any], choice: str, text: str, today: dt.date | None = None) -> dict[str, str]:
-    """What the owner's pick on a watcher ask does: {"do": arrived | wait | drop | words | needdate | "", "date": the new end date for a wait}. "" = the pick is not one of this ask's buttons.
-    arrived (relay ask's button) → the item goes to its post-wake mover; wait (not yet, or keep waiting) with the date he gave; drop → close as not planned; needdate = a date button with no date it can read (the answer and the note are kept, the item asks him back: ask_back);
-    words = an answer in the box with no button: it is never read as arrived or as drop, the item goes to its post-wake mover with his words and the record of the wait, and the mover judges."""
+    """What the owner's pick on a watcher ask does: {"do": arrived | wait | drop | words | "", "date": the new end date for a wait}. "" = the pick is not one of this ask's buttons.
+    arrived → the item goes to its post-wake mover; wait (one more week) → the wait is put back with its end a week from today; drop → close as not planned;
+    words = an answer in the box with no button (any other wait is such a note): it is never read as arrived or as drop, the item goes to its post-wake mover with his words and the record of the wait, and the mover judges."""
     asked = asked_of(meta)
     if not asked:
         return {"do": ""}
-    c = str(choice or "").strip()
+    c = new_label(str(choice or "").strip())      # a button as an earlier version named it still counts
     if not c:                              # an answer in the box with no button: his words, which the post-wake mover reads
         return {"do": "words", "text": str(text or "").strip()}
-    if asked == "relay" and c == ARRIVED:
+    if c == ARRIVED:
         return {"do": "arrived"}
     if c == DROP:
         return {"do": "drop"}
-    if (asked == "relay" and c == NOT_YET) or (asked == "dropit" and c == KEEP):
-        date = parse_date(text, today, _wait_end(meta))
-        return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
-    if c.startswith(ASK_AGAIN):      # a button of the question put back (ask_back): the day on the button, unless he wrote a date in the box
-        stored = next((str(o.get("date") or "") for o in meta.get("options") or [] if isinstance(o, dict) and o.get("label") == c), "")      # the day stored on the button
-        date = parse_date(text, today, _wait_end(meta)) or (stored if stored > (today or dt.date.today()).isoformat() else "")      # a day that has passed since the question was put is asked again with new days
-        return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
+    if c == WEEK:      # a week from the day he picks it: the question may have stood for days, and a day that has passed is no end
+        return {"do": "wait", "date": ((today or dt.date.today()) + dt.timedelta(days=WEEK_DAYS)).isoformat()}
     return {"do": ""}
 
 
