@@ -427,7 +427,7 @@ Q = "?"
 ROSTER = {"alpha-main", "beta-builder", "gamma-engineer"}
 
 from stackshot.service import agents as _agents, contacts as _contacts
-_ROSTER_OWNERS = {"_session_roster": _agents, "_main_agent": _agents, "_contact_fronts": _contacts, "_contact_alive": _contacts, "_contact_same": _contacts}      # the names that left the server: their owner modules
+_ROSTER_OWNERS = {"_session_roster": _agents, "_contact_main": _agents, "_contact_fronts": _contacts, "_contact_alive": _contacts, "_contact_same": _contacts}      # the names that left the server: their owner modules
 @contextlib.contextmanager
 def patched(**kv):
     """The server's own names (and the owner modules' of the roster and contact readers) replaced for a case (the service looks each one up when it is called), put back after."""
@@ -452,7 +452,7 @@ def handoff(was, meta, next_, writer):
         return H._handoff_to(was, meta, next_, writer)
 
 def contact(meta, project, fronts=(), main="", alive=True):
-    with patched(_contact_fronts=lambda p: list(fronts) if p == project else [], _main_agent=lambda p: main if p == project else "", _contact_alive=lambda c: alive,
+    with patched(_contact_fronts=lambda p: list(fronts) if p == project else [], _contact_main=lambda p: main if p == project else "", _contact_alive=lambda c: alive,
                  _contact_same=lambda a, b: bool(a) and a == b):
         return H._contact_after_move(meta, project)
 

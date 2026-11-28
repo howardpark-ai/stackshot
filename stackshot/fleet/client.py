@@ -441,6 +441,10 @@ runs on every box.
                                 creator when that was a front agent, else the project's -main agent; an item whose contact is no front agent any
                                 more falls to the -main agent too. Without --apply it is a dry run: it lists what it would set and the counts by
                                 rule, and writes nothing. Exit 0 · 1 refused or not reached. (tools/backfill_contact.py is the dry run on a copy.)
+  client.py repoint <from> <to> [--apply]
+                                before a session is retired: hand what open items hold under its name to another listed session: mover, then, needs, observers, the open next lines that name it,
+                                contact, and tell_him when <to> is a front agent. It also lists the settings and project marks that name <from>, which it does not edit. A new holder that is not a
+                                front agent gets one notice. Without --apply it is a dry run: it writes nothing. Exit 0 · 1 refused, not reached or misused.
   client.py setup-result --ok | --failed --step "<step name>" [--reason "<short text>"]
                                 for a machine's provisioning script: report how its setup run ended. The server keeps the latest
                                 result for this machine (the token's); a failed run shows on the machine's column of the board's
@@ -779,6 +783,31 @@ def backfill_contact(argv: list[str], timeout: float = 180.0) -> int:
         print(f"{r.get('item')}  {r.get('rule')}  {r.get('was') or '-'} → {r.get('to') or '-'}  ({r.get('project')})")
     if apply_:
         print(f"stackshot: {d.get('written', 0)} item(s) written")
+    return 0
+
+
+REPOINT_USAGE = "usage: client.py repoint <from> <to> [--apply]"
+
+
+def repoint(argv: list[str], timeout: float = 180.0) -> int:
+    """By hand: move what open items hold under one session's name to another (a dry run unless --apply) → exit 0, 1 refused, not reached or misused."""
+    apply_ = "--apply" in argv
+    names = [x for x in argv if x != "--apply"]
+    if len(names) != 2 or any(x.startswith("-") for x in names):
+        print(REPOINT_USAGE, file=sys.stderr); return 1
+    status, d = post("repoint", {"from": names[0], "to": names[1], "apply": apply_}, timeout)
+    if status != 200 or not isinstance(d, dict):
+        print(f"stackshot: items not moved [{status}] {d.get('error') if isinstance(d, dict) else d}"[:600]); return 1
+    items = d.get("items") or []
+    print(f"stackshot: {'applied' if apply_ else 'dry run (nothing written)'}: {d.get('from')} to {d.get('to')}, {len(items)} open item(s) name it" + (f", {d.get('written', 0)} written" if apply_ else ""))
+    for r in items:
+        print(f"{r.get('item')}  ({r.get('project')})  {', '.join(r.get('changed') or []) or 'nothing to change'}" + "".join(f"  left: {x}" for x in r.get("left") or []))
+    if d.get("created"):
+        print(f"stackshot: {d['created']} open item(s) were created by {d.get('from')}; the creator is not changed")
+    for s in d.get("settings") or []:
+        print(f"still names it, not edited here: {s}")
+    if d.get("told"):
+        print(f"stackshot: {d.get('to')} is sent one notice for {len(d['told'])} item(s)")
     return 0
 
 
@@ -1522,6 +1551,9 @@ def main(argv: list[str]) -> int:
     if cmd == "backfill-contact":
         try: return backfill_contact(argv[2:])
         except Exception as e: print(f"stackshot: backfill not run ({type(e).__name__}: {str(e)[:160]})"); return 1
+    if cmd == "repoint":
+        try: return repoint(argv[2:])
+        except Exception as e: print(f"stackshot: items not moved ({type(e).__name__}: {str(e)[:160]})"); return 1
     if cmd == "sweep-released":
         try: return sweep_released(argv[2:])
         except Exception as e: print(f"stackshot: sweep not run ({type(e).__name__}: {str(e)[:160]})"); return 1

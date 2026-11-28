@@ -99,7 +99,7 @@ class Hooks:
     handover_kind: Callable[..., Any]
     hub_sessions: Callable[..., Any]
     item_mover: Callable[..., Any]
-    main_agent: Callable[..., Any]
+    contact_main: Callable[..., Any]
     model_guards_on: Callable[..., Any]
     model_page: Any            # the gbrain page of the item model (server._MODEL_PAGE)
     open_item_named: Callable[..., Any]
@@ -1447,7 +1447,8 @@ def gate_contact(name: str, project: str, keep: tuple[str, ...] = ()) -> str:
     """A contact named by a create or an update → the form stored (the session's permanent id where the registry resolves it, else its name). Allowed: a front agent
     (user-facing agent) of the item's project, named by its name, an old name or its id; and any session in `keep` (the item's creator and its current contact) that is a front
     agent of some project: the front agent that made the item from talking with the person stays its contact wherever the item is filed, and can be set back to. Refused with the
-    project's front agents and their mandates: a background agent, a session no page lists, the person himself, a front agent of another project that is neither."""
+    project's front agents and their mandates: a background agent, a session no page lists, the person himself, a front agent of another project that is neither. A project that lists no front agent of its own
+    also takes the configured one front (anchors.sole_front)."""
     h = _hooks()
     v = str(name or "").strip()
     choices = h.contact_fronts(project)
@@ -1458,7 +1459,9 @@ def gate_contact(name: str, project: str, keep: tuple[str, ...] = ()) -> str:
         for k in keep:
             if str(k or "").strip() and h.contact_same(k, v) and h.contact_alive(k):
                 return h.store_ref(k)
-    raise ToolError(_contact.refusal(v or "(empty)", project, choices, h.main_agent(project)))
+        if not choices and h.contact_same(_anc.sole_front(), v):
+            return h.store_ref(v)
+    raise ToolError(_contact.refusal(v or "(empty)", project, choices, h.contact_main(project)))
 
 
 def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any], writer: str) -> None:

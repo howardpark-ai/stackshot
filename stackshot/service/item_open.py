@@ -95,7 +95,7 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     The item is filed through create_item (service/create.py), the create tool's own code, so the subject, description and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400);
     the caller picks no field the tool does not take for a script (no needs, owner, priority, ask or date). The project's front agent (its -main first) is the item's creator and the mover is named in needs, so it is
     told once at the create. The description ends with "- Opened by <sender> (a script on a client machine)": no host name reaches the item or its GitHub issue. Marked metadata.item_open = <marker>; while an item with
-    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. The item is then with the -main agent (`metadata.item_open_fallback`, no needs, one more description line says so) and the answer's `fallback` is true. 404 no such project, 409 no front agent
+    the marker is open on this project (read from the store; the marker is per project) a repeat call answers it and files nothing, and once it is closed a call files a new one. A project holds at most 10 open items filed by this route: past it a new marker is a 400 until one closes (a repeat never counts). The row owes no page, as every script route's. The item is then with the -main agent (`metadata.item_open_fallback`, no needs, one more description line says so) and the answer's `fallback` is true. 404 no such project, 409 no front agent and no configured one front (anchors.sole_front)
     to file under, 503 the project record cannot be read. -> (status, {item, marker, project, mover, owner, repeat, fallback})."""
     extra_keys = sorted(k for k in body if k not in _ITEMOPEN_KEYS)
     if extra_keys:
@@ -139,7 +139,7 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
         return 400, {"error": f"mover {mover!r} is not a background agent listed on {key}'s page (its agents map): " + (", ".join(back) or "the page lists none")}
     if not step.startswith(mover + ": ") or not step[len(mover) + 2:].strip():
         return 400, {"error": f"step is one line that starts with the mover's name: '{mover}: <what it does>'"}
-    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = _item_read._front_keepers(key)
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]

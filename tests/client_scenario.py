@@ -840,6 +840,7 @@ def part_client():
         "page-debt -> _page_debt.enabled, _pdsvc.page_debt_pass, _page_debt.mode",
         "orphan-handover -> _handoff.orphan_handover",
         "backfill-contact -> _contacts._contact_backfill",
+        "repoint -> _repoint.repoint",
         "message -> _relsvc._release_green, _messaging.count_client_call, _messaging.begin_client_call, _messaging._message, _messaging.end_client_call",
         "handover -> _agent_names._name_on_handover",
         "project-agent -> _project_agent",

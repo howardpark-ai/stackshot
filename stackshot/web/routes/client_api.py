@@ -55,6 +55,7 @@ from stackshot.service import proofs as _proofs
 from stackshot.service import question as _question_svc
 from stackshot.service import recycle as _recycle_svc
 from stackshot.service import released as _relsvc
+from stackshot.service import repoint as _repoint
 from stackshot.service import terminal_prompt as _terminal_prompt_svc
 from stackshot.service import update as _update_svc
 from stackshot.service.projects import _form_call, _new_project, _project_agent, _project_agent_mandate, _project_agent_rename, _project_agent_retire, _project_list
@@ -256,6 +257,11 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             return 200, _contacts._contact_backfill(dry=body.get("apply") is not True)
         except ToolError as e:
             return 400, {"error": str(e)}
+    if what == "repoint":       # what open items hold under a leaving session's name goes to another (client.py repoint FROM TO); a dry run unless the body says apply
+        try:
+            return 200, _repoint.repoint(str(body.get("from") or ""), str(body.get("to") or ""), apply=body.get("apply") is True)
+        except ToolError as e:
+            return 400, {"error": str(e)}
     if what == "message":       # a script sends a message the way a session's `message` tool does
         to, text, sender = (str(body.get(k) or "") for k in ("to", "text", "sender"))
         if str(body.get("release") or "") == "green" and text.strip() and sender.strip():   # release.sh's green result: log-only (the turn rule's second build)
@@ -421,7 +427,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _agent_state_svc.post(machine, body)
     if what == "machines":      # the fleet manager posts its machine list; the last good one is kept in the state folder (client.py post machines)
         return _machines_svc.post(machine, body)
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result | agent-state | machines"}
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | repoint | event | setup-result | agent-state | machines"}
 
 
 _BODY_CUT = "the body ended before it was complete"

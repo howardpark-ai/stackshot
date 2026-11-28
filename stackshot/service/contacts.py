@@ -51,10 +51,10 @@ def _contact_alive(contact: str) -> bool:
 
 
 def _contact_default(creator: str, project: str) -> str:
-    """The contact of an item nobody named one for: its creator when that is a front agent, else the project's -main agent; "" when the project names neither."""
+    """The contact of an item nobody named one for: its creator when that is a front agent, else the project's -main agent (the configured one front for a project with none, anchors.contact_main); "" when there is neither."""
     if creator and _telling.front_sender(creator):
         return _store_ref(creator)
-    main = _agents._main_agent(project)
+    main = _agents._contact_main(project)
     return _store_ref(main) if main else ""
 
 
@@ -63,7 +63,7 @@ def _contact_of(meta: dict[str, Any]) -> str:
     c = str(meta.get("contact") or "").strip()
     if c and _contact_alive(c):
         return c
-    return _agents._main_agent(str(meta.get("project") or ""))
+    return _agents._contact_main(str(meta.get("project") or ""))
 
 
 def _contact_label(item: dict[str, Any]) -> str:
@@ -84,7 +84,7 @@ def _main_agent_without(project: str, name: str) -> str:
                 e = {**e, "agents": {n: m for n, m in (e.get("agents") or {}).items() if str(n).casefold() != gone},
                      "back_agents": {n: m for n, m in (e.get("back_agents") or {}).items() if str(n).casefold() != gone}}
             out[k] = e
-        return _anc.fallback_main(project, out)
+        return _anc.contact_main(project, out)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -174,7 +174,7 @@ def _contact_backfill(dry: bool = True) -> dict[str, Any]:
         project = str(meta.get("project") or "")
         creator = str(meta.get("owner") or "").strip()
         if project not in mains:
-            mains[project] = _agents._main_agent(project) if project else ""
+            mains[project] = _agents._contact_main(project) if project else ""
         if creator not in fronts:
             fronts[creator] = bool(creator) and _telling.front_sender(creator)
         new, rule = _contact.plan(it, creator_front=fronts[creator], main=(_store_ref(mains[project]) if mains[project] else ""), alive=_contact_alive)

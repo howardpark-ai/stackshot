@@ -92,6 +92,11 @@ def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
     return hub, stew, back, [x for x in front if x not in back], keeper
 
 
+def _front_keepers(project: str) -> list[str]:
+    """Who keeps an item the server files on `project`: its front agents (_hub_sessions), a -main one first, else the configured one front (anchors.sole_front); [] with neither."""
+    return sorted(_hub_sessions(project)[3], key=lambda n: (not n.endswith("-main"), n)) or [n for n in (_anc.sole_front(),) if n]
+
+
 def _open_item_named(ref: str) -> str:
     """`board#N` as a session wrote it in a next line → the store id of that item when it exists and is open, else "" (a closed or unknown item is nothing to wait for). Read only."""
     try:

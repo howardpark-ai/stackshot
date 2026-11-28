@@ -880,14 +880,28 @@ def has_front(project: str, reg: dict[str, dict[str, Any]] | None = None) -> boo
 
 def fallback_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None) -> str:
     """The -main agent a project's notices fall to when its page names no session: its own page's, its hub's, else the scope's general one
-    (general_main). "" when none can be named. `roots`: as in general_main."""
+    (general_main), else the configured one front (sole_front). "" when none can be named. `roots`: as in general_main."""
     reg = registry() if reg is None else reg
     root = pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
     for k in dict.fromkeys([root, hub_of(root, reg)]):
         m = main_of(reg.get(k) or {})
         if m:
             return m
-    return general_main(root, reg, roots)[0]
+    return general_main(root, reg, roots)[0] or sole_front(reg)
+
+
+def sole_front(reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """`[front] agent`: the one front agent that stands for a project whose page and hub list no front agent of their own: a question or a script's item is filed under it, it is the contact of such a
+    project's items, it can be named as one, and it ends the fallback chain of fallback_main. An agent's name or a page key (as general_<scope>); it counts only while some page lists it as a front
+    agent. "" when the key is not set or names none: nothing changes for the instance."""
+    value = str(_cfg.get("front", "agent") or "").strip()
+    return _general_resolve(value, registry() if reg is None else reg)[0] if value else ""
+
+
+def contact_main(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """The agent an item's contact falls to: the -main agent of the project's page or hub, else the configured one front (sole_front), else fallback_main's general one."""
+    reg = registry() if reg is None else reg
+    return ("" if has_front(project, reg) else sole_front(reg)) or fallback_main(project, reg)
 
 
 # ---------- derived sessions + bindings ----------

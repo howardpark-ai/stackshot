@@ -266,7 +266,7 @@ def _jobalert_open(project: str, unit: str, host: str, when: str, machine: str, 
         return bad
     assert rec is not None
     key = rec["key"]
-    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = _item_read._front_keepers(key)
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]

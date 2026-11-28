@@ -169,7 +169,7 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
         return 200, {"item": _gh.shown(found[0]), "timer": timer, "code": code, "project": str(meta.get("project") or ""), "mover": _sr._session_label(str(meta.get("mover") or "")),
                      "owner": _sr._session_label(str(meta.get("owner") or "")), "repeat": True, "fallback": bool(meta.get("job_gap_fallback"))}
     key = rec["key"]
-    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = _item_read._front_keepers(key)
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to keep the item; a front agent lists itself first (client.py post project-agent)"}
     owner = front[0]
