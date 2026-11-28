@@ -30,7 +30,7 @@ from stackshot.web.tools import route as _tool_route
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
 from stackshot.web.tools import invite as _tool_invite
-from stackshot.web import door_guard as _door_guard, frame_guard as _frame_guard, requestlog as _requestlog
+from stackshot.web import canvas_guard as _canvas_guard, door_guard as _door_guard, frame_guard as _frame_guard, requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _MembersOnly, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
@@ -40,6 +40,7 @@ from stackshot.web.routes import join as _routes_join
 from stackshot.web.routes import ui_api as _routes_ui_api
 from stackshot.web.routes import board_pages as _routes_board_pages
 from stackshot.web.routes import answer_frame as _routes_answer_frame
+from stackshot.web.routes import canvas as _routes_canvas
 
 _ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxZjFmMjEiLz48cGF0aCBkPSJNMTUgMzRsMTIgMTIgMjItMjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2YwYTA2YSIgc3Ryb2tlLXdpZHRoPSI4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4K"  # the board's favicon (<state>/site/favicon.svg), same mark everywhere
 
@@ -221,6 +222,7 @@ def build(
     mcp.add_middleware(_RetiredInputs())
     _door_guard.install(mcp)      # a board behind a front door checks the signed identity of a call to /mcp (web/door_guard.py); with no [behind_frontdoor] identity_secret_file it touches nothing. Before the request log's wrapper, so the log is the outermost and sees a refusal too
     _frame_guard.install(mcp)      # every response says that only this server's own origin may frame it (web/frame_guard.py). Around the guard above, so its refusals say it too; inside the request log
+    _canvas_guard.install(mcp)      # the isolation headers of every answer under /canvas and /mockup (web/canvas_guard.py): in front of every route's sign-in guard, and around the frame guard, whose headers it replaces there
     _requestlog.install(mcp)      # the HTTP app is served inside the request log's wrapper, outside every other layer
     _custom_route_plain = mcp.custom_route
     mcp.custom_route = _custom_route_ro
@@ -244,5 +246,6 @@ def build(
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)
     _routes_join.register(mcp)      # `GET /join`, the setup page an invite's link names, only on a board that can invite (web/routes/join.py); before the catch-all
     _routes_answer_frame.register(mcp)      # before the catch-all of board_pages, which answers the address while [ui] answer_frame_origins is empty
+    _routes_canvas.register(mcp)      # before the catch-all too
     _routes_board_pages.register(mcp, contact_label=contact_label)
     return mcp

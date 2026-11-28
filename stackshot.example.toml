@@ -665,6 +665,10 @@ tell_owner = true                                   # another session's close of
 handback_hold_seconds = 180                          # the one line a front agent keeper hears when a builder hands an item back to it alone is held this long; a close of the item
                                                     # inside the window drops it, so the keeper hears only the close. 0 = sent at once. A held line survives a restart (<state>/handback-held.json). Live
 
+[canvas]                                            # canvases: pages an agent shares with the board's owner, kept in <paths.state>/canvas/ and read at /canvas/<number>; see docs/canvas.md
+import = false                                      # true: POST /client/canvas-import (a machine token) puts a page of another store into the board's, under its own number and version ids, and
+                                                    # replaces a page with newer content; false (the default): it answers 403 to everyone. The operator turns it on to move pages in and off after. Live
+
 [ui]                                                # the board's pages (stackshot/web/i18n.py; docs/board-ui.md)
 # locale_dir = "~/.config/stackshot/locales"        # a folder that holds a second language for the pages: `<code>.json` (e.g. ko.json), an object of string table key -> text, the keys of
                                                     # stackshot/web/i18n_catalog.py. Off by default: with no folder, or no file that loads, the pages are English and the side panel draws no language switch.

@@ -14,6 +14,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     link.*     the short labels of a bare address
     js.*       words only a page script says (copy, theme, receiver states, sent notes)
     chrome.*   the fixed buttons every page carries (reload, back to top)
+    canvas.*   the shell a canvas is read in: the way back, its name, the current page and its versions
     search.*   the search page: its filters, summary lines, notes and result rows
     runners.*  the CI runners page: its cards, table, machine lines, switch buttons and as-of lines (js.runners.* are the words its script says)
     page.*     small words several pages share (Archived, none)
@@ -244,6 +245,13 @@ CATALOG: dict[str, str] = {
     "chrome.reload": "Reload",
     "chrome.reload_tip": "Reload page",
     "chrome.totop": "Back to top",
+
+    # ------------------------------------------------------------------ the shell a canvas is read in (ui/canvas.py)
+    "canvas.name": "Canvas {n}",
+    "canvas.board": "Board",
+    "canvas.current": "Current page",
+    "canvas.versions": "Versions",
+    "canvas.until": "Until {when}",
 
     # ------------------------------------------------------------------ side panel: frame
     "panel.title": "Summary",
