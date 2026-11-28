@@ -122,7 +122,7 @@ class Hooks:
     is_held: Callable[..., Any]
     lift_ask: Callable[..., Any]
     machine_note: Callable[..., Any]
-    main_agent: Callable[..., Any]
+    contact_main: Callable[..., Any]
     model_apply: Callable[..., Any]
     model_guards_on: Callable[..., Any]
     model_of: Callable[..., Any]
@@ -546,7 +546,7 @@ def _contact_after_move(meta: dict[str, Any], new_project: str) -> str:
     c = str(meta.get("contact") or "").strip()
     if c and (any(h.contact_same(f, c) for f in h.contact_fronts(new_project)) or (h.contact_same(c, str(meta.get("owner") or "")) and h.contact_alive(c))):
         return c                                  # a front agent there too, or the creator that is a front agent (of any project): the front agent that made the item stays its contact
-    main = h.main_agent(new_project)
+    main = h.contact_main(new_project)
     return h.store_ref(main) if main else ""
 
 

@@ -870,24 +870,44 @@ def general_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roo
     return "", ""
 
 
+def front_pages(project: str, reg: dict[str, dict[str, Any]], roots: list[str] | None = None) -> list[str]:
+    """The pages whose front agents a project has: its own page (a sub-page lists its own), its top-level page, and the hub each of those names (hub_of: a `hub:` line in the chain, else the top-level page)."""
+    key = str(project or "").strip().strip("/")
+    root = pilot_root(project, roots) or "/".join(key.split("/")[:2])
+    return [k for k in dict.fromkeys([key, root, hub_of(key, reg), hub_of(root, reg)]) if k]
+
+
 def has_front(project: str, reg: dict[str, dict[str, Any]] | None = None) -> bool:
-    """Does the project's page, or its hub, list a user-facing agent? False for a one-session page (a name line and no agents map) and for a
+    """Does the project's page, its top-level page or a hub of theirs list a user-facing agent? False for a one-session page (a name line and no agents map) and for a
     page with background agents only: its keeper stays its name-line session, and only the router's passes use the general -main agent."""
     reg = registry() if reg is None else reg
-    root = pilot_root(project) or "/".join(str(project or "").strip("/").split("/")[:2])
-    return any(main_of(reg.get(k) or {}) for k in dict.fromkeys([root, hub_of(root, reg)]))
+    return any(main_of(reg.get(k) or {}) for k in front_pages(project, reg))
 
 
 def fallback_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None) -> str:
     """The -main agent a project's notices fall to when its page names no session: its own page's, its hub's, else the scope's general one
-    (general_main). "" when none can be named. `roots`: as in general_main."""
+    (general_main), else the configured one front (sole_front). "" when none can be named. `roots`: as in general_main."""
     reg = registry() if reg is None else reg
     root = pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
-    for k in dict.fromkeys([root, hub_of(root, reg)]):
+    for k in front_pages(project, reg, roots):
         m = main_of(reg.get(k) or {})
         if m:
             return m
-    return general_main(root, reg, roots)[0]
+    return general_main(root, reg, roots)[0] or sole_front(reg)
+
+
+def sole_front(reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """`[front] agent`: the one front agent that stands for a project whose page, top-level page and hub (front_pages) list no front agent of their own: a question or a script's item is filed under it, it is the contact of such a
+    project's items, it can be named as one, and it ends the fallback chain of fallback_main. An agent's name or a page key (as general_<scope>); it counts only while some page lists it as a front
+    agent. "" when the key is not set or names none: nothing changes for the instance."""
+    value = str(_cfg.get("front", "agent") or "").strip()
+    return _general_resolve(value, registry() if reg is None else reg)[0] if value else ""
+
+
+def contact_main(project: str, reg: dict[str, dict[str, Any]] | None = None) -> str:
+    """The agent an item's contact falls to: the -main agent of the project's page or hub, else the configured one front (sole_front), else fallback_main's general one."""
+    reg = registry() if reg is None else reg
+    return ("" if has_front(project, reg) else sole_front(reg)) or fallback_main(project, reg)
 
 
 # ---------- derived sessions + bindings ----------

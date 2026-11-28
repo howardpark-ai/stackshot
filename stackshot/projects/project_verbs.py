@@ -8,7 +8,8 @@ record is always the one that is right and the page is a copy stackshot writes f
     rename       the project's name: the id stays, the old name goes to `former_names`, the pending agents under the old name are dropped
     move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
     archive      status archived, with who, when and how; reopen puts it back to active
-    agent_add / agent_mandate / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed). The keeper is a mark
+    agent_add / agent_mandate / agent_background / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed;
+                 agent_background turns a listed front agent into a background one, mark and status kept). The keeper is a mark
                  on one agent of the map (keeper.py): agent_add marks a project's first agent, agent_retire moves the mark of the agent that leaves (to the builder, else the -main agent, else nobody, said in
                  the answer), agent_rename makes it follow the new name
     keeper       moves the mark to another listed agent: a dry run unless asked to apply, and the apply keeps an undo file (project_restore.py's, taken back with `restore --undo`)
@@ -1074,6 +1075,50 @@ def agent_mandate(project: str, name: str, mandate: str, *, by: str = "", io: An
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
     return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": out["front"], "mandate": mandate, "previous": out["previous"]}, by=by, mirror_now=mirror_now)
+
+
+def agent_background(project: str, name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """Turn a listed front agent into a background agent in place: its name, place in the map, mandate line and keeper mark stay, and the project's status is not touched (the agent stays on the map, so
+    no archive rule applies). The record first, then the page's `agents:` block (mirror). An agent already in the background changes nothing. Refused: a name that is not listed (404; a pending entry
+    only is not listed), an agent of another surface than sala (400: it is never a background agent). The answer's `lines` name the sessions whose roles.json entry changes, and its warning says when
+    no front agent or no keeper mark is left on the project. → {project, key, changed, entry, mirror, result: "background" | "already background", name, front, lines}."""
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        ag = copy.deepcopy(ctx.agents(pid))
+        have = _find(ag, name)
+        if have is None:
+            raise VerbError(404, f"{name} is not listed on {pr.page_key(e) or pid}: this verb turns an agent that is on the map; list a new one with agent_add")
+        if not ag[have].get("front"):
+            e["agents"] = ag
+            return {"pid": pid, "result": "already background", "name": have, "lines": []}
+        if pr.off_sala(ag[have]):
+            raise VerbError(400, f"{have} is a {pr.surface_of(ag[have])} agent: only a sala session can be a background agent")
+        before = copy.deepcopy(ctx.ents)
+        ag[have] = {**ag[have], "front": False}
+        e["agents"] = ag
+        where = pr.page_key(e) or pid
+        roles = _roles_moved(ctx.raw, before, ctx.ents)
+        lines = [f"{have} on {where}: front -> background"] + [f"roles.json {r['session']}: {_role_words(r['from'])} -> {_role_words(r['to'])}" for r in roles]
+        left = []
+        if not any(a.get("front") for a in ag.values()):
+            left.append(f"no front agent is left on {where}: a call that files an item for a front agent takes one of its hub's, else the configured one ([front] agent), and is refused for this project when there is neither (item-sync takes a hub's only)")
+        if not _kp.effective_mark(ag, _page_row(ctx, e)):
+            left.append(f"{where} has no keeper mark (`project keeper {where} {have}` lays one)")
+        if left:
+            ctx.warn = "; ".join(w for w in (ctx.warn, *left) if w)
+        return {"pid": pid, "result": "background", "name": have, "lines": lines}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"result": out["result"], "name": out["name"], "front": False, "lines": out["lines"]}, by=by,
+                   timeline=f"{out['name']} is a background agent now (it was a front agent)" if out["result"] == "background" else "", tag=f"background-{out['name']}")
+
+
+def _role_words(r: Any) -> str:
+    return f"{r.get('role')} on {r.get('project')}" + (" (retired)" if r.get("retired") else "") if isinstance(r, dict) else "nothing"
 
 
 def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:

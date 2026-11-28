@@ -203,7 +203,7 @@ def _front_and_rec(project: str) -> tuple[dict[str, Any], list[str]] | None:
         return None
     if len(recs) != 1:
         return None
-    front = sorted(_item_read._hub_sessions(recs[0]["key"])[3], key=lambda n: (not n.endswith("-main"), n))
+    front = _item_read._front_keepers(recs[0]["key"])
     return (recs[0], front) if front else None
 
 

@@ -64,7 +64,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     -main agent first, as the create tool's owner refusals name them), written by a script on `machine` named `sender`. It goes
     through create_item (service/create.py), the create tool's own code: the subject prefix, the ask's form, the options (2 to 6, exactly one recommended),
     the one-decision gate, the project page, the page-debt rules (charged to the page's keeper only) and the GitHub mirror all apply, and a refusal is
-    the tool's text (400). A project that lists no front agent is refused (409). The subject and the request_id are required: there is no
+    the tool's text (400). A project that lists no front agent is filed under the configured one front (anchors.sole_front), and refused (409) when none is configured. The subject and the request_id are required: there is no
     default prefix, and every filing is safe to repeat. The call is idempotent per (machine, sender, request_id): the same triple again
     answers the same item and files nothing, kept in the server's request map (REQUESTS in service/create.py, <state>/requests.json) like a tool create's
     request_id; an entry whose item is gone files anew. The text is written as `- ` bullets, each clipped to the line limit; too many lines or characters is a 400. The description ends
@@ -99,7 +99,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     if len(recs) > 1:
         return 400, {"error": f"{project!r} is ambiguous: it names {' and '.join(r['key'] for r in recs)}; write the full key or the id"}
     key = recs[0]["key"]
-    front = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))
+    front = _item_read._front_keepers(key)
     if not front:
         return 409, {"error": f"{key} lists no front agent (a user-facing agent under `agents:` on its page, or its hub's), so there is nobody to take the question after {OWNER} answers; "
                               "a front agent lists itself first (client.py post project-agent)"}

@@ -63,6 +63,14 @@ def _handoffs_in(text: str, roster: set[str]) -> list[str]:
     return sorted({m.group(1) for m in _HANDOFF_LINE.finditer(plain)} & roster)
 
 
+def _contact_main(project: str) -> str:
+    """The agent an item's contact falls to (anchors.contact_main); "" when none or the registry cannot be read."""
+    try:
+        return _anc.contact_main(project)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _main_agent(project: str) -> str:
     """The project's -main agent: the page's front `agents:` entry whose name ends in -main, else its first front agent; for a page with none, its
     hub's, else the general -main agent of its scope (anchors.fallback_main); "" when none. Front-only: a background agent is never the

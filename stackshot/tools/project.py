@@ -8,6 +8,7 @@
     tools/project.py reopen PROJECT                                                       status active again
     tools/project.py agent-add PROJECT NAME (--front | --back) [--surface sala|slack] --mandate "one line"        the agent on the project's agents map, then the page's agents: block
     tools/project.py agent-mandate PROJECT NAME --mandate "one line"                      the mandate line of an agent already on the map changed (record first, then the page's agents: block)
+    tools/project.py agent-background PROJECT NAME                                        a listed front agent turned background in place: its keeper mark and the project's status stay
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
     tools/project.py keeper PROJECT AGENT [--apply]                                       moves the project's keeper mark to a listed agent: a dry run unless --apply (old mark, new mark, the sessions whose roles move); --apply keeps an undo file
@@ -85,6 +86,7 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--front", action="store_true"); g.add_argument("--back", action="store_true"); aa.add_argument("--mandate", required=True); aa.add_argument("--surface", default="", help="where a front agent talks with him: sala (default) or slack")
     am = sub.add_parser("agent-mandate"); am.add_argument("project"); am.add_argument("name"); am.add_argument("--mandate", required=True)
     ar = sub.add_parser("agent-retire"); ar.add_argument("project"); ar.add_argument("name")
+    ab = sub.add_parser("agent-background"); ab.add_argument("project"); ab.add_argument("name")
     an = sub.add_parser("agent-rename"); an.add_argument("project"); an.add_argument("old"); an.add_argument("new")
     kp = sub.add_parser("keeper", description="move the project's keeper mark to another listed agent (a dry run unless --apply)"); kp.add_argument("project"); kp.add_argument("agent")
     kp.add_argument("--apply", action="store_true", help="write the record (keeps an undo file); without it the answer only says what would change")
@@ -140,7 +142,7 @@ def run(a: argparse.Namespace) -> dict:
     from stackshot.projects import project_verbs as pv
     from stackshot.router import page_debt
     io = None
-    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "keeper", "page-keeper", "mirror", "move-page"):
+    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-background", "agent-retire", "agent-rename", "keeper", "page-keeper", "mirror", "move-page"):
         io = page_debt.page_io()
     kw = {"by": a.by, "io": io}
     dry = {"dry": a.dry_run}
@@ -161,6 +163,8 @@ def run(a: argparse.Namespace) -> dict:
         return pv.agent_add(a.project, a.name, a.front, a.mandate, surface=a.surface, **kw, **dry)
     if a.cmd == "agent-mandate":
         return pv.agent_mandate(a.project, a.name, a.mandate, **kw, **dry)
+    if a.cmd == "agent-background":
+        return pv.agent_background(a.project, a.name, **kw, **dry)
     if a.cmd == "agent-retire":
         res = pv.agent_retire(a.project, a.name, **kw, **dry)
         if not a.dry_run and res["result"] in ("line removed", "dropped"):

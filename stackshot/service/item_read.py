@@ -78,7 +78,7 @@ def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
     background agents of the page, of its pilot root and of its hub, together."""
     reg = _anc.registry()
     hub = _anc.hub_of(project, reg)
-    keys = [k for k in dict.fromkeys([str(project).strip("/"), _anc.pilot_root(project), hub]) if k]
+    keys = _anc.front_pages(project, reg)
     back, front = [], []
     for k in keys:
         e = reg.get(k) or {}
@@ -90,6 +90,11 @@ def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
     keeper = str(e.get("session") or "") if e.get("role") == "agent" else ""
     stew = ""      # the retired name-line session is not offered as a session to name
     return hub, stew, back, [x for x in front if x not in back], keeper
+
+
+def _front_keepers(project: str) -> list[str]:
+    """Who keeps an item the server files on `project`: its front agents (_hub_sessions), a -main one first, else the configured one front (anchors.sole_front); [] with neither."""
+    return sorted(_hub_sessions(project)[3], key=lambda n: (not n.endswith("-main"), n)) or [n for n in (_anc.sole_front(),) if n]
 
 
 def _open_item_named(ref: str) -> str:

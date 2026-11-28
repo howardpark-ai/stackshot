@@ -47,7 +47,7 @@ _TERMINAL_REASON = "the pane stopped waiting"
 
 
 def _terminal_fallback() -> str:
-    """[terminal] fallback_project ("" = none): the project a terminal-prompt item is filed under when the session's own project lists no front agent. Read where used, so a reload applies."""
+    """[terminal] fallback_project ("" = none): the project a terminal-prompt item is filed under when the session's own project lists no front agent and no one front is configured. Read where used, so a reload applies."""
     return str(_cfg.get("terminal", "fallback_project") or "").strip()
 
 
@@ -92,7 +92,7 @@ def _terminal_projects(session: str) -> list[dict[str, Any]]:
             recs = _prj.refs(ref, _registry("projects"))
         except ValueError as e:
             raise ToolError(f"the project record cannot be read right now, nothing was filed: {e}")
-        if len(recs) == 1 and recs[0]["key"] not in [r["key"] for r in out] and _item_read._hub_sessions(recs[0]["key"])[3]:
+        if len(recs) == 1 and recs[0]["key"] not in [r["key"] for r in out] and _item_read._front_keepers(recs[0]["key"]):
             out.append(recs[0])
     return out
 
@@ -212,7 +212,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
         return 409, {"error": "no project to file under: the session's project" + (f" and {fb}" if fb else "") + " list no front agent (a user-facing agent under `agents:` on the page)"}
     rec = cands[0]
     key = rec["key"]
-    owner = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))[0]
+    owner = _item_read._front_keepers(key)[0]
     desc = _terminal_bullets(f"{name} is waiting in its terminal for {OWNER}'s answer", f"Opened by {sender} (a script on {machine}); it closes when the pane stops waiting")
     pfx_, head_, tail_ = _terminal_subject_prefix(str(rec.get('scope') or '')), "Answer ", " in its terminal"      # a task, as every title is
     name_ = _svcstore._shown_ids(name)

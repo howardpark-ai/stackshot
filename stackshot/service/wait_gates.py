@@ -47,6 +47,7 @@ from stackshot.router import routing as _routing
 from stackshot.service import checks as _checks
 from stackshot.service import event_waits as _evwaits
 from stackshot.service import messaging as _messaging
+from stackshot.service import proofs as _proofs
 from stackshot.service import released as _relsvc
 from stackshot.service import released_live as _rlive
 from stackshot.service import store as _svcstore
@@ -501,10 +502,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
             return {"moved": False, "why": "another open step already reads the same"}
         if not _nl.reword(meta, first, new_text, keeper, writer=steps_old[i].get("writer") or None, new_writer=_hooks().session_id(mover) or mover):
             return {"moved": False, "why": "the step's line is not in next"}
-        proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
-        if (pv := proofs.pop(_steps.key(first), None)) is not None:
-            proofs[_steps.key(new_text)] = pv                       # an event that finishes the step still finishes it
-            meta["step_proof"] = proofs
+        _proofs.step_proof_move(meta, first, new_text)
         steps_old[i] = {**steps_old[i], "text": new_text}
         meta["steps"] = _steps.stored(_steps.apply(steps_old, str(meta.get("next") or ""), [], [], NAME, now, strict=False, reworded={i: new_text}))
         meta.pop(_fs.CLOCK, None)
