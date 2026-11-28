@@ -33,7 +33,7 @@ NOT_MEMBER_CODE = -32003             # the JSON-RPC error code a board refuses a
 # inside the identity the proxy sets, so the person is told in words which address signed in and why. Such an identity is a member of nothing.
 REFUSALS = {
     "unverified": "Google does not report this address as verified.",
-    "other_account": "This address first joined with another Google account. An admin can remove the registration, on every board it is on, and make it again.",
+    "other_account": "This address first joined with another Google account, or was registered anew after this account joined. An admin can remove the registration, on every board it is on, and make it again.",
     "unrecorded": "The first sign-in could not be recorded, so nothing is let in yet. Try again, or ask the person who invited you.",
     "unreadable": "The board cannot check this address's registration now. Try again, or ask the person who invited you.",
 }

@@ -215,6 +215,18 @@ def part_file():
           and members()["new@example.com"]["invited"]["google_sub"] == "", members())
     check("re-invite: the new person's sign-in is the one recorded, and the earlier account is then refused", invites.admit("new@example.com", "222", True) == ""
           and members()["new@example.com"]["invited"]["google_sub"] == "222" and invites.admit("new@example.com", "111", True) == "other_account")
+    # the last board: the entry is gone from every board, and the earlier account's connector is still signed in
+    reset_members()
+    invites.register("new@example.com", "alice", S); invites.admit("new@example.com", "111", True)
+    invites.remove("new@example.com", S)
+    check("re-invite: the last board taken off keeps no board and no recorded account, only the earlier account's id to refuse",
+          members().get("new@example.com", {}).get("boards") == [] and members()["new@example.com"]["invited"].get("google_sub") == "" and members()["new@example.com"]["invited"].get("former_subs") == ["111"], members())
+    check("re-invite: before a new registration the earlier account records nothing", invites.admit("new@example.com", "111", True) == "" and not members().get("new@example.com", {}).get("invited", {}).get("google_sub"))
+    check("re-invite: the address is registered again with no account", invites.register("new@example.com", "alice", S) == (True, False) and members()["new@example.com"]["boards"] == ["main"])
+    check("re-invite: the earlier account's still-connected app cannot record itself first", invites.admit("new@example.com", "111", True) == "other_account"
+          and not members()["new@example.com"]["invited"]["google_sub"] and not invites.session_holds("new@example.com", "111"), members())
+    check("re-invite: the new person's sign-in is then the one recorded", invites.admit("new@example.com", "222", True) == "" and members()["new@example.com"]["invited"]["google_sub"] == "222"
+          and invites.admit("new@example.com", "111", True) == "other_account")
     reset_members()
     invites.register("new@example.com", "alice", S); invites.register("new@example.com", "alice", other)
     invites.remove("new@example.com", S)
@@ -474,7 +486,7 @@ def part_chain():
             # removal blocks the next request of a token already in use (the sign-in service still caches its address)
             out, e = invite("alice", "new@example.com", remove=True)
             check("remove: the reply says what stops and that machine tokens are revoked separately", not e and out.startswith("Removed the registration of new@example.com from board main.")
-                  and "From its next request on, that address gets no list, read or call of this board through a connector" in out and "Machine tokens and enrolled keys are not part of a registration: revoke separately" in out and "new@example.com" not in members(), (out, e))
+                  and "From its next request on, that address gets no list, read or call of this board through a connector" in out and "Machine tokens and enrolled keys are not part of a registration: revoke separately" in out and members()["new@example.com"]["boards"] == [], (out, e))
             r = verify(first)
             who = r.headers.get("x-verified-user", "")
             _n, e = through(who or "x", listing)
@@ -516,6 +528,21 @@ def part_direct():
         invites.remove("new@example.com", S)
         claims.clear(); claims.update(email="new@example.com", sub="111", email_verified="true")
         check("direct: a removed address is refused at its next call", "is not allowed on this board" in str(raised(_oauth._who)))
+        claims.clear(); claims.update(email="alice@example.com", sub="900", email_verified="true")
+        out = _tool.stackshot_invite("new@example.com")
+        check("direct: a registration that keeps an earlier account says so and names the way to let it in again", out.startswith("Registered new@example.com on board main.\nNote: an earlier Google account of new@example.com was kept")
+              and "is refused on this registration" in out and 'remove this registration (invite(address="new@example.com", remove=true)) and invite again' in out, out)
+        # the way back holds only until the new person signs in: the note and the tool text carry that condition, and the entry after sign-in proves it
+        check("direct: the note says the way back holds only before the new person signs in, and what to do after", "only while the new person has not signed in" in out
+              and "delete the entry from the members file" in out and "or delete the entry from the members file" not in out, out)
+        tool_doc = (pathlib.Path(_tool.__file__).parent / "text" / "invite.md").read_text()
+        check("direct: the tool text carries the same condition", "only while the new person has not signed in" in " ".join(tool_doc.split()) and "deletes the entry from the members file" in tool_doc, tool_doc)
+        invites.admit("new@example.com", "222", True)
+        invites.remove("new@example.com", S)
+        invites.register("new@example.com", "alice", S)
+        check("direct: after the new person signed in, remove and invite again keeps the earlier account refused",
+              members()["new@example.com"]["invited"]["former_subs"] == ["111", "222"] and invites.admit("new@example.com", "111", True) == "other_account", members())
+        check("direct: a registration with no earlier account carries no such note", "earlier Google account" not in _tool.stackshot_invite("fresh@example.com"))
     finally:
         _cfg.CFG["behind_frontdoor"], deps.get_access_token = saved, saved_get
 
