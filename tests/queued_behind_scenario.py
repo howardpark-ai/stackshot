@@ -210,7 +210,7 @@ rows = {r["gid"]: r for ps in b.home_pairs().values() for r, m in ps}
 hrow = b.home_row(rows["a2"], pairs["a2"], WT, named=True)
 check("4 its row says `Queued behind` with a link to the item in hand, never `After`, and names the mover", "Queued behind <a" in hrow and 'href="/items/a1"' in hrow and "After <a" not in hrow and "home-peer" in hrow, hrow[:900])
 page = b.item_html("a2")
-check("4 its item page names the item in hand, says why it waits, and shows it as waiting (the item in hand shows no such line)", 'href="/items/a1"' in page and "its mover is working on that item first" in page and "its mover is working on that item first" not in b.item_html("a1"), page[:200])
+check("4 its item page names the item in hand, says why it waits, and shows it as waiting (the item in hand shows no such line)", 'href="/items/a1"' in page and "· queued</span>" in page and "Its mover is working on that item first." in page and "Its mover is working on that item first." not in b.item_html("a1"), page[:200])
 cnt = b.phase_counts()
 off(); cnt0 = board().phase_counts(); on()
 check("4 the counts follow the lists: open the same, two fewer on agent, two more waiting", cnt["open"] == cnt0["open"] and cnt["agents"] == cnt0["agents"] - 2 and cnt["waiting"] == cnt0["waiting"] + 2 and cnt["alive"] == cnt0["alive"] - 2, (cnt, cnt0))
@@ -242,7 +242,7 @@ for label, md in (("the home page's Board", False), ("board.md's Board", True)):
     off(); out0 = board(md=md).render(("brief", "full")); on()
     check(f"4b {label}: the gate off, neither text says queued (the item is on agent)", "queued behind" not in out0["brief"] and "queued behind" not in out0["full"])
 b = board(); pairs = {r["gid"]: m for ps in b.home_pairs().values() for r, m in ps}; rows = {r["gid"]: r for ps in b.home_pairs().values() for r, m in ps}
-check("4b the home row says `Queued behind` (once, with the link) and the item page says why", b.home_row(rows["a2"], pairs["a2"], WT, named=True).count("Queued behind") == 1 and "its mover is working on that item first" in b.item_html("a2"))
+check("4b the home row says `Queued behind` (once, with the link) and the item page says why", b.home_row(rows["a2"], pairs["a2"], WT, named=True).count("Queued behind") == 1 and "Its mover is working on that item first." in b.item_html("a2"))
 stored = MODEL.derive({"status": "open", "metadata": {"state": "blocked", "after": ["a1"], "wait_kind": "item", "mover": "home-peer"}}, now0)
 check("4b wait_phrase: a queued reading says `queued behind <item>`, whatever the prefix; the item as `shown` writes it", home.wait_phrase(pairs["a2"], "on", lambda g: "x" + g[1:]) == "queued behind x1" and home.wait_phrase(pairs["a2"], "waiting on") == "queued behind a1", home.wait_phrase(pairs["a2"], "waiting on"))
 check("4b …a wait a session stored as an item wait keeps its words, with the prefix; an alive reading has none", home.wait_phrase(stored, "on") == "on " + home.wait_words(stored) and home.wait_words(stored) and "queued" not in home.wait_phrase(stored, "on") and home.wait_phrase(pairs["a1"], "on") == "")

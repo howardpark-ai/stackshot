@@ -430,6 +430,8 @@ check("apply_lang: <html lang>, the script table ahead of the page's own scripts
 check("apply_lang: English comes back as it was, and a page already done is not done twice", r2.apply_lang(page, "en") == page and r2.apply_lang(out, "ko") == out)
 check("apply_lang: the script table holds the keys the scripts ask for, in the language", json.loads(re.search(r"window.SSI=(\{.*?\});</script>", out, re.S).group(1))["js.copied"] == MARK("Copied"))
 check("the English table in every page head is the catalog's own (a script never carries a copy of a word)", r2._SST_HEAD.count("window.SSD=") == 1 and json.dumps(i18n.js_table("en")).replace("</", "<\\/") in r2._SST_HEAD)
+_asked = {k for p in pathlib.Path(i18n.__file__).parent.rglob("*.py") for k in re.findall(r"""SST\(\s*['"]([A-Za-z0-9_.]+)['"]\s*[,)]""", p.read_text(encoding="utf-8"))}
+check("every key a page script asks for by name is in the table a page carries (else the script draws the key itself)", {"js.colors.help", "panel.audit.dash_help"} <= _asked <= set(i18n.js_table("en")), sorted(_asked - set(i18n.js_table("en"))))
 
 # ---- 7. ui.render imported for the first time while a request's language is not English: its module-level words are the English ones
 IMPORT_PROBE = r"""
@@ -660,7 +662,7 @@ check("the item page has strings in the table (the areas item, wait, answer, wat
 check("every fixture page rendered in both languages", len(ipx_en) == len(ipx_ko) == len(IPX_IDS) * 6 + 5 and all("<html" in h for h in ipx_en.values()), (len(ipx_en), len(ipx_ko)))
 check("the item pages in English carry no marker and keep <html lang=\"en\"> (apply_lang rewrites it per person)", all("[x:" not in h and '<html lang="en">' in h for h in ipx_en.values()),
       [k for k, h in ipx_en.items() if "[x:" in h][:5])
-check("a queued item's page says why it waits, in English and marked in the test locale", "its mover is working on that item first" in ipx_en[(201, "queued")] and MARK(EN["wait.queued_note"]) in ipx_ko[(201, "queued")] and 'href="/items/a202"' in ipx_en[(201, "queued")], re.findall(r"Waits on.{0,300}", ipx_en[(201, "queued")])[:1])
+check("a queued item's page says why it waits, in English and marked in the test locale", "· queued</span>" in ipx_en[(201, "queued")] and EN["wait.queued_help"] in ipx_en[(201, "queued")] and all(MARK(EN[k]) in ipx_ko[(201, "queued")] for k in ("wait.queued", "wait.queued_help")) and 'href="/items/a202"' in ipx_en[(201, "queued")], re.findall(r"Waits on.{0,300}", ipx_en[(201, "queued")])[:1])
 check("the item pages in the test locale carry markers", all("[x:" in h for h in ipx_ko.values()), [k for k, h in ipx_ko.items() if "[x:" not in h][:5])
 
 def _ipx_pat(v):
@@ -728,8 +730,8 @@ check("…and in the test locale each kind reads from its own key with the same 
 # the English-only values of the item page's areas, in both languages: the English page says the table's words, the test locale's page marks them
 _en_all = html.unescape(_nojs("\n".join(ipx_en.values())))
 def _en_pat(v): return re.compile(".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)), re.S)
-LOW_B = sorted(k for k in IPX_NEW if (k.startswith(("link.google_", "item.log.", "wait.what.")) or k in ("item.earlier_steps", "item.no_open_steps", "item.github_issue", "item.github_issue_tip", "wait.chase_note", "watch.not_watched")) and k not in IPX_DIRECT)
-check("the English-only values (the Google links, the earlier and open steps, the GitHub issue, the History's lines, the wait's words and chase note, the watch's) are listed", len(LOW_B) >= 40, len(LOW_B))
+LOW_B = sorted(k for k in IPX_NEW if (k.startswith(("link.google_", "item.log.", "wait.what.")) or k in ("item.earlier_steps", "item.no_open_steps", "item.github_issue", "item.github_issue_tip", "wait.chase_help", "watch.not_watched")) and k not in IPX_DIRECT)
+check("the English-only values (the Google links, the earlier and open steps, the GitHub issue, the History's lines, the wait's words and chase text, the watch's) are listed", len(LOW_B) >= 40, len(LOW_B))
 check("…each reads as the table's words on some English fixture page", all(_en_pat(EN[k]).search(_en_all) for k in LOW_B), [k for k in LOW_B if not _en_pat(EN[k]).search(_en_all)])
 check("…and each is marked on some page in the test locale", all(k in seen for k in LOW_B), [k for k in LOW_B if k not in seen])
 
@@ -861,11 +863,11 @@ with i18n.use("ko"): rl_twice = _rl()
 write_ko(test_locale(**{"home.rendered_line": "drawn lately"})); set_dir(LOC); reset_warned()
 with i18n.use("ko"): rl_none = _rl()
 write_ko(test_locale()); set_dir(LOC); reset_warned()
-check("the rendered line in English: 'rendered' before the age, byte for byte what it always was",
-      rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_en)
-check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
-check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
-_span = f'<span id="rendered" data-stale="{_st}" title="T"><b>S</b></span>'
+check("the rendered line in English: 'rendered' before the age, byte for byte (data-xt-also: its time's popup says when the page is stale too)",
+      rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span></p>', rl_en)
+check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
+check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span></p>', rl_bare)
+_span = f'<span id="rendered" data-stale="{_st}" title="T" data-xt-also><b>S</b></span>'
 check("…REGRESSION: a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words (the old code let the marker into the second span)",
       rl_twice == f'<p class="rline">{_span}<span class="rw"> was drawn, </span></p>' and rl_twice.count('id="rendered"') == 1, rl_twice)
 check("…characterization (the old code gave the same): a template with no age at all draws the age's span once, words first and the span after (it carries the stale colour, the title and the tick)",

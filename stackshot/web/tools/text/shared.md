@@ -55,13 +55,14 @@ id, a test count, a merged, live or deployed status or a "since 09:30" stamp is 
 notes it.
 
 ## text ITEM_FORM
-subject (a create's, or one an update sets): the finished outcome ("Make X work when Y", "X is live", "Y no longer
-happens"), the same one the Goal sentence says; never an activity ("Investigate X"), a question ("Should X change?"), a
-topic ("X settings") or the symptom ("X fails when Y"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
+subject (a create's, or one an update sets): the work that closes the item, read at a glance as a task (an English
+imperative, "Keep hand-off times on closed items"; in Korean, ending in -hagi or a noun task); never a symptom ("X fails
+when Y"), a statement ("X is live"), a "should" or "must" sentence, a question ("Should X change?") or a bare topic ("X
+settings"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); a longer bullet is
 split for you at a sentence end or a space (the reply says so); prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
-opens `Goal:` (`goal:` or a bold label is put right) with that finished outcome in a sentence; a symptom,
+opens `Goal:` (`goal:` or a bold label is put right) with the finished outcome that work reaches, in a sentence; a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
 commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;

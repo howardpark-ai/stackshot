@@ -839,15 +839,15 @@ def part_display():
     # ================================================================ the item page
     pg310, pg311, pg312 = page_wait("a310"), page_wait("a311"), page_wait("a312")
     p_310 = plain(pg310)
-    check("page (all, nothing arrived): Waits on holds the list: the mode, how many arrived and how it ends, one line per wait with its kind", "all of 2" in p_310 and "0 arrived · it comes back when the last one does" in p_310 and box_on(pg310) == [False, False] and p_310.count("news only") == 2, p_310)
-    check("page: …Backstop is its own row (the day, and that it is back at the latest whatever has arrived); Picks it up follows; there is no Watched by row and no Chases row", re.findall(r"<dt>(.*?)</dt>", pg310) == ["Waits on", "Backstop", "Picks it up"]
-          and f"{b.wait_day(day(4))} · back at the latest, whatever has arrived" in p_310, re.findall(r"<dt>(.*?)</dt>", pg310))
+    check("page (all, nothing arrived): Waits on holds the list: the mode, how many arrived (how it ends is behind the \"?\"), one line per wait with its kind", "all of 2" in p_310 and "0 arrived" in p_310 and "It comes back when the last one arrives." in p_310 and box_on(pg310) == [False, False] and p_310.count("news only") == 2, p_310)
+    check("page: …Backstop is its own row (the day; that it is back at the latest whatever has arrived is behind its \"?\"); Picks it up follows; there is no Watched by row and no Chases row", re.findall(r"<dt>(.*?)</dt>", pg310) == ["Waits on", "Backstop", "Picks it up"]
+          and b.wait_day(day(4)) in p_310 and "It comes back on this day at the latest, whatever has arrived." in p_310, re.findall(r"<dt>(.*?)</dt>", pg310))
     check("page: …each open line says what watches it: news only <owner> relays, watched by the scheduler", p_310.count("news only") == 2 and p_310.count("watched by the scheduler") == 2 and "Chases" not in p_310 and "Watched by" not in p_310, p_310)
     p_311 = plain(pg311)
-    check("page (any): \"any of 2\" and \"the first to arrive brings it back\"; each anchor line shows its anchor in full as a link, watched by the anchor module", "any of 2" in p_311 and "the first to arrive brings it back" in p_311 and "arrived ·" not in p_311
+    check("page (any): \"any of 2\" and behind the \"?\", that the first to arrive brings it back; each anchor line shows its anchor in full as a link, watched by the anchor module", "any of 2" in p_311 and "The first to arrive brings it back." in p_311 and "arrived ·" not in p_311
           and pg311.count('<a href="https://github.com/o/r/pull/') == 2 and p_311.count("watched by the anchor module") == 2 and "https://github.com/o/r/pull/5" in p_311 and "https://github.com/o/r/pull/6" in p_311, (pg311.count('<a href="https://github.com/o/r/pull/'), p_311.count("watched by the anchor module"), p_311))
     p_312 = plain(pg312)
-    check("page (all of 6, two arrived): the arrived lines are ticked with the words of their arrival and the time; the open ones say what watches them", "2 arrived · it comes back when the last one does" in p_312 and box_on(pg312) == [True, True, False, False, False, False]
+    check("page (all of 6, two arrived): the arrived lines are ticked with the words of their arrival and the time; the open ones say what watches them", "2 arrived" in p_312 and "It comes back when the last one arrives." in p_312 and box_on(pg312) == [True, True, False, False, False, False]
           and f"its date came · arrived {W_(GOT)}" in p_312 and f"the other item closed (done) · arrived {W_(GOT + 600)}" in p_312, p_312)
     check("page: …an item line says whether the item is open or closed, a fleet event is watched by the server, an anchor line by the anchor module", "the close of a301 (open) · watched by the server" in p_312 and "watched by the server" in p_312 and "watched by the anchor module" in p_312 and "news only" in p_312, p_312)
     check("page: …the sidebar's wait group reads Backstop with the day (the one date of the item)", re.search(r"<dt>Backstop</dt><dd>" + re.escape(b.wait_day(day(6))) + "</dd>", b.item_html("a312")) is not None, None)
@@ -901,7 +901,7 @@ def part_display():
             t = t2
         for fx in ("PR merged", "the next recycle of testbox", "recycle testbox", "the lease", "its date came", "the other item closed (done)", "github.com/o/r/pull/5", "https://github.com/o/r/pull/5", "r PR #5", "list 312", "#300", "#301", "a300", "a301", "team-back", "testbox"):
             t = t.replace(fx, " ")      # the fixtures' own words (an anchor's short label and a fleet event's words are the board's own helpers, not this display's)
-        return re.sub(r"[\s·()\d:/.\-–,;✓\[\]]+", " ", re.sub(r"D<[^>]*>|A<[^>]*>|o\d|on\b|w\d|m\d+", " ", t)).strip()
+        return re.sub(r"[\s·()\d:/.\-–,;✓?\[\]]+", " ", re.sub(r"D<[^>]*>|A<[^>]*>|o\d|on\b|w\d|m\d+", " ", t)).strip()
     check("strings: every word of a list row comes from the string table (a locale that marks each key marks the head, each kind, the arrival, the watchers)", cx.count("[x:") >= 10 and not english_left(cx), english_left(cx))
     check("strings: …and of the item page's block (the mode, the notes, the sub lines, the Backstop row, its words)", px.count("[x:") >= 12 and not english_left(px), english_left(px))
     check("strings: …the who line carries the watchers through the table too", "[x:" in wx and not english_left(wx), plain(wx))

@@ -4,9 +4,23 @@
 Until every pull request ran all the tests/*_scenario.py suites, about 8 min of the one CI turn on box-a, for
 a docs fix as for a change to server.py. Now a scheduled workflow (suitemap-refresh.yml, every 3 hours) runs every suite MEASURED
 and keeps what each one touched (a "map", in GitHub's Actions cache, and as an artifact); a pull request runs only the suites whose
-touched code or files its change reaches, and each refresh checks the previous map's choice against the merged code's own
+touched code or files its own change reaches (see *The change a pick counts*), and each refresh checks the previous map's choice against the merged code's own
 measurement (`audit`). The merge queue and main's push run every suite PLAINLY (`run`), which is what decides a merge. The map is measured, never written:
 nobody keeps it by hand.
+
+The change a pick counts (Sat Nov 28th 2026). `select` once counted everything between the map's commit and the head, so all that main had merged since the map
+was made counted as the pull request's change: with a map hours old, 24 of 24 recent runs picked a median of 306 of about 316 suites. Now it counts what the change
+itself changes. `--base REV` names the commit the change starts from (a commit this checkout lacks is fetched like the map's); with none it is the merge base of
+origin/main and --to, taken only when that resolves and is not --to itself. The paths counted are those `git diff <base> <to>` names, both sides of a rename. Each
+is still diffed from the MAP's commit to --to, because the map's functions and files are that commit's, and that covers a file main added after the map (as a new
+file); a path main renamed after the map is diffed with its old name too, so the suites that ran it are reached. Each counted path is also counted from the base
+(the change's own diff), so a change that puts back one function or constant main had edited, in a file that still differs from the map, reaches the suites that ran
+it; the pick is the union, `all` from either winning. A change
+with no file picks only the suites that always run. A harness file changed by main alone no longer makes a pull request run everything. With no base (none given,
+and no usable merge base) the pick counts everything since the map's commit, as before, and `select` says so and names --base.
+The trade: a pull request's run can now MISS a suite whose reads changed on main after the map was made (main added a caller of what the change edits, or a suite
+began to read the file; a Python file main added after the map and the change edits is reached only as a new file is). The merge queue runs every suite before
+anything merges, and catches it there. `audit` and `measure --prev` are not narrowed: they compare two commits whole.
 
 What a suite touches, at two grains:
   * Python code, by function. coverage.py records the lines every Python process of the suite runs (its subprocesses too);
@@ -57,13 +71,21 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
   tests/suitemap.py complete REPORT…                      the check that a full plain run ran every suite: the reports the shards wrote (`run --report`)
                                                           are of this checkout's commit, every suite of the checkout is in exactly one of them and
                                                           none failed; else exit 1 with each fault on stdout as an error line
-  tests/suitemap.py select [--map MAP] [--to REV]         print `all`, or the suites to run separated by spaces (empty: none);
+  tests/suitemap.py select [--map MAP] [--to REV] [--base REV]
+                                                          print `all`, or the suites to run separated by spaces (empty: none);
                                                           the reason for each changed file goes to stderr, and to
-                                                          $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>.
-                                                          With no --map it reads `.suitemap-ci/map.json`, the one `fetch` wrote. First on
-                                                          stderr, one line: which commit of main the map is of and how far REV is from it, or,
-                                                          when the pick is wider than CI's (no map, a map refused as corrupt or of another
-                                                          format, a map whose commit this checkout lacks), that it is, and why
+                                                          $GITHUB_STEP_SUMMARY when set. The files counted are those that differ between
+                                                          --base (default: the merge base of origin/main and --to, when it is not --to) and
+                                                          --to, each diffed from the map's commit (see *The change a pick counts*); with no
+                                                          base, the change is git diff <map's commit> <REV>.
+                                                          With no --map it reads `.suitemap-ci/map.json`, the one `fetch` wrote; where a
+                                                          test launcher is configured and that file is not there yet, `fetch` is tried once
+                                                          before the run is sent (its output on stderr, a failure one line, and the run goes
+                                                          on). First on stderr, one line: which commit of main the map is of and how far REV
+                                                          is from it, and `N file(s) changed since <base>` (also in the job summary) or that
+                                                          the pick counts everything since the map, or, when the pick is wider than CI's (no
+                                                          map, a map refused as corrupt or of another format, a map whose commit this
+                                                          checkout lacks), that it is, and why
   tests/suitemap.py fetch [--sha SHA] [--repo OWNER/NAME] download the map main's newest successful run of suitemap-refresh.yml published (the
                                                           artifact `suitemap`) into `.suitemap-ci/map.json`: the newest run of a commit this
                                                           checkout descends from, or of SHA; an older one when an artifact has expired. Uses
@@ -71,7 +93,8 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           runs where the token is, BEFORE the tree is sent to a test runner (a runner's copy
                                                           holds the files git does not ignore, and `.suitemap-ci/` is not ignored; `.suitemap/`,
                                                           where CI restores its cache, is). Never commit the folder: tests/suitemap_cache_scenario.py
-                                                          fails, in CI, a checkout that tracks it. Never relaunched: it runs where it is typed.
+                                                          fails, in CI, a checkout that tracks it. Never relaunched: it runs where it is typed (`select` also runs it,
+                                                          on a machine with a test launcher and no map yet).
   tests/suitemap.py warm [--rev REV]                      build and keep the index of REV (default HEAD) as a `select` would, so the next call that
                                                           needs it loads it: what runs after a merge to main (release.sh,
                                                           [release] suitemap_warm_cmd; see *The index cache*). Exit 0 when it
@@ -363,9 +386,9 @@ Measured on one test box, the real repository (about 590 Python files), `select`
 the branch 2.1, 2.2 and 2.2 s before, 1.3, 1.4 and 1.5 s now; a repeat call for the same branch 0.5 to 0.7 s before (its tree entry had been kept), 1.3 to 1.5 s now, the price of not writing it.
 The output of select and audit is the same with no cache, a cold folder, a warmed one and a branch over it, on twelve ranges of this repository's history, four audits and the branches.
 
-A commit this checkout lacks (the map's, in a copy of the tree sent without history) is fetched once from `origin`, by a call that cannot ask anything of a terminal and is ended after FETCH_TIMEOUT seconds
+A commit this checkout lacks (the map's, in a copy of the tree sent without history, or the one --base names) is fetched once from `origin`, by a call that cannot ask anything of a terminal and is ended after FETCH_TIMEOUT seconds
 (SUITEMAP_FETCH_TIMEOUT: a number above 0, any other value is an error, checked when a command starts). Without that an ssh remote with no key or known host asks on the terminal and `select` never returned;
-now the commit stays missing, and `select` says so and picks every suite at once.
+now the commit stays missing, and `select` says so at once: without the map's commit it picks every suite, without --base's it counts everything since the map.
 """
 import argparse, ast, atexit, collections, contextlib, datetime, difflib, fcntl, hashlib, io, json, os, pickle, re, shutil, signal, stat, subprocess, sys, tempfile, time, tomllib, zlib
 
@@ -373,7 +396,7 @@ FORMAT = 1
 CI_MAP_DIR = ".suitemap-ci"   # where `fetch` keeps main's map and `select` looks when no --map is named: NOT .suitemap/ (CI's, gitignored): a test runner's copy of the tree carries only the files git does not ignore
 CI_ARTIFACT, CI_WORKFLOW = "suitemap", ".github/workflows/suitemap-refresh.yml"   # what the scheduled refresh publishes, and the workflow that does (see *The gate, per event* in CONTRIBUTING.md)
 # A suite's files are traced again when the change since the earlier map reaches it, and at least this often. The refresh runs every 3 hours, so a suite is traced again by the first run after this age
-# (about once a day, 27 hours at the longest: ages go 3, 6, … 24 and only more than 24 counts); a run in between traces only what changed. A pick never relies on a trace's age: `select` always adds the change since the map's commit.
+# (about once a day, 27 hours at the longest: ages go 3, 6, … 24 and only more than 24 counts); a run in between traces only what changed. No merge relies on a trace's age: a pick counts the change's files from the map's commit, and what it misses the merge queue's full run catches.
 TRACE_MAX_AGE = 24   # hours
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
@@ -3328,9 +3351,61 @@ def ci_map_path():
     return os.path.join(ROOT, CI_MAP_DIR, "map.json")
 
 
-def map_notes(path, explicit, m, why, to):
+def diff_rows(a, b):
+    """[(status letter, [paths])] of `git diff --name-status -M a b` (a rename: the old name, then the new), each path as git holds it; None when git failed"""
+    out = git("diff", "--name-status", "-M", "-z", a, b)
+    if out is None:
+        return None
+    words, rows, i = out.split("\0"), [], 0
+    while i < len(words) and words[i]:
+        n = 2 if words[i][0] in "RC" else 1
+        rows.append((words[i][0], words[i + 1:i + 1 + n]))
+        i += 1 + n
+    return rows
+
+
+def literal(paths):
+    """the pathspecs that name exactly these paths: nothing in a file's name is read as a pattern"""
+    return [f":(literal){p}" for p in paths]
+
+
+def change_base(given, to):
+    """(the full id of the commit the change starts from, None), or (None, why a given one is not used; None when none was given). `given` is --base, fetched like the map's commit when this
+    checkout lacks it; with none it is the merge base of origin/main and `to`, taken only when it resolves and is not `to` itself (a commit of main: its own change cannot be told from that)"""
+    if given is not None:
+        if given and not given.startswith("-") and have(given):
+            return git("rev-parse", "--verify", f"{given}^{{commit}}").strip(), None
+        return None, f"--base {given!r} is no commit of this checkout"
+    base = (git("merge-base", "origin/main", to) or "").strip()
+    head = (git("rev-parse", "--verify", "--quiet", f"{to}^{{commit}}") or "").strip()
+    return (base if base and head and base != head else None), None
+
+
+def pr_selection(m, a, base, to, rows):
+    """selection() for the change base..to alone (`rows`: diff_rows(base, to)), what a pull request itself changes, not what main did since the map's commit `a`. Each of its paths is diffed
+    from the map's commit, as the map's functions and files are that commit's (and so a file main added after the map is counted), and each is also diffed from `base`: a
+    function or constant the change puts back to the map's content, in a file that still differs from the map, shows only in that diff. A suite whose reads changed on main after the map can be missed: the merge queue runs every suite before a merge"""
+    paths = sorted({p for _, names in rows for p in names})
+    if not paths:
+        return selection(m, to, to, skip_b=True)   # to git an empty list of pathspecs is everything: the empty diff gives the suites that always run
+    since = diff_rows(a, base)
+    if since is None:
+        return "all", [("-", "git diff failed")]
+    # a path main renamed after the map goes with its old name: without it the diff from the map shows a new file (or, for a deletion, nothing) and the suites that ran the old name are missed
+    old = {names[0] for st, names in since if st == "R" and names[1] in paths}
+    sel, why = selection(m, a, to, pathspec=literal(sorted(old.union(paths))), skip_b=True)
+    # every counted path also from the base: a function or constant the change puts back to the map's content, in a file that still differs from the map, shows
+    # in this diff only (the map..to diff of that file has the main's other edits in it)
+    more, more_why = selection(m, base, to, pathspec=literal(paths), skip_b=True)
+    why = why + [r for r in more_why if r not in why]
+    sel = "all" if "all" in (sel, more) or sel | more >= set(suites_at(to)) else sel | more
+    return sel, why
+
+
+def map_notes(path, explicit, m, why, to, since=None):
     """the one line `select` says on stderr about the map it was given, or about its absence: where a pick is wider than CI's (no map, a refused map, a map whose commit this
-    checkout lacks) it says so; else which commit of main the map is of and how far HEAD is from it (CI picks by the newest map main saved, which may be newer than a change's base)"""
+    checkout lacks) it says so; else which commit of main the map is of and how far HEAD is from it (CI picks by the newest map main saved, which may be newer than a change's base),
+    and what is counted: `since` (the files changed since a base), or, with no base, everything since the map"""
     rel = os.path.relpath(path, ROOT)
     if m is None and why == "missing":
         hint = "" if explicit else " Run `tests/suitemap.py fetch` first, on a machine with a GitHub token, before the tree is sent to a test runner."
@@ -3342,8 +3417,12 @@ def map_notes(path, explicit, m, why, to):
         return f"suitemap: the map is of main {a[:12]}, which this checkout does not hold (a copy sent without history?): every suite is picked, wider than CI's pick."
     if git("merge-base", "--is-ancestor", a, to) is not None:
         n = (git("rev-list", "--count", f"{a}..{to}") or "?").strip()
-        return f"suitemap: CI map of main {a[:12]} ({n} commit(s) before {to[:12] if len(to) == 40 else to})"
-    return f"suitemap: CI map of main {a[:12]}, which is not an ancestor of {to}: the change counted is the difference from it"
+        line = f"suitemap: CI map of main {a[:12]} ({n} commit(s) before {to[:12] if len(to) == 40 else to})"
+    else:
+        line = f"suitemap: CI map of main {a[:12]}, which is not an ancestor of {to}"
+    if since:
+        return f"{line}: {since}, each counted from the map's commit"
+    return f"{line}: no base for the change, so the pick counts everything since the map (`--base <sha>` narrows it)"
 
 
 def select(args):
@@ -3352,31 +3431,39 @@ def select(args):
     m, why = read_map(path)
     to = args.to
     a = m["commit"] if m else to
-    if m:
-        have(a)
-    print(map_notes(path, explicit, m, why, to), file=sys.stderr)
-    sel, why = selection(m, a, to, skip_b=True)   # the map's commit is main's, shared by every pull request: always kept; the head is this change's alone
+    base = rows = since = unused = None
+    if m and have(a):
+        base, unused = change_base(args.base, to)
+        rows = diff_rows(base, to) if base else None
+    if rows is not None:
+        since = f"{len(rows)} file(s) changed since {base[:12]}"
+    if unused:
+        print(f"suitemap: {unused}", file=sys.stderr)
+    print(map_notes(path, explicit, m, why, to, since), file=sys.stderr)
+    # the map's commit is main's, shared by every pull request: always kept; the head is this change's alone
+    sel, why = selection(m, a, to, skip_b=True) if rows is None else pr_selection(m, a, base, to, rows)
     total = len(suites_at(to))
+    counted = f"; {since}" if since else ""
     for f, r in why:
         print(f"suitemap: {f}: {r}", file=sys.stderr)
     if sel == "all":
         print("all")
-        head = f"**Suites: all {total}** (map {a[:12] if m else 'none'})"
+        head = f"**Suites: all {total}** (map {a[:12] if m else 'none'}{counted})"
     else:
         print(" ".join(sorted(sel)))
         S = m["suites"]
         secs = sum(S.get(s, {}).get("seconds", 0) for s in sel)
         full = sum(S.get(s, {}).get("seconds", 0) for s in suites_at(to))
-        head = (f"**Suites: {len(sel)} of {total}** (about {secs:.0f}s of {full:.0f}s; map of {a[:12]}): "
+        head = (f"**Suites: {len(sel)} of {total}** (about {secs:.0f}s of {full:.0f}s; map of {a[:12]}{counted}): "
                 + (", ".join(sorted(sel)) or "none"))
     summary(["### Suite selection", head, "", "| changed | reason |", "|---|---|"] + [f"| `{f}` | {r} |" for f, r in why])
     return 0
 
 
-def gh_json(*a):
+def gh_json(*a, timeout=None):
     """(parsed JSON, None) of `gh api …`, or (None, why): gh missing, refused (no token), or an answer that is no JSON"""
     try:
-        r = subprocess.run(["gh", "api", *a], capture_output=True, text=True)
+        r = subprocess.run(["gh", "api", *a], capture_output=True, text=True, timeout=timeout)
     except OSError as e:
         return None, f"gh cannot be run ({e.strerror or e})"
     if r.returncode:
@@ -3401,7 +3488,8 @@ def fetch(args):
     if not repo:
         print("suitemap: fetch: no repository: `origin` is not a GitHub remote; name it with --repo OWNER/NAME", file=sys.stderr)
         return 1
-    runs, err = gh_json(f"repos/{repo}/actions/workflows/{os.path.basename(CI_WORKFLOW)}/runs?branch=main&status=success&per_page=100")
+    timeout = getattr(args, "timeout", None)   # seconds for each gh call; none when `fetch` is typed (see fetch_before_launch)
+    runs, err = gh_json(f"repos/{repo}/actions/workflows/{os.path.basename(CI_WORKFLOW)}/runs?branch=main&status=success&per_page=100", timeout=timeout)
     if err:
         print(f"suitemap: fetch: {err}\n  (an artifact needs a GitHub token even in a public repository: run `gh auth login`, or set GH_TOKEN)", file=sys.stderr)
         return 1
@@ -3419,7 +3507,7 @@ def fetch(args):
     for r in ours[:5]:
         work = tempfile.mkdtemp(prefix=".dl-", dir=os.path.dirname(out))
         try:
-            d = subprocess.run(["gh", "run", "download", str(r["id"]), "--repo", repo, "-n", CI_ARTIFACT, "-D", work], capture_output=True, text=True)
+            d = subprocess.run(["gh", "run", "download", str(r["id"]), "--repo", repo, "-n", CI_ARTIFACT, "-D", work], capture_output=True, text=True, timeout=timeout)
             if d.returncode:
                 problems.append(f"run {r['id']}: {d.stderr.strip()[:200] or 'download failed'}")
                 continue
@@ -3498,6 +3586,29 @@ def audit(args):
     return 0
 
 
+LAUNCH_FETCH_TIMEOUT = 60   # seconds each gh call of the fetch before a launch may take
+
+
+def fetch_before_launch(args):
+    """on the machine that sends its runs away (a launcher configured, this run not launched yet), a `select` that would find no map in this tree fetches it first, so the map travels with
+    the tree (the far side need have no GitHub token). Tried once; nothing of it reaches stdout; any failure is one line on stderr and the run goes on"""
+    if args.cmd != "select" or args.map is not None or os.path.exists(ci_map_path()):
+        return
+    import _launcher
+    if not _launcher.configured():
+        return
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sys.stderr), contextlib.redirect_stderr(said):
+            failed = fetch(argparse.Namespace(sha=None, repo=None, timeout=LAUNCH_FETCH_TIMEOUT))
+    except Exception as e:
+        failed = 1
+        said.write(f"{type(e).__name__}: {e}")
+    if failed:
+        why = " ".join(said.getvalue().split()).removeprefix("suitemap: fetch: ")
+        print(f"suitemap: select: no CI map fetched, the run goes on without it: {why[:400]}", file=sys.stderr, flush=True)
+
+
 def relaunch(args):
     """a machine that sends its test runs elsewhere (tests/_launcher.py: the launcher file and the contract) runs this invocation there, as typed:
     the subcommands that run or read the test tree, never --help or a bad command line (argparse has ended those already). `measure` needs the
@@ -3522,13 +3633,16 @@ def main():
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
     p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
     p = sub.add_parser("complete"); p.add_argument("reports", nargs="*")
-    p = sub.add_parser("select"); p.add_argument("--map"); p.add_argument("--to", default="HEAD")
+    p = sub.add_parser("select", description="print `all`, or the suites the change reaches. With --base (or a merge base of origin/main and --to that is not --to) only the files the change itself changes are counted, each from the map's commit; with none, everything since the map's commit.")
+    p.add_argument("--map", help="the map (default: .suitemap-ci/map.json, the one `fetch` wrote)"); p.add_argument("--to", default="HEAD", help="the head of the change (default HEAD)")
+    p.add_argument("--base", metavar="REV", help="the commit the change starts from, fetched from origin when this checkout lacks it (default: the merge base of origin/main and --to)")
     p = sub.add_parser("fetch"); p.add_argument("--sha"); p.add_argument("--repo")
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
     if no_suites(args):   # before a launcher is asked to run it elsewhere: a run of nothing is refused where it was typed
         return 2
+    fetch_before_launch(args)
     relaunch(args)
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     docstring_rule()

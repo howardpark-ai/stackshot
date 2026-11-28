@@ -9,6 +9,7 @@ from urllib.parse import quote, urlsplit
 from stackshot.web.ui import PREFIX, under   # the (empty) root prefix: every address this page writes goes through under()
 from stackshot.web.ui import kit as _ui   # the one item system: the state words and tags, the one row every list draws, the type scale
 from stackshot.web.ui import groups as _grp   # rows in one foldable subsection per scope: home's four lists and the Closed page (groups.py)
+from stackshot.web.ui import explain as _xp   # the "?" control that holds a page's explainer text (explain.py)
 from stackshot.web.ui import releasing as _rel   # which pull requests are in the release script's queue (an item anchored to one is Queued for release)
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
@@ -952,6 +953,7 @@ _RELOAD_JS = ("<script>document.addEventListener('click',function(e){var b=e.tar
 _TOTOP_LINK = ('<a href="#top" id="totop" aria-label="Back to top" title="Back to top"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" '
                'stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg></a>')
 _FAB_PAIR = _RELOAD_FAB + "\n" + _TOTOP_LINK
+_FAB_PAIR += _xp.SCRIPT   # the one script of every page's "?" explainers (explain.py); ahead of the color tool's, so an Escape closes an open popup before the panel it sits in
 _FAB_PAIR += _ct.BODY   # the color tool's init, at the end of every page's body: it draws the Colors button into the side panel's mount (#panel-colors) and the panel in the body
 _TOTOP_JS = ("<script>(function(){var b=document.getElementById('totop');if(!b)return;"
              "b.addEventListener('click',function(e){e.preventDefault();window.scrollTo(0,0);history.replaceState(null,'',' ')})})();</script>")
@@ -994,11 +996,11 @@ _FOLD_HEAD = ("<script>(function(){if(!window.MutationObserver)return;"
 # markup.
 # In the main column Your move and Queued for release render open and the others closed, the panel's sections all render open; each is remembered per browser (_FOLD_JS) and a
 # fold never touched keeps that default. A hash to the section id opens it, and the in-place swap carries the live open state over. The key is the section id (distinct from every item section's and scope group's). The Tasks tiles are in the summary panel (_PANEL_JS), with Machines and Anchor hub, not in the main column.
-def _top_fold(sid: str, h2: str, body: str, is_open: bool = False) -> str:
+def _top_fold(sid: str, h2: str, body: str, is_open: bool = False, aside: str = "") -> str:
     # A side-panel section carries the grip that moves it (see the panel order, below) beside the fold, not inside its <summary>: a button in a summary is nested interactive
     # content and merges its name into the summary's ("Runners Move Runners section"); beside it, the summary keeps the title as its name and the grip its own.
     grip = _pgrip(sid) if sid in _PANEL_LABELS else ""
-    return f'<section id="{sid}"><details class="fold" data-fold="{sid}"{" open" if is_open else ""}><summary>{h2}</summary>{body}</details>{grip}</section>'
+    return f'<section id="{sid}"><details class="fold" data-fold="{sid}"{" open" if is_open else ""}><summary>{h2}</summary>{body}</details>{grip}{aside}</section>'
 # The header's height: the sticky header (a phone's is not sticky) is as tall as `--hdr` says, which the rows' and sections' scroll margin and a notice that sticks under it read. One copy for home (which swaps its blocks: the
 # swap event) and for every other page (panel_tail).
 _HDR_JS = ("(function(){var h=document.querySelector('header.top');if(!h)return;function hdr(){document.documentElement.style.setProperty('--hdr',(getComputedStyle(h).position==='sticky'?h.offsetHeight:0)+'px')}"
@@ -1023,7 +1025,7 @@ def _rendered_line(stamp_html: str, tip: str | None = None) -> str:
     # the age span after its words, since the span carries the stale colour, the title text and the tick.
     pre, post = parts[0], "".join(parts[1:])
     rw = lambda x: f'<span class="rw">{esc(x)}</span>' if x else ""
-    return f'<p class="rline">{rw(pre)}<span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span>{rw(post)}</p>'
+    return f'<p class="rline">{rw(pre)}<span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}" data-xt-also>{stamp_html}</span>{rw(post)}</p>'
 # The age on a page that is not home (home's tick does the same for the whole page): the stamp's text redrawn every 30 s from its data-ts and the old class set past data-stale. A page without the line does nothing.
 _STAMP_JS = ("<script>(function(){var g=document.getElementById('rendered'),s=g&&g.querySelector('[data-ts]');if(!s)return;"
              + _AGE_FN +
@@ -1544,10 +1546,9 @@ function ago(s){return fa(s)}
 function tick(){var n=Date.now()/1000;M.querySelectorAll('.lago[data-ts]').forEach(function(e){e.textContent=ago(n-(+e.getAttribute('data-ts')))})}
 tick();setInterval(tick,30000);
 function live(sec){return [].filter.call(sec.querySelectorAll('li.lrow'),function(x){return!x.classList.contains('lcleared')})}
-function counts(){var n=live(M).length,p=M.querySelector('p.lnote');
-if(p&&p.hasAttribute('data-n')&&p.firstChild&&p.firstChild.nodeType===3)p.firstChild.nodeValue=SST(n===1?'js.closed.note_one':'js.closed.note_many',{n:n});
+function counts(){var n=live(M).length;
 [].forEach.call(M.querySelectorAll('#new details.hscope'),function(g){var c=g.querySelector('summary h3 .count');if(c)c.textContent=String(live(g).length)});
-var h=M.querySelector('#new>h2 .count');if(h)h.textContent=String(n);var a=M.querySelector('form.lmark');if(a)a.hidden=!n}
+var h=M.querySelector('#new h2.lsec .count');if(h)h.textContent=String(n);var a=M.querySelector('form.lmark');if(a)a.hidden=!n}
 function mk(cls,look,action,key,label,aria){var f=document.createElement('form');f.className=cls;f.method='post';f.action=action;
 var i=document.createElement('input');i.type='hidden';i.name='keys';i.value=key;var b=document.createElement('button');b.type='submit';b.className=look;b.textContent=label;b.setAttribute('aria-label',SST('js.closed.aria',{label:label,id:aria}));
 f.appendChild(i);f.appendChild(b);return f}
@@ -1607,8 +1608,9 @@ o.querySelectorAll('details.fold').forEach(function(d){f[d.getAttribute('data-fo
 x.querySelectorAll('details.fold').forEach(function(d){var k=d.getAttribute('data-fold');if(k in f){if(d.open!==f[k])d.open=f[k]}else if(window.stackshotFold)window.stackshotFold(d);d._fs=d.open});
 var oa=o.querySelector('#audit'),na=x.querySelector('#audit');if(oa&&na)na.parentNode.replaceChild(oa,na);
 if(a&&a!==document.body&&o.contains(a)&&!(oa&&oa.contains(a)))k=key(a);
-o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{a.focus({preventScroll:true})}catch(e){}
-if(k){var b=[].slice.call(x.querySelectorAll(a.tagName)).filter(function(e){return key(e)===k})[0];if(b)try{b.focus({preventScroll:true})}catch(e){}}}
+var F=window.stackshotBack||function(e){e.focus({preventScroll:true})};      // a "?" gets the focus back without opening (ui/explain.py)
+o.parentNode.replaceChild(x,o);if(oa&&a&&oa.contains(a)&&document.activeElement!==a)try{F(a)}catch(e){}
+if(k){var b=[].slice.call(x.querySelectorAll(a.tagName)).filter(function(e){return key(e)===k})[0];if(b)try{F(b)}catch(e){}}}
 function apply(t){var D=new DOMParser().parseFromString(t,'text/html'),m=D.querySelector('meta[name="stackshot-rendered"]'),S=m?+m.content:0,
 sh=D.querySelector('meta[name="stackshot-shell"]');if(!S)throw 0;if(S<=R)return 'old';
 if(busy())return 'busy';
@@ -1667,10 +1669,12 @@ var L=d.last,C=d.card,f=document.createDocumentFragment();run=!!d.running;
 if(run)f.appendChild(sp('a-run',num(d.running_since)?SST('panel.audit.running_since',{at:clock(d.running_since)}):SST('panel.audit.running')));
 else if(L&&L.finished==null)f.appendChild(sp('a-run a-bad',SST('panel.audit.unfinished')));
 if(C&&C.groups&&C.groups.length){f.appendChild(sp('a-h',''));f.appendChild(sp('a-h',SST('panel.audit.h_audits')));f.appendChild(sp('a-h',SST('panel.audit.h_found')));
-C.groups.forEach(function(g){f.appendChild(sp('lbl',GK[g.name]?SST('panel.audit.group.'+GK[g.name]):g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found)))});
-if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
+var why=C.note&&NK[C.note]==='unlogged'?SST('panel.audit.dash_help'):'';      // what a dash means is its explanation; any other note is a state and stays on the card
+C.groups.forEach(function(g){var none=g.found===null;f.appendChild(sp('lbl',GK[g.name]?SST('panel.audit.group.'+GK[g.name]):g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':'')+(none&&why?' a-none':''),none?'–':String(g.found),none?why:''))});
+if(C.note&&NK[C.note]!=='unlogged')f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
 else{btn();E.hidden=false;if(P)P.hidden=false;return}
-if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}
+if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}
+document.dispatchEvent(new Event('stackshot:redrawn'))}
 btn();E.hidden=false;if(P)P.hidden=false}
 function refresh(){fetch('@ROOT@/audit/status',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}})
 .then(function(r){if(r.status===404&&!r.redirected){E.hidden=true;return null}if(!r.ok||r.redirected)throw 0;return r.json()})
@@ -1733,14 +1737,15 @@ main.audits-page .apmsg{font-size:13px;color:var(--fg);overflow-wrap:anywhere}ma
 main.audits-page .asub{margin:4px 0 16px;color:var(--mut)}
 main.audits-page .apaces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 22px}
 @media(max-width:520px){main.audits-page .apaces{grid-template-columns:minmax(0,1fr)}}
-main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .apace b{display:block;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
+main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .aph{display:flex;align-items:center;column-gap:4px}main.audits-page .apace b{display:block;min-width:0;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
 main.audits-page h2{margin:22px 0 8px;font-size:17px}main.audits-page h2 small{font-size:13px;font-weight:400;color:var(--mut)}
 main.audits-page .agroups,main.audits-page .afeed{display:flex;flex-direction:column;gap:8px}
+.agw{display:flex;align-items:flex-start;gap:2px}.agw>details.audg{flex:1;min-width:0}.agw>.xp{flex:none;margin:0}
 details.audg{border:1px solid var(--line);border-radius:10px;background:var(--card)}
 details.audg>summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:baseline;padding:8px 12px;cursor:pointer;list-style:none}
 details.audg>summary::-webkit-details-marker{display:none}details.audg>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:10px}
 @media(max-width:420px){details.audg>summary{grid-template-columns:minmax(0,1fr) auto}details.audg>summary .agn{grid-column:1/-1}}
-details.audg .agn b{display:block;font-weight:600}details.audg .agn b::before{content:'▸';display:inline-block;margin-right:6px;color:var(--mut)}details.audg[open] .agn b::before{transform:rotate(90deg)}#audit-now-page[hidden]{display:none}details.audg .agn span{display:block;font-size:13px;color:var(--mut)}
+details.audg .agn b{display:block;font-weight:600}details.audg .agn b::before{content:'▸';display:inline-block;margin-right:6px;color:var(--mut)}details.audg[open] .agn b::before{transform:rotate(90deg)}#audit-now-page[hidden]{display:none}
 main.audits-page .anum{font-size:13px;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}main.audits-page .anum.hit{color:var(--orange);font-weight:600}
 details.audg ul.aaud{margin:0;padding:0 12px 10px;list-style:none;border-top:1px solid var(--line)}
 details.audg ul.aaud li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}details.audg ul.aaud li:last-child{border-bottom:0}
@@ -1751,7 +1756,7 @@ main.audits-page .atw{overflow-x:auto;border:1px solid var(--line);border-radius
 main.audits-page .atw table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}main.audits-page .atw th,main.audits-page .atw td{padding:6px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
 main.audits-page .atw th{font-weight:400;color:var(--mut)}main.audits-page .atw tr:last-child td{border-bottom:0}main.audits-page .atw td.warn{color:var(--warn);font-weight:600}
 @media(max-width:520px){main.audits-page .atw th,main.audits-page .atw td{padding:6px 8px}}
-main.audits-page .anote{max-width:70ch;margin:16px 0 0;font-size:13px;color:var(--mut)}
+main.audits-page .anote{max-width:70ch;margin:16px 0 0;font-size:13px;color:var(--mut)}main.audits-page>.anote:last-child{padding-right:56px}
 """   # the Audits page (GET /audits): the paces, the audit groups (a native details each), the latest findings and the runs, on the theme's tokens, so light and dark need no rule of their own
 
 _RUN_CSS = """
@@ -1774,7 +1779,7 @@ tr.scope{scroll-margin-top:calc(var(--hdr,0px) + 12px)}
 #audit .mh a.nm{color:var(--fg)}#audit .mh a.nm:hover{color:var(--acc)}
 #panel .audit .a-h{font-size:11px;line-height:1.4;color:var(--mut);text-align:right}
 #audit .a-n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}#audit .a-n.hit{color:var(--orange);font-weight:600}
-#panel .audit .a-cn{grid-column:1/-1;margin-top:4px;font-size:11px;line-height:1.4;color:var(--mut);white-space:normal}
+#panel .audit .a-cn{grid-column:1/-1;margin-top:4px;font-size:11px;line-height:1.4;color:var(--mut);white-space:normal}#audit .a-none{text-decoration:underline dotted;text-underline-offset:3px;cursor:help}
 #panel .ghc{margin-top:8px;font-size:12px}#panel .ghc .val{color:var(--fg)}#panel .ghc .val .cap{color:var(--mut)}
 """   # the Runners panel's cards (one line each, the count busy/online and a ↗, since an earlier change): the Machines cards' look, one to a row in the side panel; the Audit section: the daily audit's card, its name row with the Audit now text link beside the name, and the GitHub calls card, the section hidden when the audit is off and there is no calls card; every panel section on the Anchor hub's card spacing (8px between cards, 6px 10px inside a card, 2px between lines) and the Machines and Runners cards on the same three columns (subgrid: the matrix owns them, so "latest" lines up from card to card)
 def _run_stale_s(): return 3 * max(float(_runners.conf("panel_refresh_s")), _every_m() * 60)   # a snapshot older than this carries a "last read at" note in the Runners panel: three times the larger of the panel refresh and the publish interval, so the note never flips between two publishes and the block holds still (younger ones say nothing)
@@ -2984,7 +2989,7 @@ class Board:
         e = esc; m = r["metadata"]; w = mod.wait; rows = []
         by_server = bool(end) and bool(_model.server_end(m))      # the end is the day the server stored when the call gave none
         if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day (no chases: a list is never chased)
-            rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(_t("wait.list.backstop", day=self.wait_day(w.backstop)))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
+            rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(self.wait_day(w.backstop)) + " " + _xp.explain("wait-backstop", _t("wait.list.help_backstop"), _t("wait.label.backstop"))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
             rows += [(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else []
             return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
         if w.kind == "anchor":
@@ -2992,7 +2997,7 @@ class Board:
         elif w.kind == "item":
             opn = set(after_open(r))
             what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if (g in opn or w.queued) else "wait.state_closed")}</span>' for g in w.after) or _t("wait.item_none")
-            if w.queued: what += f' <span class="dim">· {e(_t("wait.queued_note"))}</span>'
+            if w.queued: what += f' <span class="dim">· {e(_t("wait.queued"))}</span> ' + _xp.explain("wait-queued", _t("wait.queued_help"), _t("wait.queued"))
         elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">{_t("wait.relay_note", who=e(_model.owner_display()))}</span>'
         else:
             what = e(wtext) if wtext and wtext != _t("wait.a_date") else _t("wait.a_date")
@@ -3006,7 +3011,7 @@ class Board:
                 try: at = self.when(float(c.get("at") or 0))
                 except (TypeError, ValueError): at = ""
                 return f'<li><span class="dim">{e(at)}</span> · <b>{self.mentions(e(str(c.get("by") or "")), r["gid"])}</b>: {self.mentions(e(str(c.get("note") or "")), r["gid"])}</li>'
-            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if w.kind in _wat.CHASE_KINDS else ""
+            more = " " + _xp.explain("wait-chases", _t("wait.chase_help", n=_wat.CHASES_MAX, owner=_model.owner_display()), _t("wait.chases")) if w.kind in _wat.CHASE_KINDS else ""
             rows.append((_t("wait.chases"), f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>'))
         elif w.kind in _wat.CHASE_KINDS: rows.append((_t("wait.chases"), f'<span class="dim">{_t("wait.none_yet")}</span>'))
         return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
@@ -3101,7 +3106,8 @@ class Board:
                 f'<title>{esc(name)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">' + self.page_header() +
                 f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
-                + f'<p class="sub">{_t("routing.sub_pilot" if pilot else "routing.sub_plain", summary=esc(summary))}</p>'
+                + f'<p class="sub">{_t("routing.sub", summary=esc(summary))}' + ("" if pilot else f' · {_t("routing.no_rulings")}')      # a page the router never rules says so; why is behind the "?"
+                + f' {_xp.explain("routing", _t("routing.help_pilot" if pilot else "routing.help_plain"), _t("routing.sec_notices"))}</p>'
                 + self.sent_notes_html() + fold("items", _t("routing.sec_items"), n_items, items_body, more=(f' <span class="count dim">{_t("routing.verifying", n=n_ver)}</span>' if n_ver else "") + (f' <span class="count dim">{_t("routing.completed", n=n_done)}</span>' if n_done else ""))
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
@@ -3327,7 +3333,7 @@ code{font:13px "D2Coding",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;b
 
 
 .dim{color:var(--mut)}
-h2.hdr{margin:10px 0 12px}#machines,#anchorhub,#by-project{margin:0 0 4px}#machines h2.hdr,#anchorhub h2.hdr,#by-project h2.hdr{margin:32px 0 12px}td.sess{font-size:13px;white-space:nowrap}ul.pagents{list-style:none;margin:0;padding:0}ul.pagents li{padding:1px 0}table.pidx{table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0}.pwrap{max-width:100%}table.pidx col.c-proj{width:30%}@media(max-width:600px){table.pidx td,table.pidx th{padding-left:4px;padding-right:4px}table.pidx th{font-size:11px;overflow-wrap:anywhere}table.pidx col.c-proj{width:36%}table.pidx td.sess{white-space:normal}table.pidx td.sess a,table.pidx td.sess code{display:inline;max-width:none;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere}}td.sess{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}td.proj{white-space:normal;overflow-wrap:break-word}td.sess a,td.sess code{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;white-space:nowrap}tr.scope th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg);padding-top:14px;border-bottom:1px solid var(--mut)}.matrix{display:grid;gap:8px;margin:0 0 6px}#machines .matrix{grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}.mcol{display:grid;gap:8px;align-content:start;min-width:0}.mcol .pc.none{padding:6px 10px;border:1px solid transparent}.matrix.rcvs{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:600px){.matrix.rcvs{grid-template-columns:repeat(2,minmax(0,1fr))}}.matrix .mh{display:flex;flex-direction:column;padding:4px 6px 2px;min-width:0}.matrix .mh .name{font-size:12px;color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.matrix .mh .hi{font-style:normal;font-size:12px;font-weight:600;color:var(--mut)}.pc{display:grid;grid-template-columns:max-content max-content;column-gap:8px;row-gap:2px;align-items:baseline;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}.pc .lbl{font-size:12px;color:var(--mut)}.pc b.lbl{font-weight:600;color:var(--fg)}.pc .val{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}.pc.update{border-color:var(--call)}.pc.update .lbl:not(b){color:var(--call);font-weight:600}.pc.update .val:nth-of-type(n+3){color:var(--call)}.pc.offline{opacity:.6}.pc.none{visibility:hidden;border:0;background:none;padding:0;min-height:0}.pc.bad{border-color:var(--p1)}.tip{position:relative;cursor:default}.tip:hover::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 3px);z-index:40;white-space:nowrap;padding:2px 7px;border-radius:6px;background:var(--fg);color:var(--bg);font-size:11px;font-weight:400;font-style:normal;line-height:1.5;pointer-events:none}.pc .val.ok,.pc .lbl.ok{color:var(--ok);font-weight:600}.pc .val.bad,.pc .lbl.bad{color:var(--p1);font-weight:600}a.pc{text-decoration:none;color:inherit}a.pc:hover{border-color:var(--fg);text-decoration:none}a.pc:hover *{text-decoration:none}
+h2.hdr{margin:10px 0 12px}#machines,#anchorhub,#by-project{margin:0 0 4px}#machines h2.hdr,#anchorhub h2.hdr,#by-project h2.hdr{margin:32px 0 12px}td.sess{font-size:13px;white-space:nowrap}ul.pagents{list-style:none;margin:0;padding:0}ul.pagents li{padding:1px 0}table.pidx{table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0}.pwrap{max-width:100%}table.pidx col.c-proj{width:30%}@media(max-width:600px){table.pidx td,table.pidx th{padding-left:4px;padding-right:4px}table.pidx th{font-size:11px;overflow-wrap:anywhere}table.pidx col.c-proj{width:36%}table.pidx td.sess{white-space:normal}table.pidx td.sess a,table.pidx td.sess code{display:inline;max-width:none;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere}}td.sess{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}td.sess:has(ul.pagents){overflow:visible;white-space:normal}td.proj{white-space:normal;overflow-wrap:break-word}td.sess a,td.sess code{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom;white-space:nowrap}tr.scope th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg);padding-top:14px;border-bottom:1px solid var(--mut)}.matrix{display:grid;gap:8px;margin:0 0 6px}#machines .matrix{grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}.mcol{display:grid;gap:8px;align-content:start;min-width:0}.mcol .pc.none{padding:6px 10px;border:1px solid transparent}.matrix.rcvs{grid-template-columns:repeat(4,minmax(0,1fr))}@media(max-width:600px){.matrix.rcvs{grid-template-columns:repeat(2,minmax(0,1fr))}}.matrix .mh{display:flex;flex-direction:column;padding:4px 6px 2px;min-width:0}.matrix .mh .name{font-size:12px;color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.matrix .mh .hi{font-style:normal;font-size:12px;font-weight:600;color:var(--mut)}.pc{display:grid;grid-template-columns:max-content max-content;column-gap:8px;row-gap:2px;align-items:baseline;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}.pc .lbl{font-size:12px;color:var(--mut)}.pc b.lbl{font-weight:600;color:var(--fg)}.pc .val{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}.pc.update{border-color:var(--call)}.pc.update .lbl:not(b){color:var(--call);font-weight:600}.pc.update .val:nth-of-type(n+3){color:var(--call)}.pc.offline{opacity:.6}.pc.none{visibility:hidden;border:0;background:none;padding:0;min-height:0}.pc.bad{border-color:var(--p1)}.tip{position:relative;cursor:default}.tip:hover::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 3px);z-index:40;white-space:nowrap;padding:2px 7px;border-radius:6px;background:var(--fg);color:var(--bg);font-size:11px;font-weight:400;font-style:normal;line-height:1.5;pointer-events:none}.pc .val.ok,.pc .lbl.ok{color:var(--ok);font-weight:600}.pc .val.bad,.pc .lbl.bad{color:var(--p1);font-weight:600}a.pc{text-decoration:none;color:inherit}a.pc:hover{border-color:var(--fg);text-decoration:none}a.pc:hover *{text-decoration:none}
 header.top{position:sticky;top:0;z-index:9;background:var(--bg);margin:0 -16px 32px;padding:14px 16px 8px;border-bottom:2px solid var(--mut);box-shadow:0 6px 14px -8px rgba(0,0,0,.45)}header.top h1,header.top p.site{font-size:18px;margin:0 0 6px}h1 .logo,.site .logo{width:1.2em;height:1.2em;vertical-align:-.2em;margin-right:.4em;border-radius:.25em}header.top .hbar{display:flex;align-items:center;gap:12px;margin:0 0 6px;padding-right:calc(24px + 2 * var(--ico))}header.top .hbar>h1,header.top .hbar>p.site{margin:0;padding-right:0;min-width:0;flex:0 1 auto}header.top .rline{margin:0;flex:none;white-space:nowrap;color:var(--mut);font-size:12px}header.top .rline:has(#rendered.old){color:var(--warn)}section,article.task,li.iline,details.said,details.fold{scroll-margin-top:calc(var(--hdr,0px) + 12px)}@media(max-width:600px){header.top .rline .rw{display:none}header.top{position:relative;margin:0 0 32px;padding:16px 0 0;border:0;box-shadow:none}header.top .theme{top:16px;right:0}header.top .pbtn{top:16px;right:calc(8px + var(--ico))}section,article.task,li.iline,details.said,details.fold{scroll-margin-top:0}}
 #totop,.fab{position:fixed;right:calc(20px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));width:44px;height:44px;border-radius:50%;background:var(--card);border:1.5px solid var(--mut);color:var(--fg);display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 2px 12px rgba(0,0,0,.35);z-index:10;transition:background-color .12s,border-color .12s}#totop:hover,.fab:hover{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--card));text-decoration:none}.fab{bottom:calc(74px + env(safe-area-inset-bottom));padding:0;cursor:pointer;font:inherit}.fab:focus-visible,#totop:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 a.rt{color:var(--fg);font-size:13px;white-space:normal;overflow-wrap:anywhere}a.rt:hover{color:var(--acc)}.aflag{color:var(--call);font-size:11px;font-weight:600;white-space:nowrap;cursor:help}table.rlog{table-layout:auto;font-size:13px}table.rlog td{vertical-align:top}table.rlog td.t{white-space:nowrap;color:var(--mut)}table.rlog td.r,table.rlog td.f{white-space:nowrap}table.rlog td.why{min-width:24ch}table.rlog th{white-space:nowrap}.r-pending{color:var(--call);font-weight:600}.r-dropped,.r-merged{color:var(--mut)}.r-passed{color:var(--ok)}ul.alist{padding-left:18px;font-size:14px;overflow-wrap:anywhere}ul.alist em{font-style:normal;color:var(--mut)}.rwrap{overflow-x:auto;max-width:100%}details.archived{margin-top:12px}details.archived>summary{cursor:pointer;color:var(--mut);font-size:13px}
@@ -3357,7 +3363,7 @@ main.itempage .istate{margin:0;font-size:15px;line-height:1.5;min-width:0}.istat
 main.itempage details.fold[id]>summary~*{margin-left:18px}main.itempage details.fold[id]>summary h2{margin-bottom:6px}
 .wl{display:grid;gap:5px;font-size:13px;min-width:0}.wlh{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wmode{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;background:color-mix(in srgb,var(--mut) 16%,var(--card));color:var(--fg);white-space:nowrap}.wll{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;align-items:start}.wbox{width:14px;height:14px;border:1.5px solid var(--mut);border-radius:3px;margin-top:2px;box-sizing:border-box;display:grid;place-items:center;font-size:10px;line-height:1;color:transparent}.wbox.on{background:var(--ok);border-color:var(--ok);color:var(--on-acc)}.wlt{min-width:0;overflow-wrap:anywhere;color:var(--fg)}.wkind{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--mut);margin-right:6px;text-transform:uppercase;letter-spacing:.03em}.warr{color:var(--ok);font-size:12px;margin-left:4px}.wsub{display:block;font-size:12px;color:var(--mut)}
 .iwait{margin:0 0 14px}.iwait h2{margin:0 0 6px}dl.iwl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:14px;line-height:1.45}dl.iwl dt{color:var(--mut)}dl.iwl dd{margin:0;min-width:0}ul.ichases{list-style:none;margin:4px 0 0;padding:0;font-size:13px}ul.ichases li{margin:0 0 3px}
-main.itempage details.fold>summary h2{margin-top:18px}.imore{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}.imore>summary h3{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:6px 0}.imore dl.sgrp:first-of-type{border-top:0}
+main.itempage details.fold>summary h2{margin-top:18px}#queued-release{position:relative}#queued-release>.xp{position:absolute;top:0;right:0}@media(pointer:coarse){#queued-release>.xp{top:-6px}}.imore{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}.imore>summary h3{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:6px 0}.imore dl.sgrp:first-of-type{border-top:0}
 ul.inext{list-style:none;margin:0 0 4px;padding:0;font-size:14px;line-height:1.5}ul.inext>li{display:flex;align-items:flex-start;gap:9px;margin:0 0 7px;min-width:0}ul.inext .cb{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:17px;height:17px;margin-top:3px;border:1.5px solid var(--fg);border-radius:4px;font-size:13px;font-weight:700;line-height:1;color:var(--mut)}ul.inext .cl-b{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}ul.inext .cl-b ul{list-style:disc;margin:2px 0 0;padding-left:18px}ul.inext .cl-by{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext li.cl-done .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-done .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-decided .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-decided .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-dropped{color:var(--mut);opacity:.75}ul.inext li.cl-dropped a{color:inherit;text-decoration:underline}ul.inext li.cl-dropped code{color:inherit}ul.inext li.cl-dropped .cb{border-color:var(--mut);color:var(--mut)}ul.inext li.cl-dropped .cl-t{text-decoration:line-through}ul.inext li.cl-dropped .cl-by b{font-weight:600}ul.inext li.icode{list-style:none;margin:4px 0 4px -14px}ul.inext li.icode .md pre{margin:0}.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}ul.hist li.ev-step::before{border-color:var(--ok)}.istep .istepnext{margin:8px 0 0}.istep .istepnext ol.stepol{margin-top:0}li.hrow .istepnext{margin:6px 0 0}li.hrow .istepnext ol.stepol{margin-top:0}ul.inext .cl-tag{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext .cl-tag::before{content:"status: "}details.iearlier .sh-hide{display:none}details.iearlier[open] .sh-show{display:none}details.iearlier[open] .sh-hide{display:inline}ul.hist ul.estat{list-style:none;margin:2px 0 0;padding:0}ul.hist ul.estat li{margin:0 0 2px;line-height:1.4}ul.hist li.ev-work::before{border-color:var(--run)}
 .md{min-width:0;overflow-wrap:anywhere}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md p{margin:0 0 8px;line-height:1.5}.md ul,.md ol{margin:0 0 8px;padding-left:22px}.md ul ul,.md ul ol,.md ol ul,.md ol ol{margin:2px 0}.md ul{list-style:disc}.md ul ul{list-style:circle}.md li{margin:0 0 3px;line-height:1.5}.md li>p{margin:0 0 4px}.md li>:last-child{margin-bottom:0}.md blockquote{margin:0 0 8px;padding:2px 12px;border-left:3px solid var(--line);color:var(--mut)}.md blockquote>:last-child{margin-bottom:0}.md pre{margin:0 0 8px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:auto;max-width:100%;line-height:1.45}.md pre code{border:0;padding:0;background:none;color:var(--fg)}main.itempage .desc.md{padding-left:0;margin:0;font-size:14px}ul.hist .w{min-width:0;max-width:100%}ul.hist .body.md{display:block;white-space:normal;margin:2px 0 0;font-size:13px;line-height:1.45;opacity:.92}ul.hist .body.md p{line-height:1.45}
 #for-you h2{margin-top:20px}ul.fy-list{list-style:none;margin:0;padding:0;border:1px solid var(--ibd);border-radius:10px;background:var(--bg)}
@@ -3398,12 +3404,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         css = css.replace("__D2FACE__", _D2_FACE).replace("__DOCK__", str(_PANEL_DOCK_PX)).replace("__ISPIN__", f"{_ITEM_PIN_STRIP_PX - 0.02:g}")
         css = css.replace("__FONT__", str(_cfg.get("instance", "font_stack") or "system-ui,sans-serif"))
         ts = _ui.type_scale      # the page's own rules on the five-size scale; the panel's cards, the machine cards and the Runners page keep theirs
-        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS
+        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS + _xp.CSS
 
     def audit_line(self):
         """HTML: the audit card, the body of the side panel's Audit section. The name row is `Audits ↗`, a link to the Audits page (/audits), with the Audit now text link at its right; under it the shortlist
-        (audit_overview.card): one row per audit group with its number of audits and its findings in the last 24 hours, `–` for a group that keeps no findings log (never a zero) and a line under the list that
-        says what the dash means. Drawn at render time with the rows, classes and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
+        (audit_overview.card): one row per audit group with its number of audits and its findings in the last 24 hours, `–` for a group that keeps no findings log (never a zero), that dash carrying what it means
+        (a tap or the mouse on it shows it); with the findings log off, a line under the list says so. Drawn at render time with the rows, classes and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
         nothing. A run in progress is a line above the list (`Audit running since 03:00…`), a last run that did not finish a warn line. The status is the endpoint's own (audit.status, imported here:
         audit.py needs only config). Hidden only when the audit is not enabled; a status that cannot be read leaves the card hidden and empty for the script to fill."""
         z = _cfg.tz()
@@ -3432,9 +3438,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         else:
             txt = ""
         txt += cell("a-h", "") + cell("a-h", _t("panel.audit.h_audits")) + cell("a-h", _t("panel.audit.h_found"))
+        why = _t("panel.audit.dash_help") if c["note"] == _ov.NOTE_UNLOGGED else ""      # what a dash means is its explanation; any other note is a state and stays on the card
         for g in c["groups"]:
-            txt += cell("lbl", _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")) + cell("val a-n", str(g["audits"])) + cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
-        if c["note"]:
+            txt += cell("lbl", _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")) + cell("val a-n", str(g["audits"]))
+            txt += f'<span class="val a-n a-none" title="{esc(why)}">–</span>' if g["found"] is None and why else cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
+        if c["note"] and c["note"] != _ov.NOTE_UNLOGGED:
             txt += cell("a-cn", _audit_word(_AUDIT_NOTES, c["note"], "panel.audit.note."))
         return f'{head}>' + name.format(dis=" disabled" if run else "") + f'<span class="a-txt">{txt}</span>' + tail
 
@@ -3869,8 +3877,13 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         ends it and gives each line a second line: when and in what words it arrived, else what watches it. The words of every line are free text (an event, an anchor), so each is escaped here, once."""
         e = esc; gid = r["gid"]; w = mod.wait
         n = sum(1 for ln in mod.waits if ln.arrived)
-        head = (_t("wait.list.page_all", n=n) if mod.wait_mode == "all" else _t("wait.list.page_any")) if page else _t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))
-        out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span><span class="dim">{head}</span></span>']
+        if page:      # the item page: how many arrived (a wait for all of them); how the mode ends the wait is behind the "?"
+            every = mod.wait_mode == "all"
+            said = f'<span class="dim">{_t("wait.list.page_arrived", n=n)}</span>' if every else ""
+            said += _xp.explain("wait-list", _t("wait.list.help_all" if every else "wait.list.help_any"), _t("wait.waits_on"))
+        else:
+            said = f'<span class="dim">{_t("wait.list.row_head", n=n, day=e(self.day_words(w.backstop)))}</span>'
+        out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span>{said}</span>']
         for ln in mod.waits:
             k = ln.kind
             at = self.arrival_when(ln.arrived_at) if ln.arrived else ""      # "" when it has not arrived, or for a time no date can show
@@ -4052,10 +4065,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return _grp.sections(prefix, self.scope_groups(items, row), draw)
     def home_section(self, sid, title, pairs, which, empty):
         """One of the four lists as a top-level fold: Your move and Queued for release render open, On agent and Waiting closed, and each keeps the person's own choice per browser (_FOLD_JS). The heading is the list's name and its count; the rows are the one row,
-        in a foldable subsection per scope (scope_sections: the scope's name and row count in the summary, the Closed page's h3.iscope, open even in a list that starts closed); a list with no rows keeps its one empty line."""
-        if not pairs: return _top_fold(sid, f'<h2>{esc(title)} <span class="count">0</span></h2>', f'<p class="empty">{esc(empty)}</p>', is_open=(which in (_home.YOUR_MOVE, RELEASE_LIST)))
+        in a foldable subsection per scope (scope_sections: the scope's name and row count in the summary, the Closed page's h3.iscope, open even in a list that starts closed); a list with no rows keeps its one empty line.
+        Queued for release says what it holds behind a "?" beside its fold: its count card carries the same words in a title, which a tap on that link never shows."""
+        aside = _xp.explain("queued-release", _t("home.queued_tip"), title) if which == RELEASE_LIST else ""
+        if not pairs: return _top_fold(sid, f'<h2>{esc(title)} <span class="count">0</span></h2>', f'<p class="empty">{esc(empty)}</p>', is_open=(which in (_home.YOUR_MOVE, RELEASE_LIST)), aside=aside)
         body = self.scope_sections(f"home.{sid}", pairs, lambda p: self.home_row(p[0], p[1], which, named=True), row=lambda p: p[0])
-        return _top_fold(sid, f'<h2>{esc(title)} <span class="count">{len(pairs)}</span></h2>', body, is_open=(which in (_home.YOUR_MOVE, RELEASE_LIST)))
+        return _top_fold(sid, f'<h2>{esc(title)} <span class="count">{len(pairs)}</span></h2>', body, is_open=(which in (_home.YOUR_MOVE, RELEASE_LIST)), aside=aside)
     def home_counts(self, lists=None, off_home=False):
         """The count cards at the top of the page, in the header between the title and the rendered line (page_header draws the same cards on every other page):
         one card per count, the number over its label, each a link: Your move, On agent, Queued for release and Waiting to their lists, Closed to the Closed page (/closed, the Landed page renamed).
@@ -4111,9 +4126,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         pager = (f'<nav class="lpager" aria-label="{esc(_t("closed.pager"))}">{side(_t("closed.newer"), page - 1 if page > 1 else 0, "prev")}<span class="lpos">{_t("closed.page_of", page=page, pages=pages)}</span>'
                  f'{side(_t("closed.older"), page + 1 if page < pages else 0, "next")}</nav>') if pages > 1 else ""
         body = self.scope_sections("closed.completed", rows, lambda r: self.done_row(r, named=True)) if rows else f'<p class="empty">{_t("page.none")}</p>'
-        note = _t("closed.last14_showing", first=first + 1, last=first + len(rows), n=n) if rows and pages > 1 else _t("closed.last14_note")
-        return (f'<section id="completed" class="lcompleted"><h2 class="lsec" title="{esc(_t("closed.last14_tip"))}">{_t("closed.last14")} <span class="count">{n}</span></h2>'
-                f'<p class="lpgnote">{esc(note)}</p>{body}{pager}</section>')
+        showing = f'<p class="lpgnote">{esc(_t("closed.showing", first=first + 1, last=first + len(rows), n=n))}</p>' if rows and pages > 1 else ""
+        head = _xp.head(f'<h2 class="lsec">{_t("closed.last14")} <span class="count">{n}</span></h2>', _xp.explain("closed-last14", _t("closed.last14_note"), _t("closed.last14")))
+        return f'<section id="completed" class="lcompleted">{head}{showing}{body}{pager}</section>'
 
     # ---------------- Landed ----------------
     def landed_rows(self):
@@ -4159,7 +4174,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                            actions_html=clear, li_class="lrow", data=f'data-key="{e(key)}"', project_html=self.row_line(r), edge=_ui.NEW)
         # the same subsections as home's lists (scope_sections): one foldable subsection per scope in [project_scopes] order, the entries of a scope newest first (landed_rows is), each a row with no who line
         secs = self.scope_sections("closed.new", rows, lambda pr: line(*pr), row=lambda pr: pr[1])
-        note = _t("js.closed.note_one" if len(rows) == 1 else "js.closed.note_many", n=len(rows)) if rows else _t("closed.note_none")
+        none = "" if rows else f'<p class="lnote">{esc(_t("closed.new_none"))}</p>'
+        newhead = _xp.head(f'<h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2>', _xp.explain("closed-new", _t("closed.new_help"), _t("closed.new")))
         btn = ('<form class="lmark" method="post" action="' + under("/landed/clear") + '"><input type="hidden" name="keys" value="' + e(",".join(self.landed_keys())) + '">'
                '<button type="submit" class="b">' + _t("closed.clear_all") + '</button></form>') if rows and mark else ""
         font_css = str(_cfg.get("instance", "font_css") or "")
@@ -4167,7 +4183,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("state.closed")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew"><h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2><p class="lnote"{" data-n" if rows else ""}>{note}</p>{btn}{secs}</section>{self.completed_html(page)}</main>'
+                f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew">{newhead}{none}{btn}{secs}</section>{self.completed_html(page)}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_LANDED_JS}</script></body></html>')
 
     def projects_html(self) -> str:
@@ -4178,7 +4194,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("projects.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>{_t("projects.title")}</h1><p class="pjnote">{_t("projects.note")}</p><section id="by-project">{self.projects_table()}</section></main>'
+                f'{_xp.head("<h1>" + _t("projects.title") + "</h1>", _xp.explain("projects", _t("projects.note"), _t("projects.title")))}<section id="by-project">{self.projects_table()}</section></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     # TEMPORARY PROBE (the installed-app session link test) (remove, or promote into sess_html, in the follow-up PR): GET /probe/sala-link, a signed-in page of the same session link written six ways, so a tap on an Android phone
@@ -4268,14 +4284,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             btn = (f'<div class="atbtn"><button type="button" class="b" id="audit-now-page"{" disabled" if running else ""}>{_t("panel.audit.now")}</button>'
                    '<span class="apmsg" id="audit-page-msg" role="status" aria-live="polite"></span></div>')
         else:
-            sub, btn = _t("audit.off"), ""
+            sub, btn = _t("audit.off_note"), ""
+        off_tip = "" if ov["enabled"] else " " + _xp.explain("audit-off", _t("audit.off_help"), _t("audit.title"))
         done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
         last = done[0] if done else None
         times = _t("audit.times_join").join(ov["times"]) or _t("audit.scheduled")
-        paces = [(_t("audit.pace_min"), _t("audit.pace_min_what")),
-                 (_t("audit.pace_ten"), _t("audit.pace_ten_what_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else _t("audit.pace_ten_what")),
-                 (times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet"))]
-        paces_html = "".join(f'<div class="apace"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in paces)
+        def pace(title, said="", tip=""):      # one schedule card: its name, what its last run left or that there was none (the every-minute pass says neither), and what it looks at behind a "?"
+            return f'<div class="apace"><div class="aph"><b>{e(title)}</b>{tip}</div>' + (f'<span>{e(said)}</span>' if said else "") + '</div>'
+        paces_html = (pace(_t("audit.pace_min"), tip=_xp.explain("audit-pace-min", _t("audit.pace_min_help"), _t("audit.pace_min")))
+                      + pace(_t("audit.pace_ten"), _t("audit.pace_ten_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else _t("audit.no_run_yet"), _xp.explain("audit-pace-ten", _t("audit.pace_ten_help"), _t("audit.pace_ten")))
+                      + pace(times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet")))
         def group(g):
             if g["found"] is None:
                 num = f'<span class="anum">{_t("audit.not_logged" if not g["log"] else "audit.log_off")}</span>'
@@ -4284,15 +4302,17 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             word = lambda table, prefix, english: _audit_word(table, english, prefix)      # a pace or a mode in the request's language; an audit's own name stays as the module gives it
             items = "".join(f'<li>{e(a["name"])}<span{"" if a["mode"] == "on" else " class=" + chr(34) + "shadow" + chr(34)}>{e(word(_AUDIT_PACES, "audit.pace.", a["pace"]))}{"" if a["mode"] == "on" else " · " + e(word(_AUDIT_MODES, "audit.mode.", a["mode"]))}</span></li>' for a in g["audits"])
             desc = _t("audit.desc." + g["key"]) if "audit.desc." + g.get("key", "") in _i18n.EN else g["desc"]
-            return (f'<details class="audg"><summary><span class="agn"><b>{e(_audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group."))}</b><span>{e(desc)}</span></span><span class="anum">{_t("audit.n_audits", n=len(g["audits"]))}</span>{num}</summary>'
-                    f'<ul class="aaud">{items}</ul></details>')
+            name = _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")
+            about = _xp.explain("audit-group-" + str(g["key"]), desc, name)      # what the group looks at: beside the fold, never inside its <summary>
+            return (f'<div class="agw"><details class="audg"><summary><span class="agn"><b>{e(name)}</b></span><span class="anum">{_t("audit.n_audits", n=len(g["audits"]))}</span>{num}</summary>'
+                    f'<ul class="aaud">{items}</ul></details>{about}</div>')
         groups_html = "".join(group(g) for g in ov["groups"])
         def finding(r):
             n = _ov.item_path(r["id"])
             ref = f'<a href="{under("/items/" + n)}">{e(r["id"])}</a>' if n else e(r["id"])
             return (f'<div class="af">{ref} {e(r["detail"])}<div class="am">{e(stamp(r["at"]))} · {e(_t("audit.source." + r["source"]) if r["source"] in _ov.SOURCES else (r["source"] or _t("audit.source_default")))} · {e(r["agent"])}</div></div>')
         if not ov["log"]:
-            feed, fsub = f'<p class="aempty">{_t("audit.feed_log_off")}</p>', _t("audit.log_off")
+            feed, fsub = f'<p class="aempty">{_t("audit.feed_off")}</p>', _t("audit.log_off")
         elif ov["recent"]:
             feed, fsub = '<div class="afeed">' + "".join(finding(r) for r in ov["recent"]) + "</div>", _t("audit.found_24h", n=ov["found"])
         else:
@@ -4312,16 +4332,20 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             runs = (f'<div class="atw"><table><tr><th>{_t("audit.th_started")}</th><th>{_t("audit.th_took")}</th><th>{_t("audit.th_items")}</th><th>{_t("audit.th_findings")}</th><th>{_t("audit.th_calls")}</th></tr>' + "".join(run_row(r) for r in ov["runs"]) + "</table></div>")
         else:
             runs = f'<p class="aempty">{_t("audit.no_runs")}</p>'
-        note = _t("audit.note_logged" if ov["log"] else "audit.note_log_off")
+        about = _t("audit.groups_help") + (" " + _t("audit.note_logged") if ov["log"] else "")
+        note = "" if ov["log"] else f'<p class="anote">{e(_t("audit.note_off"))} {_xp.explain("audit-log-off", _t("audit.note_off_help"), _t("audit.findings"))}</p>'      # a setting that is off is said on the page
+        groups_head = _xp.head(f'<h2>{_t("audit.groups")}</h2>', _xp.explain("audit-groups", about, _t("audit.groups")))
+        starts = _t("audit.runs_help", times=times, button=_t("panel.audit.now")) if ov["enabled"] else _t("audit.runs_help_off", times=times)      # an audit that is off draws no button, so none is named
+        runs_head = _xp.head(f'<h2>{_t("audit.runs")}</h2>', _xp.explain("audit-runs", starts, _t("audit.runs")))
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
                 f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
-                f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
-                f'<h2>{_t("audit.groups")} <small>{_t("audit.groups_hint")}</small></h2><div class="agroups">{groups_html}</div>'
+                f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}{off_tip}</p><div class="apaces">{paces_html}</div>'
+                f'{groups_head}<div class="agroups">{groups_html}</div>'
                 f'<h2>{_t("audit.findings")} <small>{e(fsub)}</small></h2>{feed}'
-                f'<h2>{_t("audit.runs")} <small>{e(_t("audit.runs_hint", times=times, button=_t("panel.audit.now")))}</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
+                f'{runs_head}{runs}{note}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     def page_header(self, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
@@ -4587,7 +4611,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     def projects_table(self) -> str:
         """The Projects page's table: one row per project under its scope, two columns, Project and Agents. A project's agents are a plain
         list (project_agents): its -main agent, the other front agents, then its running background agents, muted and tagged
-        "background"; a project with no agent of its own says so. The items and the watch are on the project's own page.
+        "background", what each is for behind its own "?"; a project with no agent of its own says so. The items and the watch are on the project's own page.
         The archived projects (a page status in retired_statuses; a project is archived when its last agent is retired, project_archive.py) sit in a foldable
         Archived group after the active ones, drawn as home's subsections are (groups.fold_block: the heading, its count of projects, a native fold) and
         closed on load; inside it they are listed by scope as above. The table fits its box at every width (fixed layout, names wrap on a phone)."""
@@ -4596,9 +4620,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def ref(nm):   # a session's name, linked to its view while it has one
             code = esc(nm)
             return self.sess_html(nm, cls="sref", inner=code) if self.sess_href(nm) else code
-        def agent_li(nm, what, back):
+        def agent_li(k, nm, what, back):
             body = ref(nm) + (f' <span class="rtag" title="{esc(_t("projects.role_background"))}">{_t("projects.background")}</span>' if back else "")
-            return f'<li{" class=dimline" if back else ""}{f' title="{esc(what)}"' if what else ""}>{body}</li>'
+            if what: body += " " + _xp.explain("ag-" + hashlib.sha256(f"{k}\n{nm}".encode()).hexdigest()[:12], what, nm)      # what the agent is for, behind its own "?"
+            return f'<li{" class=dimline" if back else ""}>{body}</li>'
         rows = self.project_keys()      # a registered project is a top-level page of type project, with or without open items; notes and sub-pages roll up
         out = {False: [], True: []}     # the table rows of the active projects and of the archived ones
         n_arch = 0
@@ -4614,7 +4639,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 # the name opens the project's details page in a new tab; its items, its watch and its gbrain page are there
                 pl = f'<a href="{esc(under("/" + k))}" target="_blank" rel="noopener" title="{esc(t)}">{esc(t)}</a>'
                 declared, ags = self.project_agents(k)
-                cell = (f'<ul class="pagents">{"".join(agent_li(*x) for x in ags)}</ul>' if ags
+                cell = (f'<ul class="pagents">{"".join(agent_li(k, *x) for x in ags)}</ul>' if ags
                         else f'<span class="dim">{_t("projects.none_running" if declared else "projects.no_agent")}</span>')
                 out[fin_pass].append(f'<tr><td class="proj">{pl}</td><td class="sess">{cell}</td></tr>')
         table = lambda trs: '<div class="pwrap"><table class="pidx">' + _cols + "".join(trs) + '</tbody></table></div>'      # .pwrap: the table's box; the table fits it at every width (fixed layout, the agents column takes the rest), no sideways scroll
