@@ -542,13 +542,16 @@ def sc_double(pg, say):
     held[0].continue_(); soon(pg, "() => !!document.querySelector('#brief .bsent .bnext')")
     say("one answer is recorded", len(answers(a)) == 1, answers(a))
     say("…and then leaving is not asked about", not pg.evaluate(ARMED))
-    # the other way round: the row's own Send first (its page load held back here), then the panel
+    # the other way round: the row's own Send first (its request held here, so it stays under way), then the panel
     shut_panel(pg); tokened(pg, b)
-    pg.evaluate("() => document.addEventListener('submit', e => { if (e.target.matches('form.hanswer')) e.preventDefault() })")
-    pg.evaluate(ROW_SEND, row(b)); pg.wait_for_timeout(300); open_(pg, b); got = panelsend(pg)
+    rowheld = []
+    pg.route(f"**/items/a{b}/answer", lambda r: rowheld.append(r))
+    pg.evaluate(ROW_SEND, row(b)); soon(pg, "(s) => !!document.querySelector(s + ' form.hanswer[aria-busy]')", row(b))
+    open_(pg, b); got = panelsend(pg)
     say("a send under way from a row shuts the panel's Send", bool(got) and got[0] and "Sending" in got[1], got)
     pg.evaluate("() => document.querySelector('#brief form.ianswer').requestSubmit()"); pg.wait_for_timeout(500)
-    say("…and the panel sends nothing", count(b) == 0, count(b))
+    say("…and the panel sends nothing", count(b) == 1 and len(rowheld) == 1, (count(b), len(rowheld)))
+    rowheld[0].abort()
     # a row's own send, to its end: the page it comes back as ends that draft
     home(pg); tokened(pg, c)
     with pg.expect_navigation():
