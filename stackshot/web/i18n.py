@@ -215,7 +215,7 @@ def t(key: str, lang: str | None = None, **fields: Any) -> str:
             return base
 
 
-JS_PREFIXES = ("js.", "age.", "date.", "panel.hide", "panel.show", "panel.pin", "panel.order_", "panel.moved", "panel.move_for", "panel.audit.")      # the keys the page scripts use (SST in the page head): the table a page carries
+JS_PREFIXES = ("js.", "age.", "date.", "panel.hide", "panel.show", "panel.pin", "panel.order_", "panel.moved", "panel.move_for", "panel.audit.", "explain.")      # the keys the page scripts use (SST in the page head): the table a page carries
 
 
 def js_table(lang: str | None = None) -> dict[str, str]:

@@ -1267,7 +1267,7 @@ def asof_html(snap: dict[str, Any], now: float) -> str:
     import datetime as dt
     when = f'{dt.datetime.fromtimestamp(snap["ts"], _cfg.tz()).strftime("%H:%M:%S")} {_cfg.tz_abbr()}'
     age = max(0, int(now - snap["ts"]))
-    bits = [_i18n.t("runners.updated", when=when)] + ([_i18n.t("runners.ago", dur=dur(age))] if age >= 5 else []) + ([_i18n.t("runners.refreshing")] if snap.get("refreshing") else []) + [_i18n.t("runners.checks")]
+    bits = [_i18n.t("runners.updated", when=when)] + ([_i18n.t("runners.ago", dur=dur(age))] if age >= 5 else []) + ([_i18n.t("runners.refreshing")] if snap.get("refreshing") else [])
     out = f'<p class="sub rasof">{_html.escape(" · ".join(bits))}</p>'
     if snap.get("stale"):
         out += f'<p class="rstale" role="status">{_html.escape(_i18n.t("runners.stale", when=when))}</p>'

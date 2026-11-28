@@ -292,9 +292,13 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
         if _model.stood_his(item, after):
             _hs.ensure(meta, _holders._owner_want(meta), keeper, NAME, now, NAME)
         elif (_model.stood_his(before, after) or _hs.recorded(meta)) and not (author and author[1] == "board"):    # it stood on him before this write, or the server's step is still recorded open (the item stopped waiting on him by a wait earlier, and the step stayed): either way no ask or step of his stands now
-            _hs.drop_open(meta, keeper, _sr._session_label(writer) or writer or NAME, now, also=_holders._owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
+            route = _hs.route_line(meta, keeper)      # read first: a line that leaves next loses its writer
+            gone = _hs.drop_open(meta, keeper, _sr._session_label(writer) or writer or NAME, now, also=_holders._owner_want((before or {}).get("metadata") or {}) if _model.stood_his(before, after) else "")
+            if any(_model.derive(i_, None, after).state == _model.WAITING or _model.shown_waiting(i_, None, after) for i_ in (item, before) if i_):      # waiting now, or until this write ended the wait
+                _hs.route_wait_dropped(meta, route, gone)
         else:
             _hs.forget_closed(meta, keeper)
+        _hs.forget_route_closed(meta, keeper)
         return was != (meta.get("steps"), meta.get("next"), _hs.recorded(meta))
     except Exception as e:  # noqa: BLE001
         print(f"owner-steps: {item.get('gid') or item.get('id')}: not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

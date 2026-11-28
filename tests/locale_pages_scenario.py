@@ -497,8 +497,8 @@ def locale_audits_part():
         en = {p: get(p, NOOR) for p in PAGES}
         check("English: every page answers 200 and holds no marker", all(r.status_code == 200 for r in en.values()) and not [p for p, r in en.items() if "[x:" in r.text], {p: r.status_code for p, r in en.items()})
         ea = body(en["/audits"].text)
-        check("English: the Audits page's words are the old words (title, groups, latest findings, runs, the paces and the table's heads)", "Audits" in ea and "Groups open one to see its audits" in ea and "Latest findings" in ea
-              and "Every minute" in ea and "Every 10 minutes" in ea and "Started Took Items Findings Calls" in ea and ", and Audit now" in ea and "did not finish" in ea and "1 found" in ea and "Silence" in ea, ea[:900])
+        check("English: the Audits page's words are the old words (title, groups, latest findings, runs, the paces and the table's heads)", "Audits" in ea and "Open a group to see its audits." in ea and "Latest findings" in ea
+              and "Every minute" in ea and "Every 10 minutes" in ea and "Started Took Items Findings Calls" in ea and "and when you press Audit now." in ea and "did not finish" in ea and "1 found" in ea and "Silence" in ea, ea[:900])
         eproj, erout, eclosed = body(en["/projects"].text), body(en["/projects/alpha"].text), body(en["/closed"].text)
         check("English: the routing page's words (Sessions, Anchors, Notices, the table heads, a log-only note)", all(w in erout for w in ("Notices", "Sessions", "Anchors", "when (", "ruling", "reason")) and GIST in erout and "[x:" not in erout, erout[:600])
         check("English: Closed's words (Clear all, Last 14 days) and its script has the table's keys, never an English message of its own",
@@ -518,15 +518,15 @@ def locale_audits_part():
             left = words_left(h, DATA)
             check(f"{p}: every interface word is in the test locale (no English word left outside a marker)", not left, ctx(h, left))
         ka = ko["/audits"].text; kb = body(ka)
-        check("Audits: the title, the group and run headings, the paces and the table's heads carry markers", all(MARK(EN[k]) in kb for k in ("audit.title", "audit.groups", "audit.findings", "audit.pace_min", "audit.pace_ten",
+        check("Audits: the title, the group and run headings, the paces and the table's heads carry markers", all(MARK(EN[k]) in kb for k in ("audit.title", "audit.groups", "audit.findings", "audit.pace_min", "audit.pace_ten", "audit.pace_min_help", "audit.pace_ten_help",
               "audit.th_started", "audit.th_took", "audit.th_items", "audit.th_findings", "audit.th_calls")), kb[:700])
         check("Audits: each group's name and description are the test locale's, one for each of the eight groups", all(MARK(g["name"]) in kb and MARK(g["desc"]) in kb for g in ov.GROUPS), kb[:400])
         check("Audits: a pace and a mode word in the group's list are the test locale's, an audit's own name stays as written",
               all(MARK(EN["audit.pace." + r2._AUDIT_PACES[w]]) in kb for w in PACES if w in r2._AUDIT_PACES) and all(MARK(EN["audit.mode." + m]) in kb for m in ("shadow", "off") if m in ea.lower()), kb[-500:])
         check("Audits: a finding's source word and the run that did not finish are the test locale's; the log's own detail stays as written", MARK(EN["audit.source.filing"]) in kb and MARK(EN["audit.run_unfinished"]) in kb
               and "waits on a thing that closed" in kb and "went quiet" in kb, kb[-900:])
-        check("Audits: the Audit now button, the page's note and its sub line; the runs hint ends with the button's own label in the test locale", MARK(EN["panel.audit.now"]) in kb and MARK(EN["audit.note_logged"]) in kb
-              and ", and " + MARK(EN["panel.audit.now"]) + "]" in kb, kb[-300:])
+        check("Audits: the Audit now button, the page's note and its sub line; the runs text names the button by its own label in the test locale", MARK(EN["panel.audit.now"]) in kb and MARK(EN["audit.note_logged"]) in kb
+              and "and when you press " + MARK(EN["panel.audit.now"]) + ".]" in kb, kb[-300:])
         kr = ko["/projects/alpha"].text; krb = body(kr)
         check("Routing: its headings and table heads are the test locale's; the notice's gist and the log-only reason stay as written", all(MARK(EN[k]) in krb for k in ("routing.sec_sessions", "routing.sec_notices", "routing.th_source", "routing.th_what"))
               and GIST in krb and "nothing to deliver" in krb, krb[:900])
@@ -535,7 +535,7 @@ def locale_audits_part():
         kc = ko["/closed"].text; kcb = body(kc)
         check("Closed: the headings, the Clear all button and the note are the test locale's, the items' subjects stay", MARK(EN["closed.last14"]) in kcb and MARK(EN["closed.clear_all"]) in kcb and TITLE in kcb, kcb[:600])
         check("Closed: the script reads its words from the table: SST keys, no English message, and the relative words come from age.*",
-              all(f"SST('js.closed.{w}')" in kc for w in ("clear", "undo", "not_restored", "clearing")) and "SST('js.closed.aria'" in kc and "SST(n===1?'js.closed.note_one':'js.closed.note_many'" in kc
+              all(f"SST('js.closed.{w}')" in kc for w in ("clear", "undo", "not_restored", "clearing")) and "SST('js.closed.aria'" in kc and "js.closed.note" not in kc
               and "age.min" in kc and "'Undo'" not in kc and "'Clear'" not in kc and "'just now'" not in kc and "m ago" not in visible(kc).split("<script>")[-1], re.findall(r"SST\([^)]*\)", kc)[:12])
         check("Closed: the page's head hands the script the js.closed.* and age.* tables (SST reads them)", "js.closed.clear" in kc and "age.min" in kc, kc[:300])
 
@@ -569,10 +569,10 @@ def locale_audits_part():
         pt = _Titles(); pt.feed(fyq)
         check("For you: a seen_tip translation with quotes, brackets and an ampersand stays whole in the button's title attribute", [tt for tt in pt.titles if tt] and all(tt == TIP for tt in pt.titles if tt) and "<now>" not in fyq.split("title=", 1)[1].split(">", 1)[0], (pt.titles, fyq[-300:]))
 
-        # ---- 9. the runs hint names the button from the button's own key: a translation can put it anywhere in the sentence
-        (LOC / "ko.json").write_text(json.dumps(test_locale(**{"audit.runs_hint": "<<{button}>> then {times}", "panel.audit.now": "GO-NOW"})), encoding="utf-8"); i18n._WARNED.clear(); i18n._LOADED.clear()
+        # ---- 9. the runs text names the button from the button's own key: a translation can put it anywhere in the sentence
+        (LOC / "ko.json").write_text(json.dumps(test_locale(**{"audit.runs_help": "<<{button}>> then {times}", "panel.audit.now": "GO-NOW"})), encoding="utf-8"); i18n._WARNED.clear(); i18n._LOADED.clear()
         kh = body(get("/audits", MINA).text)
-        check("Audits: the runs hint is the translation's template, its {button} is the button's own label (one source for both)", "<<GO-NOW>> then" in kh and kh.count("GO-NOW") >= 2 and "and Audit now" not in kh, kh[-400:])
+        check("Audits: the runs text is the translation's template, its {button} is the button's own label (one source for both)", "<<GO-NOW>> then" in kh and kh.count("GO-NOW") >= 2 and "press Audit now" not in kh, kh[-400:])
 
 
 set_dir(None)

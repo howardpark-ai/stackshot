@@ -189,10 +189,51 @@ allow = [
     "`dropped`, `rank`)",
 ]
 
-# ---- the subject: the finished outcome, the one the Goal sentence says. "A task" read as leave to name an activity, which the audit's goal-unclear check flags.
+# ---- the subject: the work that closes the item, as a task; the finished outcome is the Goal sentence's. A title that stated the outcome ("X is live") left unclear whether it named a symptom or the end
+# state, and "A task" or "outcome wanted" read as leave to name an activity or a topic in the Goal's place.
 [[term]]
 retired = "outcome wanted"
-use = "the finished outcome (the subject and the `Goal:` bullet name the same one, never an activity, a question, a topic or a symptom)"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "name the same finished outcome"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "names the same outcome"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "reword the subject to the finished outcome"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "Shorten it to the finished outcome"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "if the outcome moved"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "not a finished outcome"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "naming the result wanted"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
+allow = []
+
+[[term]]
+retired = "question or an activity"
+use = "the subject names the work that closes the item, as a task (an English imperative; in Korean, ending in -hagi or a noun task), and the `Goal:` bullet the finished outcome that work reaches"
 allow = []
 
 [[scan]]

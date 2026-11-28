@@ -225,6 +225,89 @@ A release restarts the board. While work on the server must not have that in its
 
 While the hold stands no release deploys: one started by hand or by the queue still merges its PR, then waits before its deploy, says in its log and in one message who holds and why, and goes on by itself when the hold ends. A rollback waits too. `release.sh queue --list` shows the hold. It ends after the minutes given, 120 at most, or by `--end`. The command first waits for a deploy that is under way. `deploy.sh` run by hand does not look at the hold. Where `release.sh` runs on another machine than the server (`[release] deploy_ssh`), run the hold there.
 
+## The live switch scripts
+
+Four scripts help move a running single-user board behind the front door on its own machine: the board goes from port 8020 to 8021, the splitter takes 8020, the front door listens on 8030 and the sign-in service on 8031. These ports are fixed in the scripts.
+
+Run them on the board's machine with `python3` (3.11 or later) and `STACKSHOT_CONFIG` set to the instance's `stackshot.toml`. None of them asks a question, and none commits or pushes anything. A script that writes is a dry run until it is given `--apply`, and one such run goes at a time (a lock at `~/.config/stackshot/frontdoor-switch.lock`, dropped when its process ends). The config saves, the proxy in front of the machine, and every check in a browser or a client stay a person's work: the scripts print those as `MANUAL` or `OPERATOR` lines.
+
+| Script | What it does |
+| --- | --- |
+| `tools/frontdoor_preflight.py --backup-dir DIR` | what has to hold before the first step; read-only |
+| `tools/frontdoor_snapshot.py --expect MEMBERS,ALIASES,ADDRESSES --apply` | the snapshot, then the front door's secrets and members file |
+| `tools/frontdoor_cutover.py --snapshot DIR --apply` | the cut-over as one run, with the way back built in |
+| `tools/frontdoor_undo.py --apply` | the way back to the single-user board on 8020; `--saved` runs it on the saved copy whatever the config on disk says; `--drop-saved` removes the saved config of a switch that is kept |
+
+All four use the same exit codes:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | passed (a dry run included), nothing left to look at |
+| 1 | a check failed or the script refused; this run did not restart the board |
+| 2 | the call cannot run as asked |
+| 3 | every automated check passed; manual checks are pending |
+| 4 | the board is back on 8020 on a saved copy of the config; reverting or fixing the config is still to be done |
+| 5 | the way back did not complete: a person is needed now |
+
+`FRONTDOOR_PUBLIC_URL` is the board's public address (`https://...`); `--apply` of the cut-over and of the way back require it. A number of seconds in a `FRONTDOOR_SWITCH_*` variable above 300 is read as 300; one that is not above 0, or no number, is refused.
+
+### Before the cut-over
+
+1. `tools/frontdoor_preflight.py`: the config is a single-user one, the checkout is new enough, no release hold, queue or running release, ports 8021, 8025, 8030 and 8031 are free, the board's, the minute runner's and the portal sync's units are installed, no override of an earlier way back, the config notes can be read (`--baseline FILE` compares them), and the newest file in the backup folder (`--backup-dir` or `FRONTDOOR_BACKUP_DIR`) is of today. What only a person can see is a `MANUAL` line until `--confirm NAME` says it holds. It changes nothing of the board, its config or its units; reading the config notes runs `uv run` in the checkout, which may first sync that checkout's environment.
+2. Hold releases ([Holding releases](#holding-releases)).
+3. `tools/frontdoor_snapshot.py`: first the member list, before anything is written. `members.json` is the one that is there, else it is made from the members as the board reads them (`[[members]]`, else `[instance] owner` and `owner_aliases` and `[auth] allowed_emails`; sessions listed as a member's `agents` are not carried over). It has to hold `--expect`'s number of members, aliases and addresses, and the front door has to read every entry. A file that is there and stays also has to let each member the config gives reach the board `main`, found by name or sign-in address. Two data folders that would get the same name in the archive, or one inside the other's, are refused. Then a new folder under `FRONTDOOR_SNAPSHOT_ROOT` (default `~/.local/share/stackshot-runs/frontdoor-switch`) with an archive of `[paths] repo` and `state` (or each `--data PATH`), a copy of the config, the checkout's commit and the config notes. A data folder that is a link is followed; a link inside the data that leads outside the folders archived is refused (give where it leads with `--data` too). Every file that was there both before and after `tar` ran has to be in the archive, and only a snapshot whose every check passed gets the file `snapshot-complete`. Then `identity.key`, `verify.key`, `members.json` and `board-token` in `FRONTDOOR_SECRETS_DIR` (default `~/.config/stackshot/frontdoor`). Keys and members that are there already are kept, a `board-token` that is also another file (a link to `oauth.env`, to a key, or to a file the config names) is refused, and the printed removal command names only the files this run made. No value is printed. A signal that asks the run to end ends the program it runs and prints those removal lines; the snapshot it began is not marked complete.
+4. Add the front door's tables to the config, check them, and turn on the front door, the sign-in service and a splitter on a test port such as 8025 ([The splitter](#the-splitter)).
+
+### The cut-over
+
+Save and push one config change: `[server] port = 8021`, `[behind_frontdoor]` with the front door's `identity_secret_file` and `members_file` and `board_name = "main"`, the board's `url` in `[[frontdoor.backends]]` and `[frontdoor_signin] board_verify_url` on 8021, `accept_portal_token` set to the answer you want, and `[frontdoor_splitter] listen_port = 8020`. Then run `tools/frontdoor_cutover.py` within five minutes: it looks that far back in the board's journal for the line that a key waits for the next restart.
+
+It needs the config in a git checkout (it pulls with `--ff-only`) and these units installed: the board, the minute runner (`[runner] process = "unit"`), the portal sync (`[portal] account_id`), the front door, the sign-in service and the splitter. An instance without one of them is refused.
+
+Before the restart it stops at the first check that fails and restarts nothing: nothing answers on 8021 yet; the release hold has 15 minutes or more left and no release is queued or running; the snapshot holds a single-user config this code can load, its notes and its archive, is marked `snapshot-complete` and is from the last 24 hours; no drop-in of an earlier way back is in place; the pulled config holds the settings above and has no note the snapshot's list lacks; the front door holds the board's machine token; `./install.sh units`; the journal of the board's current run says `server.port` waits for the next restart; the board still answers on 8020. Then it stops the test splitter, clears a failed state of the board and the minute runner, and asks once more that the hold is on and no release runs. A signal during the pull is answered when the pull has ended. A run that stops here prints what the machine shows and what to do about it: how to undo what was saved and turned on, how to finish an earlier way back that is still in place, or that a switch already made needs no second cut-over; and it says so when it had asked for the test splitter to be stopped.
+
+A window of 300 seconds starts at the board's restart. The checks have its first 210 seconds; the last 90 are kept for the way back (`FRONTDOOR_SWITCH_WINDOW`, `FRONTDOOR_SWITCH_RESERVE`; never more than half of the window is kept). The board and the minute runner restart; 8021, 8030 and 8031 answer; the board refuses a call without the front door; the splitter is enabled and started; the portal sync restarts; `stackshot.frontdoor.check --installed` passes; 8020 and the public address answer and refuse a call without a sign-in. When all pass it exits 3 and prints the manual checks, the time they are due, the undo command (`UNDO`) and, for a switch that is kept, `tools/frontdoor_undo.py --apply --drop-saved` (`KEEP`). Run the undo at once if a check fails or they are not all done by then. When they pass, remove the saved copy with the `KEEP` command and end the hold.
+
+### The way back
+
+A failed check, an error, a signal (`INT`, `TERM`, `HUP`, `QUIT`, `USR1`, `USR2`) or the end of the checks' time after the restart brings the board back with no person needed. Because the pulled config still shows the switch at that moment, the board comes back on the saved copy of the single-user config, which the cut-over put at `~/.config/stackshot/frontdoor-rollback/stackshot.toml` before it restarted anything:
+
+1. the splitter is disabled and stopped;
+2. a drop-in, `zz-frontdoor-rollback.conf`, points `STACKSHOT_CONFIG` of the board, the minute runner and the portal sync at the saved copy;
+3. the board is restarted and answers on 8020; then the other two are restarted and the public address is checked.
+
+**What the 300 seconds bound.** From the first restart to the board answering on 8020 again, as far as this script's own waiting goes: each program it runs is ended at its limit, with everything it started in its process group, and in the way back each limit is a share of what is left of the window (the restart of the board gets all but one share, which is kept for its answer; while there is also a saved copy to fall back on, a try on the config on disk gets half). Inside that window the portal sync's restart is asked for and not waited for. The way back prints how long after the first restart the board answered. It does not bound what `systemd` does: a job whose `systemctl` call was ended goes on, and a board that takes longer than its share to stop or to start is reported as failed (exit 5). A call after the board's answer still gets a few seconds when the window is over, so the script itself can end a little later. The manual checks and a run of the undo by a person are not bounded by it.
+
+The way back ignores the signals above from its first change to its end, run by the cut-over or by a person. The drop-in holds across a reboot. Every end of this way, a failed one included, prints what is left as `OPERATOR` lines:
+
+1. revert the commits of the switch in the config's repository and push;
+2. pull on the board's machine;
+3. run `tools/frontdoor_undo.py --apply`, which goes back to the config on disk (below);
+4. end the release hold, when step 3 has passed.
+
+Until step 3 the board does not see changes to the config, other units and command-line calls read the pulled config, and releases should stay held (a deploy would look for the board on the pulled config's port). A hold ends by itself after two hours at most, so hold again if the revert takes longer.
+
+The undo also works on its own, and which way it goes is read from the config on disk.
+
+**With the config reverted** it goes in this order:
+
+1. it asks the checkout's code to load the config (`python -m stackshot.core.config check`). When the code cannot, it changes nothing, prints the command that shows why, and prints the same run with `--saved`;
+2. it disables the splitter, which runs on for the moment;
+3. it removes the drop-ins of an earlier way back (that file only; other drop-ins of those units stay) and runs `./install.sh units`. When either fails, nothing is restarted and the drop-ins are put back;
+4. it stops the splitter; if the splitter still runs, nothing is restarted and the drop-ins are put back;
+5. it restarts the board and waits for its answer on 8020. A board that does not come up is put on a saved copy of the old config, when there is a usable one (exit 4);
+6. it restarts the other two, checks the public address and removes the saved copy (`--end-hold` also ends the release hold).
+
+When this way ends incomplete (exit 5), it prints the run that puts the board on a saved copy (`--saved`, with `--snapshot DIR` where one is needed).
+
+**With the config still switched, or with `--saved`,** the board comes back on a saved copy: `--snapshot DIR` names the snapshot whose config to use. Without it the saved copy is taken, unless no unit reads it and it is more than a day old (it may be from an earlier switch). With no usable config, one the checkout's code cannot load included, it refuses, changes nothing and prints the steps for a person.
+
+The cut-over's own run of the way back has no one to ask: when the config on disk is a single-user one that the code cannot load, whose units cannot be set up or on which the board does not come up, it takes the saved copy.
+
+**No data is restored or removed** by either way: records written since the snapshot stay. The archive is there for a person; putting it back drops what was written after it was made.
+
+A cut-over that is killed with `SIGKILL`, or whose machine goes down, brings nothing back: run the undo then. Once the switch stays, run `tools/frontdoor_undo.py --apply --drop-saved` (refused while a unit reads the copy), and remove the snapshot when it is no longer wanted. A later way back while the config shows the switch then needs `--snapshot DIR`.
+
 ## The one tool set
 
 The tool list is one board's tool list, whichever boards the caller is on, with each tool's schema as the board gives it plus one optional property, `board`. A caller on several boards must pass `board` on each call; a caller on one need not. When the caller is a member of the brain, the brain's tools are listed beside them (a brain tool takes no `board`). The list shows only the caller's own backends and lists each live, so a backend that is down is named in a warning to the client and left out, and the list fails only when none answers. With no caller (the server's own start) the list is empty.
@@ -277,7 +360,7 @@ The other scenarios cover the pieces, in one process:
 
 `tests/frontdoor_board_scenario.py` covers the board's side: the settings and their notes, the check of one signed identity (every refusal, the window, a rotated secret), the members read from the front door's file (the format, a change on an open session, a file that is missing or wrong), the guard as a wrapper, the real board over HTTP and the front door's own transport against it, a board with no table, which is as it was, and a real board with sign-in on that offers the token check (the route's place among the app's routes, the header's name and the signed word as the service writes them, the portal's machine token, a token the board does not know, a bearer that `/mcp` refuses, a 401's `WWW-Authenticate` against `/mcp`'s own; Google's own check of a grant is called by no test). `tests/members_only_scenario.py` covers who is answered at all: members, the machine token, someone who is no member, a removed member, no token and auth off, over HTTP in both of the client's connect modes, on a board that signs people in itself, on a board behind a front door and through the front door. `tests/frontdoor_scenario.py` (stand-in boards and a stand-in brain on loopback ports) covers the schema diff against a single board, the routing and every refusal text above, concurrent calls of several sessions with no cross-talk, that the caller's bearer never reaches a backend, streaming, a backend that is down, a backend that accepts a connection and never answers (initialize, list, call and `/healthz` return within the bound), a health URL that answers a byte at a time (the list, `/healthz` and 40 lists at once return within the bound and the next member is not held), a member removed from the members file on an open session, the instructions text, the signed identity, the no-caller list and the config notes.
 
-`tests/frontdoor_units_scenario.py` covers the units: what `install.sh` renders with and without the tables, that none is enabled or started, the splitter's refusals to render and to start, and the splitter's Caddyfile (with a real Caddy where one is on the PATH). `tests/frontdoor_realcall_scenario.py` runs the real-call check against real processes, the deploy's use of it and the command that copies the machine token. `tests/release_hold_scenario.py` covers holding releases.
+`tests/frontdoor_units_scenario.py` covers the units: what `install.sh` renders with and without the tables, that none is enabled or started, the splitter's refusals to render and to start, and the splitter's Caddyfile (with a real Caddy where one is on the PATH). `tests/frontdoor_realcall_scenario.py` runs the real-call check against real processes, the deploy's use of it and the command that copies the machine token. `tests/release_hold_scenario.py` covers holding releases. `tests/frontdoor_switch_scenario.py` runs the live switch scripts against stand-ins for every program they call (the board's own check of a config also for real, in one case): each refusal, each failed check of the cut-over before and after the restart, signals, the lock of one run at a time, the window and what each program may take inside it, what the snapshot has to hold, the way back on a saved and on a reverted config, a reverted config that the code cannot load or that the board does not come up on, and printed commands in paths with a space.
 
 `tests/frontdoor_verify_scenario.py` covers the token check for the sign-in service: the `verify_secret_file` settings and notes, every refusal of the signed header, a rotated secret, a verify secret that is the identity secret, and the route over a stand-in sign-in provider (a good token, the portal's, no bearer, an unknown token, a token with no address, a check that raises, a board with no sign-in, that the route itself never asks about the token of a refused request, and that the bearer is read as the MCP library's middleware reads it).
 

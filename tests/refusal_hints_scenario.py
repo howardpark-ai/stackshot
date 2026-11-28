@@ -274,7 +274,7 @@ SYM = "- The run fails when the disk is full\n- It lives here\n- Done when done"
 res, made, got = created(SYM)
 shown = "- Goal: The run fails when the disk is full\n- It lives here\n- Done when done"
 check("b create refused: a first bullet that is no goal word: the refusal shows the description with that bullet as the goal", isinstance(res, ToolError) and "Send the description again with that bullet as the goal:\n" + shown + "\n" in str(res) and kinds(made) == [], str(res)[:500])
-check("b …it says what to do when that bullet names a symptom, and keeps the rule and the retry hint", "move the bullet to a later bullet that opens `Problem:`" in str(res) and "The subject and the first bullet name the same finished outcome" in str(res) and "Retry the call" in str(res), str(res)[:900])
+check("b …it says what to do when that bullet names a symptom, and keeps the rule and the retry hint", "move the bullet to a later bullet that opens `Problem:`" in str(res) and "The subject names the work that closes the item and the first bullet the finished outcome it reaches" in str(res) and "Retry the call" in str(res), str(res)[:900])
 check("b …the refusal names no machine and no fleet tool", not re.search(r"\b(box-[a-d]|sala|salamander)\b", str(res), re.I), str(res)[:300])
 n_before = len(list((T / "store").rglob("[0-9]*.json")))
 res2, made2, got2 = created(shown)

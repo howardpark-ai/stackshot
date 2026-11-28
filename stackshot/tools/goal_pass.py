@@ -1,4 +1,4 @@
-"""tools/goal_pass.py — the one-time goal pass: does each OPEN item's subject and first bullet name a finished outcome?
+"""tools/goal_pass.py — the one-time goal pass: does each OPEN item's subject name its task and its first bullet a finished outcome?
 
 The goal-unclear audit check (audit_run.py) judges only items that carry a `Goal:` first bullet and whose subject or Goal sentence is new. The items filed before the form have no such bullet; this
 report asks the same judge, with the same rubric, model and lane (`[audit] model`, `[audit] lane`), about EVERY open item once, so the owner can see how many titles describe a symptom.
@@ -97,7 +97,7 @@ def run(items: dict[str, dict[str, Any]], *, env: AR.Env | None = None, rubric: 
 
 
 def main(argv: list[str], *, env: AR.Env | None = None, items: dict[str, dict[str, Any]] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="goal_pass.py", description="report-only: does each open item's subject and first bullet name a finished outcome?")
+    ap = argparse.ArgumentParser(prog="goal_pass.py", description="report-only: does each open item's subject name its task and its first bullet a finished outcome?")
     ap.add_argument("--dry-run", action="store_true", help="list the items it would judge; no model call, no file")
     ap.add_argument("--max-calls", type=int, default=0, help="judge the first N open items only (0 = all)")
     ap.add_argument("--out", default="", help="write the report here instead of <paths.state>/audit/goal-pass-<stamp>.txt")

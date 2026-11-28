@@ -65,7 +65,7 @@ FIX = {
     "unneeded-escalation": "settle it in the project and take needs: decision off",
     "older-than-page": "bring the item up to what the project page says",
     "obsolete-wait": "drop the item with the evidence, or write what still holds the wait",
-    "goal-unclear": "reword the subject to the finished outcome and the first bullet to `Goal: <that outcome>`; move the symptom, cause or trigger to a later bullet that opens `Problem:`",
+    "goal-unclear": "reword the subject to the task that closes the item and the first bullet to `Goal: <the outcome>`; move the symptom, cause or trigger to a later bullet that opens `Problem:`",
     "why-not-now": "do the step now, or write what concretely keeps it from running before then (an event, someone's run, a scheduled job)",
     "proof-wait": "close the item with that evidence; if part of it really cannot be staged (another party, a vendor, a date), write that as the wait's basis",
     "step-handover": "split the delivery into a step of its own or give it step_proof, or hand the item to the session the next step names (mover=)",
