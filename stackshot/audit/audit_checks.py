@@ -7,7 +7,7 @@ the filing pass (every ten minutes, in the server) share one copy of the rules.
                                               stale; an item with no date of its own is given the hourly audit line and the idle hand-over, audit/hourly.py, audit/hand_idle.py); → (findings, idle-pass entries, open items read); `env` supplies role_map().
                                               `ten_minute=True` adds the filing and dates passes' checks back, which is how the scenarios compare the passes with what the daily run used to find
   check_stale / check_ask_missing / check_stuck_elsewhere / idle_pass    the per-item rules behind it
-  filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, mover-no-session (the mover is no session), reads-as-wait, step-handover, ask-options (check_ask_options), and why-not-now for a wake that is the
+  filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, mover-no-session (the mover is no session), reads-as-wait, step-handover, step-howto (check_step_howto), ask-options (check_ask_options), and why-not-now for a wake that is the
                                               whole of a wait (date_only_wait: the shape the write parks, found in code every ten minutes, no model call, no cap); → (findings, flags)
   check_mover_no_session(mover, names)        an open item whose mover is a session name that no live or known session carries (its notices wait in a queue nobody reads); `session_names()` reads the names once per pass
   check_ask_options(meta)                     an ask that shows Yes / No under an open question or whose Recommend is no yes or no while it lists no options, or whose Recommend does not match its Decide or its options (reads with ask_read.py, the write gates' own matchers)
@@ -38,6 +38,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.projects import keeper_reads as _reads  # noqa: E402  (the count of reads that answer from an old keeper form)
 from stackshot.waits import event_waits as _ew  # noqa: E402
 from stackshot.waits import handover as _hv  # noqa: E402
+from stackshot.model import draft as _draft  # noqa: E402
 from stackshot.model import model as _model  # noqa: E402
 from stackshot.model import model_guards as _mg  # noqa: E402
 from stackshot.fleet import fleet as _fleet  # noqa: E402
@@ -45,6 +46,7 @@ from stackshot.fleet import sessions_registry as _sr  # noqa: E402
 from stackshot.model import states as _states  # noqa: E402
 from stackshot.waits import watchers as _watch  # noqa: E402
 from stackshot.web import render as _render  # noqa: E402
+from stackshot.model import step_howto as _howto  # noqa: E402
 from stackshot.model import step_proof as _sp  # noqa: E402
 from stackshot.model import steps as _steps  # noqa: E402
 from stackshot.waits import wait_end as _we  # noqa: E402
@@ -76,6 +78,7 @@ FIX = {
     "event-missing": "add an event type for it to event_waits.py, or tell the mover to wait on a time or a relay",
     "ask-options": f"rewrite the ask with options ({_render.OPTIONS_MIN} to {_render.OPTIONS_MAX} answers {_cfg.owner()} could pick, one recommended and named in the Recommend part), or reword the Decide part as a yes/no whose Recommend answers yes or no",
     "reads-as-wait": "set the wait itself (a park with its reason, an after item, an event wait), or write next as the action to take now",
+    "step-howto": "send any update of the item with step= its step as it stands: the server moves those bullets under the step (or send step= as a lead line with the how-to as `- ` lines under it)",
 }
 
 # Which findings need the person. A finding of the categories below is about how an item is written, filed or waited on (its ask, its next, its state, its wait): no decision and no step of his is in it, so on an item
@@ -83,11 +86,11 @@ FIX = {
 # (`audit_run.finding_route`). A category left out keeps the marked path to -main, and so does one named nowhere (a new check) until it is classified here.
 #   no need of him  ask-missing, ask-options (the ask's wording and options), next rules, board checks (arbitrary-hold, mislabeled-state), reads-as-wait, why-not-now, wait-end (how the wait is filed),
 #                   next-done, wrong-needs, unneeded-escalation, older-than-page, obsolete-wait, goal-unclear (the judgment checks: each says what the item's text should say),
-#                   step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item), wait-loop (items that wait on each other: a session ends the newest link)
+#                   step-howto (the writer moves how-to under the step), step-handover (a session hands the item on), proof-wait (a session stages the event and closes the item), wait-loop (items that wait on each other: a session ends the newest link)
 #   needs him       stale (an item he moves is past its own wake: only he writes a date, a decision or a done; the dates pass leaves an item he moves alone today, so it is kept for a pass that does)
 #   its own `to`    stuck-elsewhere (the session whose step it is), event-missing (the builder): not the person's findings, unchanged; mover-no-session (the project's front agent, which sets the mover; it needs nothing of him either)
 NO_PERSON_NEED = frozenset({"ask-missing", "ask-options", "next rules", "board checks", "reads-as-wait", "why-not-now", "wait-end", "next-done", "wrong-needs", "unneeded-escalation",
-                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop", "mover-no-session"})
+                            "older-than-page", "obsolete-wait", "goal-unclear", "step-handover", "proof-wait", "wait-loop", "mover-no-session", "step-howto"})
 
 
 def needs_person(category: Any) -> bool:
@@ -394,10 +397,21 @@ def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
 
 # ---------- the filing rules: is the item filed in the right state? ----------
 FILING_KINDS = ("arbitrary-hold", "mislabeled-state")      # the board report's kinds that are filing rules (all of them now)
-CHECKS_FILING = ("stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
+CHECKS_FILING = ("stuck-elsewhere", "mover-no-session", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing", "wait-loop", "step-howto")      # the categories the filing pass can raise (`wait-loop` is the minute walk's, audit/wait_loops.py, told through the same delivery)
 
 
 _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a Recommend part that opens by answering a yes/no
+
+
+def check_step_howto(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any] | None = None) -> str:
+    """Why an item that is the owner's turn (his your-step) still keeps how to do it only in the description, which the home row and the Your step block do not show; "" when it does not. It names exactly
+    the bullets a session's next write moves under the step (step_howto.pending), so a bullet the move would not take is never reported, and once they moved the finding is gone."""
+    if not (_draft.owner_steps(item) and _model.stood_his(item, after_open)):
+        return ""
+    got = _howto.pending(item)
+    if not got:
+        return ""
+    return f"it is {_cfg.owner()}'s step, but {len(got)} how-to bullet{'' if len(got) == 1 else 's'} ({_clip(got[0], 70)!r}) {'sits' if len(got) == 1 else 'sit'} only in the description, which the step does not show"
 
 
 def check_ask_options(meta: dict[str, Any]) -> str:
@@ -580,6 +594,9 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         ao = check_ask_options(meta)
         if ao:
             add(gid, meta, mover, "ask-options", ao)
+        sh = check_step_howto(it, after_open)
+        if sh:
+            add(gid, meta, mover, "step-howto", sh)
         hits, broad = wait_words(it, after_open, now)
         wgaps, handled = wait_end_gaps(gid, it, meta, mover, after_open, by_shown, items, now, wfacts)
         spoken = covered_lines(meta, [g for g in wgaps if g.kind != _we.EVENT]) | handled if (wgaps or handled) else set()

@@ -65,7 +65,8 @@ split for you at a sentence end or a space (the reply says so); prose, a bullet 
 opens `Goal:` (`goal:` or a bold label is put right) with the finished outcome that work reaches, in a sentence; a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
-commands for {{OWNER}} (those go in step, below), no working notes, status or history; prune what is no longer live;
+commands for {{OWNER}} (those go in step, below: how to do it, such as where to click or what to attach, as `- ` lines
+under his step; a bullet like that in the description is moved there), no working notes, status or history; prune what is no longer live;
 details go on the project page. A create, or an update that replaces the description, whose first bullet is no goal
 is refused; an update that leaves description out is never judged. A refusal lists the faults it can check together. Item text renders as
 markdown (nested `- ` lists, **bold**, `code`, > quotes; no raw HTML, headings or tables). next: {{NEXT_WORDS}}
@@ -275,7 +276,7 @@ outcome on a close.
 
 ## param DESCRIPTION
 The item's background as `- ` bullets, at most {{DESC_MAX_LINES}} lines, every line `- ` included at most
-{{DESC_LINE_MAX}} characters, live state only (never steps or commands): description="- Goal: the export finishes in
+{{DESC_LINE_MAX}} characters, live state only (never steps, how-to or commands): description="- Goal: the export finishes in
 under a minute\n- Problem: the nightly run takes 9 minutes". The first bullet opens `Goal:`, a
 symptom or cause goes in a later `Problem:` bullet, {{OWNER}}'s words go in a bullet such as `- {{OWNER}}: …`, and
 parallel bullets go under one parent bullet, indented two spaces.

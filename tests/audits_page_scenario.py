@@ -101,7 +101,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("the page: the title, an h1 'Audits' and the three paces", "<title>Audits ·" in h and h.count("<h1>Audits</h1>") == 1
           and all(x in w for x in ("Every minute", "Every 10 minutes", "05:00")), w[:400])
     check("the groups: eight folds in the catalog's order, each with its number of audits", re.findall(r'<details class="audg"><summary><span class="agn"><b>([^<]+)</b>', h) == NAMES
-          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "56 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
+          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "57 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
     nums = re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h)
     check("the groups' findings in 24 hours from the log: 1, 3, 2, 1, 1, 1, and 'not logged' (never a zero) for the two that keep no log", nums == ["1 found", "3 found", "2 found", "1 found", "1 found", "1 found", "not logged", "not logged"], nums)
     check("a group with findings is marked (hit), a group without a log is not", h.count('<span class="anum hit">') == 6 and "0 found" not in h)

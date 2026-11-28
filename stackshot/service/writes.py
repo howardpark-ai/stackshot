@@ -40,6 +40,7 @@ from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
 from stackshot.model import steps as _checklist
+from stackshot.model import step_howto as _howto
 from stackshot.router import routing as _routing
 from stackshot.service import foryou_events as _fyev
 from stackshot.service.store import _path
@@ -296,6 +297,7 @@ def save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", autho
     elif ctx.settle == SETTLE_NAMED:
         steps.owner_steps(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms (QUIET) leaves the checklist alone
     _settle_members(gid, item, before, written)      # once the checklist is final: whose each bare step is, on a board of several members
+    _howto.follow(item)      # how to do his step stays with that step: once it ends or is another, its lines go back to the end of the description (step_howto.py)
     quiet = ctx.settle == SETTLE_QUIET
     record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
     _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)

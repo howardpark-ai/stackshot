@@ -48,8 +48,8 @@ carries one line per stale next line (`(note: next line N still waits on board#X
 it)`): reword or drop those lines in the same turn. An item stores alive or waiting directly; there is no state to
 set, and these are not parameters of this tool or of create: a call that passes state, clear_state, party, chase, end,
 proof or chase_note is refused with what to pass instead. Whose move it is goes in mover; {{OWNER}}'s call is
-needs=["decision"] with an ask; his own step is step=<one line, no command, of the single thing only {{OWNER}} does;
-what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it when he says it is done; never ask him
+needs=["decision"] with an ask; his own step is step=<one line, no command, of the single thing only {{OWNER}} does,
+then how to do it as `- ` lines under it; what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it when he says it is done; never ask him
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
 output gives this one> says what it takes from it); a park is until=<date> with wait_kind="time" and either his recorded
 words for it (cap_ok) or a wait_basis (the end of a window the work needs, or a date past the cap); a wait on someone
@@ -182,7 +182,13 @@ work-in-hand state.
 
 ## text STEP_FORM lead trail
 step (update only; create sets no step): a ONE-LINE summary of what the person whose step it is does, for an item that
-is his step, at most {{STATE_LINE_MAX}} characters. It points at his Next lines and never holds a command: every shell
+is his step, at most {{STATE_LINE_MAX}} characters. How to do it (where to click, what to enter, what to attach, with its
+link) goes as `- ` lines under that line (a line indented under one belongs to it): the server keeps them beside the step,
+shows them under it on his home row and in Your step and in get under `step:`, never in next, and puts them back at the end of the
+description when the step ends. A how-to bullet of the description (a click path with two or more arrows, or attach or upload
+with a link) is moved under his step by your write (the reply says so: never a refusal), so the description keeps the background;
+a bullet with a command stays. A step sent again, reworded or split keeps the lines under it; step= with its own `- ` lines, or a
+description with new how-to bullets, replaces them, and the reply quotes what it replaced. It points at his Next lines and never holds a command: every shell
 command he runs goes in a next line that starts `{{OWNER}}:`, whole in backticks (or a ``` block), {{P_PLACE_STEP}}A
 step that carries a command (a backticked span with a space in it that reads as a shell command, a `! ` line, a ```
 block) is refused, and the refusal says to put the command in a next line that starts `{{OWNER}}:` (a step stored with
