@@ -159,7 +159,7 @@ def reads():
         out[tag + " md"] = B_.markdown()
         out[tag + " brief"] = B_.brief()
     return out
-WORDS = re.compile(r"rank(?!s after)|work order|queue of |Builder queues|\bqueued\b(?!\s+for release)", re.I)   # the "Queued for release" heading is the release queue, not the state
+WORDS = re.compile(r"rank(?!s after)|work order|queue of |Builder queues|\bqueued\b(?!\s+for release|-release\b)", re.I)   # the "Queued for release" heading and its section id queued-release are the release queue, not the state
 def seen(txt): return WORDS.findall(plain(txt))
 for name, txt in reads().items():
     check(f"read: {name} shows no rank, work order, builder queue or queued state for items that still store them", not seen(txt), [m.group(0) for m in re.finditer(r".{0,40}(?:rank|queued|work order).{0,40}", plain(txt), re.I)][:3])

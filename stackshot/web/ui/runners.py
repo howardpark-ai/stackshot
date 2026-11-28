@@ -15,6 +15,7 @@ from stackshot.core import config as _cfg
 from stackshot.web import i18n as _i18n
 from stackshot.web.runners import ORG_MARK, SWITCH_ACTIONS, _columns, _machines, dur as _dur, _now, asof_html, conf, enabled, pending_html, switch_boxes, switch_enabled, unused
 from stackshot.web.ui import under
+from stackshot.web.ui import explain as _xp
 
 # ----------------------------------------------------------------------------- the page
 def _e(s: Any) -> str:
@@ -219,12 +220,15 @@ def page_html(board: Any, snap: dict[str, Any], token: Any = None) -> str:
     from stackshot.web.ui import render as R
     font_css = str(_cfg.get("instance", "font_css") or "")
     title = _i18n.t("runners.title", site=board.title)
-    sub = "" if not_used_html(snap) else f'<p class="sub">{_i18n.t("runners.sub", org=_e(_org_phrase(snap)))}</p>'      # the not-used line is the body's
+    heading = f'<h1>{_e(_i18n.t("runners.heading"))}</h1>'
+    if not not_used_html(snap):      # a board with no runners has the one line of the body and nothing to explain
+        about = _i18n.t("runners.sub", org=_org_phrase(snap)) + " " + _i18n.t("runners.checks")
+        heading = _xp.head(heading, _xp.explain("runners", about, _i18n.t("runners.heading")))
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_e(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{_e(font_css)}">' if font_css else "")
             + R._THEME_HEAD + R._FOLD_HEAD + R._APP_HEAD + f'<style>{board._css()}{_CSS}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header()}'
-            f'<h1>{_e(_i18n.t("runners.heading"))}</h1>{sub}'
+            f'{heading}'
             f'<p id="rn-note" class="rstale-js" role="status"></p><p id="rn-result" role="status" aria-live="polite"></p>'
             f'<div id="rn-body" data-ts="{int(snap["ts"])}"{" data-stale=\"1\"" if snap.get("stale") else ""}{" data-refreshing=\"1\"" if snap.get("refreshing") or snap.get("pending") else ""}>{table_html(snap, token=token)}</div></main>' + board.panel_tail()
             + _JS % (json.dumps(str(_cfg.get("instance", "timezone") or "UTC")), json.dumps(_cfg.tz_abbr())) + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')
