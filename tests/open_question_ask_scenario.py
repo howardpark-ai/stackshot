@@ -100,7 +100,7 @@ OQ = ("Refused", "lists no options", "open question", "Yes / No", "Decide: wheth
 # ================================================================ 1. the open-question gate on a create
 for w in WORDS:
     e = refused_nc(f"1 create: a Decide part opening with “{w}” and no options is refused", lambda w=w: mk(ask=OPEN(PHRASES[w])), *OQ, PHRASES[w])
-check("1 create: the refusal names the Decide wording that triggered it, then the page's Yes / No, then the way out", e.startswith("Refused: this needs=decision item lists no options and its Decide part is an open question (“why the layout ships”)")
+check("1 create: the refusal names the Decide wording that triggered it, then the page's Yes / No, then the way out", e.startswith("Refused: this ask lists no options and its Decide part is an open question (“why the layout ships”)")
       and e.index("Yes / No") < e.index("options=[") < e.index("Decide: whether to"), e)
 check("1 create: …and the Recommend part names the label of the option", "name the recommended option's label in the ask's Recommend part" in e, e)
 for name, lead in (("a double quote", '"which layout to ship"'), ("curly quotes", "“which layout to ship”"), ("a bracket", "[which layout to ship]"), ("a parenthesis", "(which layout to ship)"),

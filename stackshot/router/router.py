@@ -87,6 +87,7 @@ from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
 from stackshot.core import members as _members
 from stackshot.core.lines import newline_lines
+from stackshot.model import note_read as _noteread
 from stackshot.router import routing as _routing
 from stackshot.anchors import anchors as _anc
 
@@ -217,13 +218,13 @@ def agent_gone(name: str, surface: set[str]) -> bool:
 
 def unreachable(name: str, surface: set[str]) -> bool:
     """Can the agent `name` read no line any more: gone (agent_gone: retired, or a surface agent), or shown to be no live session by retired_recipient.gone_why (every pane of it gone for [client] dead_after_minutes
-    on a machine that is online, or an old name of a renamed session)? A doubt is never "unreachable". Only the two reroute switches ask it."""
+    on a machine that is online, or an old name of a renamed session)? A doubt is never "unreachable". Only the reroute switch asks it."""
     from stackshot.fleet import retired_recipient as _rr      # at call time
     return agent_gone(name, surface) or bool(_rr.gone_why(name))
 
 
 def switch_background(project: str, reg: dict[str, dict[str, Any]], surface: set[str]) -> str:
-    """The background agent a reroute switch ([front] to_background_senders, idle_peers_to_background) may send to: the first of anchors.background_ranked that is not `unreachable`; "" when none is left."""
+    """The background agent a reroute switch ([front] to_background_senders) may send to: the first of anchors.background_ranked that is not `unreachable`; "" when none is left."""
     return next((n for _c, _o, n in _anc.background_ranked(project, reg) if not unreachable(n, surface)), "")
 
 
@@ -1009,7 +1010,7 @@ _LAUGH_LETTERS = frozenset(chr(c) for c in (0x314B, 0x314E))      # the two Hang
 _POSITIVE_EMOJI = frozenset(chr(c) for c in (0x1F602, 0x1F923, 0x1F606, 0x1F604, 0x1F44F, 0x2764, 0x1F44D, 0x1F389, 0x1F973))      # laughing, clapping, a heart, a thumbs up, a party: the reactions that say nothing more than "fine"
 _POSITIVE_SHORTCODES = frozenset(("thumbsup", "+1", "joy", "rofl", "laughing", "clap", "heart", "tada", "partying_face"))      # the same reactions as Slack writes them
 _SKIN_TONE = re.compile(r"skin-tone-[2-6]")
-_ASK_MARKS = ("?", chr(0xFF1F))                          # the question mark and its full-width form
+_ASK_MARKS = _noteread.ASK_MARKS                         # the question mark and its full-width form (one list with the reading of the owner's answers)
 SYSTEM_SENDERS = ("anchor-hub",)                         # the sender the listener gives its own notices (an anchor unreadable, removed): neither a person's message nor machine news; the call rules them as before
 
 

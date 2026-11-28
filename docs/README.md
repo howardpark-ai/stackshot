@@ -23,6 +23,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [The board pages](board-ui.md): How the board pages are drawn: search, the item page, the home lists, rows, cards, buttons, the side panel and the CI runners page.
 - [The color tool](color-tool.md): The Colors button that tries a whole dark color combination, and the saved color combinations.
 - [Asks and answers on the board](asks-and-answers.md): The board sign-in, how a wrong ask leaves the owner, how the owner answers from an item page, the answer box and the History after a decision.
+- [Canvases](canvas.md): Pages an agent shares with the board's owner: their addresses, the shell and the sandboxed page, the headers that keep a page apart from the board, the store, and the import that is off by default.
 - [The answer frame](answer-frame.md): One item's answer block shown in a frame on another site of yours: the config key, the address, the states, the messages between the frame and its parent page, and what protects it.
 - [The For you list and the Closed page](for-you-and-closed.md): The list of notices for the owner, Watch and Mute, the Slack post for an urgent row, the machine-token routes of the web form, and the Landed list that is now the Closed page.
 - [Drafts, steps and the Next checklist](next-and-steps.md): The draft of a text the owner will send, the one-line step, the Next checklist and its write checks, step proofs and the hand-over of a finished step.
@@ -50,6 +51,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [The fleet tool](fleet-tool.md): The points of contact between stackshot and an optional fleet tool: session links, lanes, recycles, spawns, reboots, CLI updates and naming.
 - [The agents' box over ssh](agents-box.md): Running the server on another box than the agents: the optional `[agents_box]` setting, what the server then runs and reads on the agents' box over ssh, and what happens when that box does not answer.
 - [A read-only standby copy](read-only-standby.md): How a warm second instance runs from a copy of the data and never writes, with one switch for takeover.
+- [Files on a memo-box note](memo-files.md): the files a person attaches to a note: the upload and download routes, the limits (10 MB a file, 5 MB an image, 4 a note, 100 MB in all), where they are kept, what a session is told and the daily timer that removes them 30 days after the item closes.
 - [The standby-copy command](standby-copy.md): `stackshot standby-copy`, one consistent copy of a running server's data for a standby: what it locks, what it copies and leaves out, the manifest, `--verify` on the receiving side, and `stackshot standby-push`, which sends the copy to a standby over ssh every 5 minutes.
 - [What a running session reloads](session-reload.md): Which files a release changes reach a running session on its next call, and which only at its start.
 

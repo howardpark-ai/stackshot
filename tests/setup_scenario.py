@@ -166,8 +166,8 @@ check("ui-session.key is not written by setup (the server makes it)", not (SEC /
 # the units this config would install
 r = subprocess.run([os.path.join(STACK, "install.sh"), "render", "--config", str(CFG)], capture_output=True, text=True, env=ENV)
 units = re.findall(r"^# Rendered by install\.sh from units/(\S+)\.in", r.stdout, re.M)
-check("install.sh render: the server units, the puller and the minute unit (the example config ships [runner] process = \"unit\", the default), no portal-sync, no anchor-hub",
-      r.returncode == 0 and units == ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path", "stackshot-puller.service", "stackshot-minute.service"], units or r.stderr[-400:])
+check("install.sh render: the server units, the puller, the memo files' clean-up pair and the minute unit (the example config ships [runner] process = \"unit\", the default), no portal-sync, no anchor-hub",
+      r.returncode == 0 and units == ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path", "stackshot-puller.service", "stackshot-memo-files-clean.service", "stackshot-memo-files-clean.timer", "stackshot-minute.service"], units or r.stderr[-400:])
 check("the rendered units carry this config", f"STACKSHOT_CONFIG={CFG}" in r.stdout)
 
 # ---- 2. a second setup without --force

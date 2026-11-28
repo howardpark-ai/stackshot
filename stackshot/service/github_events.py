@@ -60,6 +60,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
             return True
         rec = {"ts": float(c.get("ts") or time.time()), "kind": "comment", "text": str(c.get("text") or ""), "via": "github",
                "url": str(c.get("url") or ""), "comment_id": c.get("id")}      # no `by`: the one login the reader follows ([github] owner_login) is the first person's, and a record with none reads as the first person's
+        rec.update(_answer._question_fields(item, rec["text"]))      # a comment that is nothing but a question is marked, as one typed on the board is
         answers.append(rec)
         meta["answers"] = answers
         try:

@@ -120,6 +120,16 @@ check("resolve: nothing, an empty string, a cloud id, an unknown uuid → None",
 check("resolve: case of an id does not matter; padding does not", sr.resolve(S["main"].upper()) == S["main"] and sr.resolve("  home-sparrow-main ") == S["main"])
 check("explain: the reason it cannot tell", sr.explain("home-twin")[1].startswith("ambiguous: 2 sessions") and "no registry session" in sr.explain("nobody")[1], (sr.explain("home-twin"), sr.explain("nobody")))
 check("display_name: the current name, for an id, an alias, an old transcript", {sr.display_name(x) for x in (S["main"], "home-sparrow", Tr["main_a"])} == {"home-sparrow-main"} and sr.display_name("nobody") is None)
+SHID = "9f3e8f21-0000-4000-8000-000000000999"; SH = SHID.replace("-", "")[:8]      # a session whose id starts like the one `sala sessions` lists (the start of the permanent id, no dashes)
+put_registry([*ROWS, {**row("docs", "home-shorty"), "id": SHID, "transcripts": []}, {**row("docs", "home-shorty-two"), "id": "9f3e8f22-0000-4000-8000-000000000998", "transcripts": []}])
+check("resolve: the short id `sala sessions` lists (6 or more hex characters of the id, no dashes) → the session; one that fits two rows, or none, → None",
+      sr.resolve(SH) == SHID and sr.resolve(SH.upper()) == SHID and sr.resolve(SH[:7]) is None and sr.display_name("9f3e8f21") == "home-shorty" and sr.same("9f3e8f21", "home-shorty") is True
+      and sr.resolve("9f3e8") is None and sr.resolve("9f3e8f") is None and sr.resolve("0" * 8) is None and sr.resolve("9f3e8f2z") is None, (sr.resolve("9f3e8f21"), sr.resolve("9f3e8f")))
+check("named: a short id is the session's name; a name, an unknown id and the empty string stay as they are",
+      sr.named("9f3e8f21") == "home-shorty" and sr.named("home-shorty") == "home-shorty" and sr.named("deadbeef") == "deadbeef" and sr.named("") == "", (sr.named("9f3e8f21"), sr.named("deadbeef")))
+_g = gates.gate_model_args({"mover": "9f3e8f21", "then": "9F3E8F21", "goal": "G"}, {})[0]
+check("a write that names the mover by its short id stores the session's name (mover, then), not the id", _g.get("mover") == "home-shorty" and _g.get("then") == "home-shorty" and _g.get("goal") == "G", _g)
+put_registry()
 check("delivery: a sala id → the name now; anything else as it came", sr.delivery(S["main"]) == "home-sparrow-main" and sr.delivery("home-sparrow") == "home-sparrow" and sr.delivery(Tr["main_b"]) == Tr["main_b"])
 check("same: True/False when both resolve, None when either cannot be told", sr.same(Tr["main_a"], "home-sparrow") is True and sr.same("home-sparrow-docs", "home-sparrow-main") is False and sr.same("home-twin", "home-sparrow-main") is None)
 check("expand: a hold list in either form", sr.expand(["home-sparrow-main", "x"]) == {"home-sparrow-main", "x", S["main"]})

@@ -665,6 +665,10 @@ tell_owner = true                                   # another session's close of
 handback_hold_seconds = 180                          # the one line a front agent keeper hears when a builder hands an item back to it alone is held this long; a close of the item
                                                     # inside the window drops it, so the keeper hears only the close. 0 = sent at once. A held line survives a restart (<state>/handback-held.json). Live
 
+[canvas]                                            # canvases: pages an agent shares with the board's owner, kept in <paths.state>/canvas/ and read at /canvas/<number>; see docs/canvas.md
+import = false                                      # true: POST /client/canvas-import (a machine token) puts a page of another store into the board's, under its own number and version ids, and
+                                                    # replaces a page with newer content; false (the default): it answers 403 to everyone. The operator turns it on to move pages in and off after. Live
+
 [ui]                                                # the board's pages (stackshot/web/i18n.py; docs/board-ui.md)
 # locale_dir = "~/.config/stackshot/locales"        # a folder that holds a second language for the pages: `<code>.json` (e.g. ko.json), an object of string table key -> text, the keys of
                                                     # stackshot/web/i18n_catalog.py. Off by default: with no folder, or no file that loads, the pages are English and the side panel draws no language switch.
@@ -735,11 +739,8 @@ result_turn_hours = 24                              # how long after the agent's
 result_turn_cap_per_hour = 6                        # the most turns one session may start in one listed front agent in an hour; past it the message is held or handled as without the key, and a log line says so (a whole number from 0; 0 turns the case off; anything else reads as 6)
 to_background_senders = []                          # the front agents that send nothing to a front agent: their message to one (marked or not, fyi or not, by name or as "For <front agent>, ..." to a project page) goes to
                                                     # that project's live background agent, with its marks and quoted words, and the router passes their messages to it too; with no live background agent, or one that cannot take it, it is held for the
-                                                    # front agent's next turn, and when it cannot be held either it goes as with both switches off. One that carries a decision or step for the owner and names no open item of the owner's is refused (put it on an
+                                                    # front agent's next turn, and when it cannot be held either it goes as with the switch off. One that carries a decision or step for the owner and names no open item of the owner's is refused (put it on an
                                                     # item first). Their reply says, in one line, when a hand-off names no open board item. Empty (the default): nothing changes
-idle_peers_to_background = false                    # true: a front agent's unmarked message to a peer front agent the owner is not talking with goes to that project's live background agent instead of being held for the peer's next turn
-                                                    # (a presence that cannot be told counts as talking; done or no-action notes, answers to the peer's question, fyi and marked messages, verified quoted words, an item that waits on a decision or has tell_him, and a project
-                                                    # with no live background agent stay as they were). Only a TOML true turns it on
 
 # [frontdoor]                                       # the front door (python -m stackshot.frontdoor; docs/front-door.md): one MCP endpoint over several boards and a brain, behind a reverse proxy that sets
 #                                                   # the caller's identity header. A separate program: the board server does not read this table. Restart-only, except members_file, which is read at each request

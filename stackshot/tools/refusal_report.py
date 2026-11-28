@@ -475,7 +475,7 @@ NO_HINT: dict[str, str] = {
     "message: retired-recipient": "no hint fits: the relay sends such a message on to the project page itself, so the caller has nothing to change.",
     "message: no-keeper": "no hint fits: the page has no agent that can take a message, a gap in the instance's setup and not in the call.",
     "message: delivery-failed": "no hint fits: the call passed every rule and the push to the session failed; the logged refusal carries the push error.",
-    "message: reroute-to-retired": "no hint fits: the reroute catches it and holds the message or handles the call as with the reroute switches off, so the caller has nothing to change.",
+    "message: reroute-to-retired": "no hint fits: the reroute catches it and holds the message or handles the call as with the reroute switch off, so the caller has nothing to change.",
 }
 
 

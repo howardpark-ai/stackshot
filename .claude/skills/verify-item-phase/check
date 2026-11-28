@@ -1,0 +1,31 @@
+#!/bin/sh
+# Check that a closed item stores no phase and no waits_on, against the code in this checkout.
+#   .claude/skills/verify-item-phase/check            exit 0 holds, 1 TLC found a counterexample, 2 the check could not run
+# Needs java, uv and network on the first run (the TLC jar is fetched once, pinned by sha256, into ${XDG_CACHE_HOME:-~/.cache}/stackshot/tlc).
+# Run it where tests run (see SKILL.md), never in a working pane.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$here/../../.." && pwd)
+VER=v1.8.0
+SHA=df7cef5d37bcca879817424c001696e07fd094d68a72690449af3045fd972469
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/tlc
+jar=$cache/tla2tools-$VER.jar
+mkdir -p "$cache"
+if ! { [ -f "$jar" ] && [ "$(sha256sum "$jar" | cut -d' ' -f1)" = "$SHA" ]; }; then
+    tmpjar=$(mktemp "$cache/dl.XXXXXX")
+    trap 'rm -f "$tmpjar"' EXIT
+    curl -fsSL -o "$tmpjar" "https://github.com/tlaplus/tlaplus/releases/download/$VER/tla2tools.jar"
+    [ "$(sha256sum "$tmpjar" | cut -d' ' -f1)" = "$SHA" ] || { echo "check: tla2tools.jar does not match the pinned sha256" >&2; exit 2; }
+    mv "$tmpjar" "$jar"
+fi
+work=$(mktemp -d "${TMPDIR:-/tmp}/itemphase.XXXXXX")
+trap 'rm -rf "$work"; rm -f "${tmpjar:-}"' EXIT
+exec 9<"$work"; flock -s 9 || :
+cp "$here/spec/ItemPhase.tla" "$here/spec/ItemPhase.cfg" "$work/"
+UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv} \
+    uv run --locked --project "$root" --only-group tests python -I "$here/extract_stamp.py" "$work" || { echo "check: the extraction failed" >&2; exit 2; }
+cd "$work"
+rc=0
+java -XX:+UseParallelGC -cp "$jar" tlc2.TLC -workers 1 -nowarning -config ItemPhase.cfg ItemPhase.tla -metadir "$work/states" || rc=$?
+# TLC: 0 no error, 12 invariant violated, other = it did not run
+case $rc in 0) exit 0 ;; 12) exit 1 ;; *) exit 2 ;; esac

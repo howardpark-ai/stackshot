@@ -49,6 +49,7 @@ from stackshot.model import migration as _mig
 from stackshot.model import model_guards as _mg
 from stackshot.model.needs import _after_of, _canon_needs, _needs_kinds, _NEEDS_KINDS, _needs_list, _needs_sessions, _waits_decision
 from stackshot.model import nextlines as _nl
+from stackshot.model import note_read as _noteread
 from stackshot.model import said as _said
 from stackshot.model import states as _states
 from stackshot.model import step_commands as _sc
@@ -632,7 +633,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[
         setv["wait_kind"] = setv["wait_kind"].lower()
     for k in ("mover", "then", "post_wake_mover"):
         if k in setv:
-            setv[k] = _model.norm_who(setv[k])
+            setv[k] = _sr.named(_model.norm_who(setv[k]))      # a short session id (`sala sessions`) is stored as the session's name: a mover that is an id would not be told from its name
     probs = _model.check_fields(setv)
     if probs:
         faults.append("Refused: " + "; ".join(probs))
@@ -971,7 +972,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
 #   3  next opens with the owner while the state (stored or derived) is an agent's: a note in get and on the write's reply
 #   4  a third re-park in a row (a move of a parked or verifying item's wake or end with nothing else changed) is refused; a verifying item's end date is its wait (the watchers end the wait that day)
 #   5  next may be stale: another session changed needs, state, hold, wake or after and not next (metadata.next_stale), or next names a date that has passed
-#   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
+#   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused; a question of his is no answer once the description has answered it
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
 _REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "waits", "wait_mode")     # the structured fields a re-park may not change (status and hold beside them)
 
@@ -1040,28 +1041,51 @@ def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, s
     raise err
 
 
-def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], ask_was: Any, gid: str) -> None:
+def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], ask_was: Any, gid: str, description: str | None = None) -> None:
     """One ask per decision: refuse a write that puts `decision` back into needs within an hour of the owner's last answer on the item
-    (a board answer or a comment of his: metadata.answers), unless the ask line changes in the same write. A decision already in needs is not put back."""
+    (a board answer or a comment of his: metadata.answers), unless the ask line changes in the same write. A decision already in needs is not put back.
+    A record the server marked as a question (model/note_read.py) is no call of his. Answered on the item (the description as this write leaves it, `description`, is another one than he asked under), it
+    does not count. Not answered, and newer than anything he decided or commented, it refuses the put-back in words that say to answer it there. A question that stores no ask (a comment) was asked about the
+    one the item holds, else the latest ask an earlier record of his stores, answered question or not."""
     h = _hooks()
     was_on_call = any(str(x).lower() == "decision" for x in was_needs) or h.eff_state(item) == "your-call"      # already on his call before this write: nothing is put back
     back = not was_on_call and "decision" in _needs_kinds(meta)
     if not back:
         return
+    written = item.get("description") if description is None else description
     last, prev = 0.0, str(ask_was or "")
+    asked_at, asked_prev = 0.0, ""      # his newest question that the item has not answered
+    said: list[tuple[float, dict[str, Any]]] = []
     for a in h.answers_of(item):
         try:
-            if (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= last:
-                last, prev = float(a.get("ts") or 0), str(a.get("ask") or ask_was or "")      # a board decision keeps the ask it answered (its answer drops the ask from the item)
+            if a.get("text") or a.get("choice"):
+                said.append((float(a.get("ts") or 0), a))
         except (TypeError, ValueError):
             continue
+    stored = ""      # the latest ask a record of his stores, in the order he wrote them (a GitHub comment is read later than it was written)
+    for ts, a in sorted(said, key=lambda x: x[0]):
+        stored = str(a.get("ask") or "") or stored
+        ask = str(a.get("ask") or ask_was or "")      # a board decision keeps the ask it answered (its answer drops the ask from the item)
+        if not a.get("question"):
+            if ts >= last:
+                last, prev = ts, ask
+        elif ts >= asked_at and not _noteread.answered_on_item(a, written):
+            asked_at, asked_prev = ts, ask or stored      # a comment holds no ask, and the item may hold none any more: the one he was last asked still stands
+    unanswered = asked_at > last
+    if unanswered:
+        last, prev = asked_at, asked_prev or prev
     age = time.time() - last
     if last <= 0 or not 0 <= age < _DECISION_AGAIN_S:
         return
     new = str(meta.get("ask") or "")
     if new and " ".join(new.split()) != " ".join(prev.split()):
         return
-    raise ToolError(f"Refused: {OWNER} answered {_gh.shown(gid)} {max(int(age // 60), 0)} min ago ({h.when_words(dt.datetime.fromtimestamp(last, h.zone()))}), and this write puts it back on his call "
+    ago = f"{max(int(age // 60), 0)} min ago ({h.when_words(dt.datetime.fromtimestamp(last, h.zone()))})"
+    if unanswered:
+        raise ToolError(f"Refused: {OWNER} asked a question on {_gh.shown(gid)} {ago} that the item does not answer yet (its description is the one the question was asked under), and this write puts the decision "
+                        "back with the same ask line. Answer the question there first: rewrite the description with the answer, saying it answers the question (description=…), in this write or an earlier one. "
+                        "The same ask line is then accepted at once")
+    raise ToolError(f"Refused: {OWNER} answered {_gh.shown(gid)} {ago}, and this write puts it back on his call "
                     f"with the same ask line: one ask per decision, and he is not asked again within {int(_DECISION_AGAIN_S // 60)} minutes of his answer. Act on his answer (write the next step), or, "
                     "if a new question is open, pass the new ask line in this same write (ask=…): a question that has changed is a new ask")
 

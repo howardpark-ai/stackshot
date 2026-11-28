@@ -2182,7 +2182,7 @@ check("anchor wait: the update description says how the park is released", "rele
 it5 = rd(g4); check("confirmed: set on create (with both clocks)", rd(g1)["confirmed"] == rd(g1)["updated"] == rd(g1)["state_updated"], rd(g1))
 setf(g4, confirmed=1000.0, state_updated=1000.0)
 _update_svc._update(g4, priority="p3", sender="home-beta"); check("confirmed: a filing edit leaves it (and the state clock) alone", rd(g4)["confirmed"] == 1000.0 and rd(g4)["state_updated"] == 1000.0, rd(g4))
-_update_svc._update(g4, ask=ASK, sender="home-beta"); check("confirmed: an ask edit is filing: no confirm, no state clock", rd(g4)["confirmed"] == 1000.0 and rd(g4)["state_updated"] == 1000.0, rd(g4))
+_update_svc._update(g4, ask=ASK, sender="home-beta"); check("confirmed: an ask written alone adds the decision need, a state change: confirm and state clock move", rd(g4)["metadata"].get("needs") == ["decision"] and rd(g4)["confirmed"] > 1000.0 and rd(g4)["state_updated"] > 1000.0, rd(g4))
 t0 = time.time(); _update_svc._update(g4, next="pick one", sender="home-beta"); check("confirmed: a state change sets it with the state clock", rd(g4)["confirmed"] == rd(g4)["state_updated"] >= t0, rd(g4))
 # the confirm tool: confirmed only; no page, no relay; published
 pubs = []; _pub_ = _web_publish._publish; _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)

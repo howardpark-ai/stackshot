@@ -26,6 +26,7 @@
 #                                   [portal] account_id is set, anchor-hub.service only when [anchor_hub] enabled = true, and
 #                                   stackshot-audit.{service,timer} only when [audit] enabled = true (the timer enabled and
 #                                   started: it only arms the schedule, the audit, or its cue in mode "agent", runs at [audit] at),
+#                                   stackshot-memo-files-clean.{service,timer} on every box unless the run has STACKSHOT_READ_ONLY=1 (the daily pass over the memo-box files; the timer enabled and started, the service never started here),
 #                                   stackshot-standby-push.{service,timer} only when [standby_copy] push_to is set (the timer enabled and
 #                                   started, the service never started here: a start is a push), removed when it is empty,
 #                                   and stackshot-minute.service only when [runner] process = "unit" (the default, so unless "inline" is set) on a box that is not a read-only
@@ -97,6 +98,7 @@ CADDYFILE="$HOME/.config/stackshot/splitter.Caddyfile"
 PUSH=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get standby_copy.push_to | tr -d '[:space:]')" ] && PUSH=1      # the standby push's timer pair
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
+MEMO=1; [ "${STACKSHOT_READ_ONLY:-}" = 1 ] && MEMO=0      # the memo-box files' daily clean-up (docs/memo-files.md): not where this script runs with STACKSHOT_READ_ONLY=1 (a standby's copy of the data is the server's to change). No question to the user manager here: a standby set up by a drop-in gets the pair too, and the program itself does nothing there
 MINUTE=0; MINUTE_OFF=inline; MINUTE_STUCK=0     # stackshot-minute.service: only at [runner] process = "unit", and never on a standby (`stackshot minute` exits 4 there); MINUTE_OFF says why it is not wanted
 if [ "$RUNNER_PROCESS" = unit ]; then if standby; then MINUTE_OFF=standby; else MINUTE=1; MINUTE_OFF=""; fi; fi
 minute_off() {   # stop and disable the minute unit: 0 once nothing of it runs, 1 (a line on stderr says what failed) when it still does. `disable --now` first; when it fails, `stop` and `disable` apart; then the unit's own state decides,
@@ -154,6 +156,7 @@ SERVER=(stackshot.service stackshot-reload.service stackshot-reload.path); [ $PO
 USERU=(); [ $HUB = 1 ] && USERU+=(anchor-hub.service); USERU+=(stackshot-puller.service)
 AUDITU=(stackshot-audit.service stackshot-audit.timer); [ $AUDIT = 1 ] && USERU+=("${AUDITU[@]}")
 PUSHU=(stackshot-standby-push.service stackshot-standby-push.timer); [ $PUSH = 1 ] && USERU+=("${PUSHU[@]}")
+MEMOU=(stackshot-memo-files-clean.service stackshot-memo-files-clean.timer); [ $MEMO = 1 ] && USERU+=("${MEMOU[@]}")
 [ $MINUTE = 1 ] && USERU+=(stackshot-minute.service)
 FRONTU=()      # installed by `units`, never enabled or started by this script
 [ "$DOOR" = 1 ] && FRONTU+=(stackshot-frontdoor.service)
@@ -269,6 +272,16 @@ case "$VERB" in
                     echo "  stackshot-standby-push.timer, stackshot-standby-push.service: skipped ([standby_copy] push_to is empty)"
                 fi
             fi
+            if [ $MEMO = 0 ]; then          # STACKSHOT_READ_ONLY=1 in this run: a pair an earlier run installed goes
+                if [ -f "$UNIT_DIR/stackshot-memo-files-clean.timer" ] || [ -f "$UNIT_DIR/stackshot-memo-files-clean.service" ]; then
+                    systemctl --user disable --now --quiet stackshot-memo-files-clean.timer 2>/dev/null || true
+                    rm -f "$UNIT_DIR/stackshot-memo-files-clean.timer" "$UNIT_DIR/stackshot-memo-files-clean.service"
+                    systemctl --user reset-failed stackshot-memo-files-clean.service 2>/dev/null || true
+                    echo "  stackshot-memo-files-clean.timer, stackshot-memo-files-clean.service: disabled and removed (STACKSHOT_READ_ONLY=1)"
+                else
+                    echo "  stackshot-memo-files-clean.timer, stackshot-memo-files-clean.service: skipped (STACKSHOT_READ_ONLY=1)"
+                fi
+            fi
             if [ $MINUTE = 0 ]; then       # not wanted: back at "inline" the server runs the runner again; on a standby `stackshot minute` exits 4 at its start, and a runner already running there is a writer the standby drop-in does not reach
                 if [ -f "$UNIT_DIR/stackshot-minute.service" ]; then   # an installed unit goes, stopped first: a process cannot notice that its box became a standby, and a runner left running keeps the lock the server's own runner needs
                     if minute_remove; then
@@ -298,6 +311,10 @@ case "$VERB" in
             systemctl --user enable --now --quiet stackshot-standby-push.timer 2>/dev/null || true
             case " ${changed[*]:-} " in *" stackshot-standby-push.timer "*) systemctl --user restart stackshot-standby-push.timer 2>/dev/null || true ;; esac
         fi
+        if [ "$VERB" = units ] && [ $MEMO = 1 ]; then      # arming the timer: the clean-up runs at 04:20 each day; the service is never started here
+            systemctl --user enable --now --quiet stackshot-memo-files-clean.timer 2>/dev/null || true
+            case " ${changed[*]:-} " in *" stackshot-memo-files-clean.timer "*) systemctl --user restart stackshot-memo-files-clean.timer 2>/dev/null || true ;; esac
+        fi
         systemctl --user enable --quiet stackshot-puller.service 2>/dev/null || true
         if [ "$START" = 1 ]; then          # start what this verb runs, or restart it if it is running (covers --restart too)
             failed=()
@@ -317,7 +334,7 @@ case "$VERB" in
             if [ "$RESTART" = 1 ]; then
                 for n in "${changed[@]}"; do
                     case "$n" in
-                        stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer|stackshot-standby-push.service|stackshot-standby-push.timer) ;;   # the audit's: a restart of its service would cue an audit, the push's would push; the timers are re-armed above
+                        stackshot-reload.service|stackshot-portal-sync.service|stackshot-audit.service|stackshot-audit.timer|stackshot-standby-push.service|stackshot-standby-push.timer|stackshot-memo-files-clean.service|stackshot-memo-files-clean.timer) ;;   # the audit's: a restart of its service would cue an audit, the push's would push; the timers are re-armed above
                         stackshot-frontdoor.service|stackshot-signin.service|stackshot-splitter.service|stackshot-splitter.Caddyfile) ;;   # front_restart below: only one that runs already
                         stackshot-minute.service) systemctl --user reset-failed "$n" 2>/dev/null || true; systemctl --user restart "$n" && echo "  restarted $n" ;;   # reset-failed first: past its start limit a plain restart is refused
                         *) systemctl --user restart "$n" && echo "  restarted $n" ;;

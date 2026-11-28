@@ -348,7 +348,11 @@ for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\
     if not m.startswith("["):
         m = re.search(rf'(?m)^{m} = (\[.*\])\s*$', src + "\n" + routes_src).group(1)
     declared.setdefault(path, set()).update(ast.literal_eval(m))
-expected = {k: sorted(v | ({"HEAD"} if "GET" in v else set())) for k, v in declared.items()}      # Starlette adds HEAD to a GET route
+canvas_src = pathlib.Path(STACK, "stackshot/web/routes/canvas.py").read_text(encoding="utf-8")      # the canvas routes are built on the one constant of their address, so no literal path is there to read
+canvas_at = re.search(r'(?m)^PATH = "([^"]+)"', pathlib.Path(STACK, "stackshot/service/canvas.py").read_text(encoding="utf-8")).group(1)
+for one in (canvas_at + "/{n}", canvas_at + "/{n}/versions/{id}"):
+    for path in (one, one + "/raw"): declared[path] = set(ast.literal_eval(re.search(r'(?m)^_METHODS = (\[[^\]]*\])', canvas_src).group(1)))
+expected = {k:sorted(v | ({"HEAD"} if "GET" in v else set())) for k, v in declared.items()}      # Starlette adds HEAD to a GET route
 cenv = {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_READ_ONLY", "STACKSHOT_URL")}
 cenv.update(HOME=str(N), PYTHONDONTWRITEBYTECODE="1")
 cerr = open(T / "normal.err", "w")

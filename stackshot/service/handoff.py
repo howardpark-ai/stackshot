@@ -209,7 +209,7 @@ def handoff_peer(item: dict[str, Any], who: str) -> bool:
         r = _ho.record_of(item)
         if not r or r.get("taken_at") or not (ho_same(r.get("to"), who) or ho_same(r.get("to_id"), who)) or not front_handed_by_peer(r, who, proj):
             return False      # a taken hand-off is no one's to watch (the stall pass treats the item as any quiet one)
-        main = _anc.fallback_main(proj)      # the same pick the ladder's last rung makes (pane_recovery._recovery_target)
+        main = _anc.fallback_main(proj)      # the project's front/-main agent (the ladder's last rung asks anchors.chore_main instead, pane_recovery._recovery_target: in a project with a background agent and no front that is its lead, which this does not count as someone above)
         return bool(main) and not (ho_same(main, who) or _hooks().session_id(main) == (_hooks().session_id(who) or who))
     except Exception:  # noqa: BLE001  — an extra: a failed read keeps the exemption
         return False

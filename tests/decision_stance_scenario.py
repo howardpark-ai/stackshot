@@ -113,7 +113,7 @@ try:
     # ================================================================ 1. a create: no options and a Recommend that is no yes or no is refused
     e = refused_nc("1 create: a noun-phrase Decide with a Recommend naming a person and a topic and no options is refused", lambda: mk(ask=ASK(GUEST, "Elena, on pricing")), *STANCE, "Elena, on pricing")
     check("1 create: the refusal quotes the Recommend part, says the page would draw only Yes / No, then gives the options form, then the yes/no way out",
-          e.startswith("Refused: this needs=decision item lists no options and its Recommend part (“Elena, on pricing”) is not a yes or a no.") and e.index("Yes / No") < e.index("options=[") < e.index("Decide: whether to"), e)
+          e.startswith("Refused: this ask lists no options and its Recommend part (“Elena, on pricing”) is not a yes or a no.") and e.index("Yes / No") < e.index("options=[") < e.index("Decide: whether to"), e)
     check("1 create: …and tells the agent to name the recommended option's label in the Recommend part", "name the recommended option's label in the ask's Recommend part" in e, e)
     refused_nc("1 create: a Decide in another language (Greek) with a Recommend naming a person and a topic is refused", lambda: mk(ask=ASK(GREEK_Q, "η Ελένη και το θέμα των τιμών")), *STANCE)
     refused_nc("1 create: a yes/no Decide with a Recommend that is a date is refused", lambda: mk(ask=ASK("whether the guest joins", "Friday at ten")), *STANCE)

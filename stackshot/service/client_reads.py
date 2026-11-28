@@ -447,7 +447,7 @@ def _item_row(gid: str, p: Any, it: dict[str, Any], ctx: "_agents._WaitCtx", que
     except (TypeError, ValueError):
         su = None
     try:
-        up = float(it.get("updated") or 0) or None    # any write, a filing edit too (an ask-only update moves only this)
+        up = float(it.get("updated") or 0) or None    # any write, a filing edit too (a priority or subject edit moves only this; an ask-only write on an open item adds the decision need, a state change)
     except (TypeError, ValueError):
         up = None
     st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))     # the item's stored state, or the one derived from its fields (not sent)

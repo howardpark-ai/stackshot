@@ -2606,7 +2606,7 @@ class Board:
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
                 if new_said: ev.append(("said", e(_said.recorded_words([x for _n, x in new_said])) + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in new_said)))
                 if (prev.get("confirmed") != v.get("confirmed") and v.get("confirmed")
-                        and {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id", "last_activity")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in prev.items() if k_ not in ("confirmed", "activity")} == {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id", "last_activity")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in v.items() if k_ not in ("confirmed", "activity")}):      # `activity` is a clock too (activity.py): seeding it is no change to the item, and neither are the stored phase and the kind of its wait that every save of an open item writes (metadata.phase, metadata.waits_on), nor the last-activity record the hub's event pass stamps (metadata.last_activity)
+                        and {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id", "last_activity", "last_pr_event")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in prev.items() if k_ not in ("confirmed", "activity")} == {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id", "last_activity", "last_pr_event")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in v.items() if k_ not in ("confirmed", "activity")}):      # `activity` is a clock too (activity.py): seeding it is no change to the item, and neither are the stored phase and the kind of its wait that every save of an open item writes (metadata.phase, metadata.waits_on), nor the last-activity records the hub's event pass stamps (metadata.last_activity, metadata.last_pr_event)
                     ev.append(("confirm", _t("item.log.confirmed")))   # the confirm tool: confirmed changed alone
                 pa_ = answers_of(prev)
                 for a in answers_of(v)[len(pa_):]:      # phase 3: the owner's comment written on GitHub, at the comment's own time
@@ -3514,7 +3514,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return m
     def queue_map(self):
         """{item: the item it is queued behind} over the open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
-        if getattr(self, "_queue", None) is None: self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp(), _home.front_test())
+        if getattr(self, "_queue", None) is None: self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp(), _home.front_test(), name_of=_home.session_name)
         return self._queue
     def mod_of(self, r):
         """The item as the board shows it: base_mod, then the queue rule (an item behind its mover's other item reads waiting, queued behind it), once per row."""

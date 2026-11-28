@@ -121,6 +121,16 @@ def _ui_is_navigation(request: Request) -> bool:
     return not mode or mode == "navigate"
 
 
+def _ui_opened_as_page(request: Request) -> bool:
+    """True unless the browser says the answer is loaded into something else (Sec-Fetch-Dest: iframe, image, empty ...). A client that sends no such header counts as a page."""
+    return request.headers.get("sec-fetch-dest", "document") == "document"
+
+
+def _ui_framed_from_elsewhere(request: Request) -> bool:
+    """True for a frame that another origin sent to this address. A canvas runs in a sandboxed frame, so its origin is none of the board's: what it opens is this."""
+    return request.headers.get("sec-fetch-dest") in ("iframe", "frame") and request.headers.get("sec-fetch-site") == "cross-site"
+
+
 # A visit restarts the session's days. The cookie is written again only when it has used up an hour of them, so a burst of page loads does not set a cookie on each.
 _UI_RENEW_AFTER = 3600
 
@@ -128,10 +138,10 @@ _UI_RENEW_AFTER = 3600
 def _ui_renewed(request: Request, resp):
     """The response with the session cookie renewed when the request is a visit by someone signed in: a GET that a browser opens as a page (not a script's fetch, so a tab left polling
     does not keep a session alive on its own), with a session that is still good (an expired one never comes back; a removed address is not renewed). Not on /ui/ (the sign-in's own routes:
-    logout deletes the cookie), not on a failed answer, not on a public cacheable file."""
+    logout deletes the cookie), not on a failed answer, not on a public cacheable file, and not in a frame another origin sent here (a canvas)."""
     try:
         if (request.method != "GET" or _ui_open() or _auth_mode() == "off" or request.url.path.startswith("/ui/")
-                or request.url.path.strip("/") in _UI_PUBLIC or not _ui_is_navigation(request) or getattr(resp, "status_code", 200) >= 400
+                or request.url.path.strip("/") in _UI_PUBLIC or not _ui_is_navigation(request) or _ui_framed_from_elsewhere(request) or getattr(resp, "status_code", 200) >= 400
                 or "public" in str(resp.headers.get("cache-control") or "")):
             return resp
         d = _ui_session(request)
@@ -219,7 +229,7 @@ async def ui_login(request: Request):
     from starlette.responses import RedirectResponse
     if _ui_open() or _auth_mode() == "off":
         return RedirectResponse("/", status_code=302)
-    if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
+    if not _ui_is_navigation(request) or not _ui_opened_as_page(request):      # a script's request, or a frame's, starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
         return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
     nxt = str(request.query_params.get("next") or "/")
     if not nxt.startswith("/") or nxt.startswith("//"):
@@ -261,6 +271,9 @@ async def ui_callback(request: Request):
 
 
 async def ui_logout(request: Request):
+    """Sign out: only when a person opens the address (typed, or a link on the board itself)."""
+    if not _ui_opened_as_page(request) or request.headers.get("sec-fetch-site", "none") not in ("none", "same-origin"):
+        return PlainTextResponse("not signed out: to sign out, type this address into the browser's address bar", status_code=403, headers={"Cache-Control": "no-store"})
     r = PlainTextResponse("signed out")
     r.delete_cookie(_UI_COOKIE, path="/")
     return r

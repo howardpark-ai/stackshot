@@ -19,6 +19,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.web import i18n as _i18n
+from stackshot.fleet import sessions_registry as _sr
 from stackshot.waits import handoff as _ho
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -147,6 +148,11 @@ def end_epoch(mod: "_model.Model") -> float:
     """When a wait ends, for the sort (end_of as an epoch); far away when it has none."""
     v = end_of(mod)
     return _FAR if v is None else _wt.wake_epoch(v)
+
+
+def session_name(who: str) -> str:
+    """The name of the session a stored mover refers to (a permanent id, an old name or a transcript id), else the value as stored: how the passes read a mover (tools/board_report.py), for the board's queue rule."""
+    return _sr.display_name(who) or who
 
 
 def front_test() -> Callable[[str, str], bool]:

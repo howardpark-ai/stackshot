@@ -28,6 +28,7 @@ from stackshot.model import steps as _steps
 from stackshot.model.ids import _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_of, _needs_sessions, _needs_store
 from stackshot.service import item_read as _item_read
+from stackshot.service import memo_files as _memo_files
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -228,11 +229,11 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     return other
 
 
-def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "", by: str = "") -> str:
+def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "", by: str = "", mark: dict[str, Any] | None = None, files: list[dict[str, Any]] | None = None) -> str:
     """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
     is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
-    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click). `by` is the person who wrote it (the first person when none is named): it is kept on the comment and is the save's author.
-    → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
+    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click). `by` is the person who wrote it (the first person when none is named): it is kept on the comment and is the save's author. `files` (service/memo_files.records) go with the comment and move from pending to the item once it is saved.
+    → `code`, the notice the page shows (it says the note was kept). `mark`: what the caller read of the words and keeps on the record (a question's mark). The caller holds the item and answer locks."""
     now = time.time()
     meta = dict(item.get("metadata") or {})
     text = f"({why}: {pick}) {note}" if why and pick else note
@@ -245,11 +246,15 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
         if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
             return code
     who = by or OWNER
-    rec: dict[str, Any] = _members.stamp({"ts": now, "kind": "comment", "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
+    rec: dict[str, Any] = _members.stamp({"ts": now, "kind": "comment", **(mark or {}), "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
+    if files:
+        rec["files"] = files
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
     meta["answers"] = [*prior, rec]
     item["metadata"], item["updated"] = meta, now
     _writes.save(gid, item, note=_hooks().answer_note(rec), author=(who, "board"))
+    if files:
+        _memo_files.commit(gid, files)
     item["gid"] = gid
     told = [t for t in _hooks().answer_deliver(gid, item, rec) if t]
     print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)

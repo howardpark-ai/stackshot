@@ -700,6 +700,17 @@ _pj["pages"]["ops/note-x"] = page("Note X", ""); _pj["pages"]["ops/note-x/child"
 _pj["pages"]["projects/bgonly"] = page("Bg only", "home-bg", hub="projects/eta", agents={"home-bg-docs": "keeps the pages"}, back_agents={"home-bg-docs": "keeps the pages"})
 (T / "store/projects.json").write_text(json.dumps(_pj))
 check("a page with background agents only is served by its hub's -main agent, the same in the stand-in and in anchors.fallback_main", live.stand_in("projects/bgonly") == "home-eta-main" == a.fallback_main("projects/bgonly"), (live.stand_in("projects/bgonly"), a.fallback_main("projects/bgonly")))
+_pj = json.loads((T / "store/projects.json").read_text())
+_pj["pages"]["projects/thesis"] = page("Thesis", "home-thesis", agents={"home-thesis-docs": "writes the chapters"}, back_agents={"home-thesis-docs": "writes the chapters"})      # background agent only, no front, no builder words
+(T / "store/projects.json").write_text(json.dumps(_pj))
+check("a project with a background agent and no front: its chores go to that lead, not the scope's general -main agent (fallback_main still names that one)",
+      a.background_lead("projects/thesis") == "home-thesis-docs" and a.chore_main("projects/thesis") == "home-thesis-docs" and a.fallback_main("projects/thesis") == "home-commons-main",
+      (a.background_lead("projects/thesis"), a.chore_main("projects/thesis"), a.fallback_main("projects/thesis")))
+check("a project with a front (here through its hub), and one with no agent at all, keep fallback_main's pick: no lead, chore_main == fallback_main",
+      a.background_lead("projects/bgonly") == "" and a.chore_main("projects/bgonly") == a.fallback_main("projects/bgonly") == "home-eta-main"
+      and a.background_lead("projects/beta") == "" and a.chore_main("projects/beta") == a.fallback_main("projects/beta") == "home-commons-main",
+      (a.chore_main("projects/bgonly"), a.chore_main("projects/beta")))
+_pj = json.loads((T / "store/projects.json").read_text()); _pj["pages"].pop("projects/thesis"); (T / "store/projects.json").write_text(json.dumps(_pj))
 check("a nameless page's notices are addressed to its scope's general -main agent, and that agent is front there: (True, no keeper), so a pass to it is marked", a.notice_name("ops/note-x") == "heron-main" and a.notice_name("ops/note-x/child") == "heron-main"
       and telling.front_keeper("heron-main", "ops/note-x") == (True, "") and telling.front_keeper("heron-main", "ops/note-x/child") == (True, ""), (telling.front_keeper("heron-main", "ops/note-x"), a.notice_name("ops/note-x")))
 item(30, "ops/note-x", "work-osprey-main"); item(31, "ops/note-x/child", "work-osprey-main")
