@@ -538,7 +538,7 @@ def _commit_pages(rels: tuple[str, ...], adds: list[str], drops: list[str], fold
     every one is as HEAD has it. Refused before the commit (CommitFailed, nothing committed, the store clone's index untouched): an entry that is not named
     and would go with them (a file and a folder that swapped places with one side named, a submodule in a folder that is a named file now: `git diff-index`
     is told to show submodules, whatever the config says), and an entry a session staged in the store clone's index that bringing it to the commit would
-    drop (`_dropped`). The commit is `git commit --only` of the named files on that index: hooks and signing as for any commit, HEAD as it is at the commit,
+    drop (`_dropped`). The commit is `git commit --only` of the named files on that index: hooks and signing as for any commit that needs no terminal (a tty-based gpg pinentry, or a hook that prompts on /dev/tty, finds none: the commit runs in a session of its own), HEAD as it is at the commit,
     and no automatic maintenance (a gc started from it would read this index, not the store clone's, and could prune a blob only a session's staged entry
     holds). After it the store clone's index is brought to it for the named files (`_bring_index`); where that fails, the commit stays made and stderr says
     what is left and how to clear it."""
@@ -578,8 +578,11 @@ def _commit_pages(rels: tuple[str, ...], adds: list[str], drops: list[str], fold
                                    "folder that swap places): commit, unstage or name them first: nothing committed")
             r = _git(_LIT, "-c", "maintenance.auto=false", "commit", "--quiet", "--only", "--author", who, "-m", _page_msg(changed), "--", *only, env=own, new_session=True)
             if r.returncode != 0:
-                now = _git("rev-parse", "--verify", "-q", "HEAD^{commit}")      # git stopped after the ref moved (a hook ran on, or git was killed): the commit is made
-                if now.returncode != 0 or now.stdout.strip() == head:
+                try:                                                            # git stopped after the ref moved (a hook ran on, or git was killed): the commit is ours only if
+                    now = _git("rev-parse", "-q", "HEAD^{tree}", "HEAD^1")      # HEAD holds this call's own tree on top of `head`, not another session's commit
+                except Exception as e:                                          # the re-read itself could not start: the ref may have moved
+                    raise CommitFailed(f"git commit failed: {_last_line(r)}, and HEAD could not be re-read ({type(e).__name__}: {e}): whether a commit was made is unknown") from e
+                if now.returncode != 0 or now.stdout.split() != [t.stdout.strip(), head]:
                     raise CommitFailed(f"git commit failed: {_last_line(r)}: nothing committed")
         except CommitFailed:
             raise

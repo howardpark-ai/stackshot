@@ -963,6 +963,25 @@ try: got = put(["ada-note.md"])
 finally: P._git = real_git
 check("pages: a git commit that fails after HEAD moved is a commit made: True, the index brought to it, no page left staged", got == ("ok", True) and git(store, "rev-parse", "HEAD") != head and staged(store) == "" and git(store, "show", f"HEAD:{PG}") == "# killed after the ref moved", (got, staged(store)))
 
+# a real hook fails after the ref moved (post-commit exits 1): our own commit, so it still counts as made
+hook = store / ".git/hooks/post-commit"; hook.write_text("#!/bin/sh\nexit 1\n"); hook.chmod(0o755)
+write(store, PG, "# own commit, hook failed after\n"); head = git(store, "rev-parse", "HEAD")
+try: got = put(["ada-note.md"])
+finally: hook.unlink(missing_ok=True)
+check("pages: our own commit whose post-commit hook fails after the ref moved still counts as made: True, no page left staged", got == ("ok", True) and git(store, "rev-parse", "HEAD") != head and git(store, "rev-parse", "HEAD^") == head and staged(store) == "" and git(store, "show", f"HEAD:{PG}") == "# own commit, hook failed after", (got, staged(store)))
+
+# another session commits during our pre-commit hook window and our own ref update is lost: not our commit, so CommitFailed, the shared index as it was
+once = T / "other-committed"
+hook = store / ".git/hooks/pre-commit"
+hook.write_text(f"#!/bin/sh\n[ -e {shlex.quote(str(once))} ] && exit 0\n: > {shlex.quote(str(once))}\nunset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE\ngit -c user.name=other -c user.email=o@x commit -q --allow-empty -m 'another session'\n")
+hook.chmod(0o755)
+write(store, PG, "# lost the race\n"); head = git(store, "rev-parse", "HEAD"); p0 = porcelain(store)
+try: got = put(["ada-note.md"])
+finally: hook.unlink(missing_ok=True); once.unlink(missing_ok=True)
+check("pages: another session's commit lands during our commit and ours loses the ref update: CommitFailed nothing committed, the page not staged and not in HEAD, HEAD only the other commit, the status as it was",
+      got[0] == "failed" and "nothing committed" in got[1] and git(store, "log", "-1", "--format=%s") == "another session" and git(store, "rev-parse", "HEAD^") == head and git(store, "show", f"HEAD:{PG}", ok=False) != "# lost the race" and staged(store) == "" and porcelain(store) == p0, (got, staged(store), porcelain(store)))
+git(store, "reset", "-q", "--hard", head)
+
 # no room for the call's own folder: CommitFailed, never a bare OSError
 real_mkdtemp = tempfile.mkdtemp
 def no_room(*a, **k): raise OSError(28, "No space left on device")
