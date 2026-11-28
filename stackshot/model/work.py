@@ -3,7 +3,7 @@
 An item has one list, its checklist (`next`, steps.py). A step is a stage of the work ("stage 11: PR 83 up"), not a status. What changes while the stage
 is under way (a pull request is up, a review is running, a release is going out) is the step's status line, `tag` on the step: {text, state, ts}, a few
 words and a state. The update tool's `work` parameter writes it: it changes the status line of the sender's first open step in place, so a long job keeps one
-line on the page, and marking the step done (done=[n], or work with state done) ticks the step. The sender with no open step gets one made from the text.
+line on the page, and marking the step done (done=[n], or work with state done and no done=[...] in the call) ticks the step; a call that names steps in done ticks only those. The sender with no open step gets one made from the text.
 
 Pure helpers with no config and no store, shared by the server (the update tool, the get and brief replies), the renderer (a row's "engineer: migrating", the
 item page's Next and History) and the audits (a status line in progress is a build subagent at work on the item).
