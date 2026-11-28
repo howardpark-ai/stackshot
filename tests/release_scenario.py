@@ -1804,7 +1804,8 @@ check("--pick (a dry run) starts no index build", s["rc"] == 0 and s["warm_sysru
 SSHH = "deploy-host"
 SSH_FWD = f"-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && DEPLOY_TO={MERGE} ./deploy.sh"
 SSH_RB = (f'-o BatchMode=yes -o ConnectTimeout=15 {SSHH} cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && '
-          f'exec flock "$L" env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh')
+          f'exec 9>"$L" && {{ flock -w 900 9 || {{ echo "rollback not run: another deploy held the deploy lock $L on this box for more than 900 s" >&2; exit 1; }}; }} && '
+          f'env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh')
 def restarts(s): return [l for l in ((s["dir"] / "systemctl.log").read_text().splitlines() if (s["dir"] / "systemctl.log").exists() else []) if " restart " in f" {l} "]
 s = fast("ssh-unset", merge="ok", localdiff="stackshot/fleet/puller.py")
 check("deploy_ssh unset: the deploy runs here (one deploy, pinned), no ssh call, this checkout is not moved and nothing is restarted: a one-box install is as before",
@@ -1831,6 +1832,25 @@ check("deploy_ssh names another host (not this box): the deploy still goes over 
 s = fast("ssh-other-word", merge="ok", deploy_ssh="host:far", real_config=True, localdiff="stackshot/fleet/puller.py")
 check("deploy_ssh is a host word that resolves to another host: it goes over ssh to that host",
       s["rc"] == 0 and ssh_calls(s) == [SSH_FWD], (s["rc"], ssh_all(s), s["out"][-300:]))
+s = fast("ssh-word-nope", merge="ok", deploy_ssh="host:nope", real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh is a host word that does not resolve (no [hosts] entry): it is not this box, so the deploy goes over ssh to that word as written",
+      s["rc"] == 0 and ssh_calls(s) == [f"-o BatchMode=yes -o ConnectTimeout=15 host:nope cd ~/stackshot && DEPLOY_TO={MERGE} ./deploy.sh"] and s["deploys"] == [MERGE], (s["rc"], ssh_all(s), s["deploys"], s["out"][-300:]))
+# a user@ part: this box under another user is another box (ssh as that user); the same user is this box
+import getpass as _getpass
+s = fast("ssh-user-other", merge="ok", deploy_ssh=f"deploy-user@{ME}", real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh is user@ this box, and the user is not the one running release.sh: the deploy goes over ssh as that user, not here",
+      s["rc"] == 0 and ssh_calls(s) == [f"-o BatchMode=yes -o ConnectTimeout=15 deploy-user@{ME} cd ~/stackshot && DEPLOY_TO={MERGE} ./deploy.sh"] and s["deploys"] == [MERGE], (s["rc"], ssh_all(s), s["deploys"], s["out"][-300:]))
+s = fast("ssh-user-self", merge="ok", deploy_ssh=f"{_getpass.getuser()}@{ME}", real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh is the running user@ this box: the same user, so it is this box: the deploy runs here, no ssh call",
+      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_all(s) == [] and restarts(s) == [], (s["rc"], ssh_all(s), s["deploys"], s["out"][-300:]))
+# agentbox (the module that says whether a value is this box) cannot be imported: the value is not checked, so it is kept and the deploy goes over ssh, not here
+s = fast("ssh-no-agentbox", merge="ok", deploy_ssh=SSHH, real_config=True, no_agentbox=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh set, and the agentbox check cannot run (module missing): the deploy goes over ssh to the named host, never locally",
+      s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE], (s["rc"], ssh_all(s), s["deploys"], s["out"][-300:]))
+# the rollback over ssh waits for the lock on the far side for a limited time, then fails with a line that says why (it used to wait for ever)
+s = fast("ssh-rb-remote-busy", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py", remote_hold=True, extra={"DEPLOY_LOCK_WAIT": "2"}, secs=60)   # secs: a wait without a limit ends the run (TimeoutExpired), which fails the suite
+check("deploy_ssh set, main fails, and the far side's deploy lock is held by another deploy: the rollback gives up after DEPLOY_LOCK_WAIT with a line that says the lock was held, rc 1, this checkout not reset, and no lock left held here",
+      s["rc"] == 1 and "rollback not run: another deploy held the deploy lock" in s["out"] and s["deploys"] == [MERGE] and "reset --keep" not in s["git"] and lock_free(s), (s["rc"], s["deploys"], s["out"][-400:], s["git"][-200:]))
 s = fast("ssh-fwd", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py,docs/x.md")
 check("deploy_ssh set: the deploy is one ssh call, BatchMode and a 15 s connect timeout, the host, the checkout there and DEPLOY_TO pinned to the merge; deploy.sh ran once, on the far side of it",
       s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE] and "deploying on deploy-host over ssh" in s["out"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-400:]))
@@ -1902,7 +1922,7 @@ check("one box (deploy_ssh unset): a green release is as before: no ssh, no copy
       s["rc"] == 0 and ssh_all(s) == [] and not sync_lock(s).exists() and "last-good record on" not in s["log"] and "NOT copied" not in s["log"] and s["released"] == [RELEASED_ARGS + MERGE]
       and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and s["lastgood"] == MERGE, (s["rc"], ssh_all(s), s["msgs"], s["log"][-300:]))
 s = scenario("rec-unset-byhand", raw=["--copy-record"], lastgood=GOOD)
-check("one box: --copy-record says there is nothing to copy and does nothing", s["rc"] == 0 and "nothing to copy: [release] deploy_ssh is unset" in s["out"] and ssh_all(s) == [] and not sync_lock(s).exists() and s["msgs"] == [], (s["rc"], s["out"], ssh_all(s)))
+check("one box: --copy-record says there is nothing to copy and does nothing", s["rc"] == 0 and "nothing to copy: [release] deploy_ssh names no other box" in s["out"] and ssh_all(s) == [] and not sync_lock(s).exists() and s["msgs"] == [], (s["rc"], s["out"], ssh_all(s)))
 
 s = split("rec-green")
 check("two boxes, a green release: the server box's record is the one made here, the merge whose run on main passed", s["rc"] == 0 and s["lastgood"] == MERGE and s["remote_lastgood"] == MERGE, (s["rc"], s["lastgood"], s["remote_lastgood"], s["log"][-500:]))

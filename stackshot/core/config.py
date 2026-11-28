@@ -709,9 +709,24 @@ def release_deploy_ssh() -> str:
     """[release] deploy_ssh: the ssh host (an alias of ~/.ssh/config, or [user@]host) release.sh runs deploy.sh on, over `ssh -o BatchMode=yes <host>`, in the checkout `~/stackshot` there, for the box that runs release.sh
     while the server runs on another box. After a deploy there release.sh moves its own checkout to the same commit (a fast-forward, or a reset for a rollback) and restarts only the puller; a checkout that cannot follow (local changes) pauses the release queue and reports the release red. "" (the default) = the deploy runs
     here, as on a one-box install. A value that names this box (its own name, short name or a loopback name or address; a host word that resolves to it) reads as "" too: the box that runs release.sh is the one
-    the deploy runs on already. release.sh checks the value is a host name and refuses the deploy otherwise."""
-    why, h = _server_host_decision()
-    return h if why or not h else ""
+    the deploy runs on already, unless the value has a user@ part that is not the user running release.sh (then the deploy goes over ssh as that user). `~/.ssh/config` is not read for this: this box's name wins over an ssh alias spelled the same. A value that cannot be checked (the
+    agentbox check fails to import or run) is kept: the deploy goes over ssh rather than locally. release.sh checks the value is a host name and refuses the deploy otherwise."""
+    try:
+        why, h = _server_host_decision()
+    except Exception:
+        h = get("release", "deploy_ssh")
+        return h.strip() if isinstance(h, str) and h.strip() else ""
+    if why:
+        return h
+    if h and "@" in h:
+        import getpass
+        try:
+            me = getpass.getuser()
+        except Exception:
+            return h
+        if h.rsplit("@", 1)[0] != me:
+            return h
+    return ""
 
 
 def _server_host_decision(cfg: dict[str, Any] | None = None) -> tuple[str, str]:
