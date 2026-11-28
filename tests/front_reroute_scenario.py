@@ -7,7 +7,7 @@ front agent's unmarked message to a peer front agent the person is not with to t
 Covers:
   0. The two keys: defaults (nobody listed, off), a value of the wrong kind reads as the default and `config.notes` names it, only a TOML true turns the second on.
   1. Both switches off: the peer hold, the pass of a hand-off, the project message, the router's hold, no added line.
-  2. A listed sender to a front agent: marked or not, fyi or not, a question, an answer, a note, its own project's front agent, the sender as a session id: the background agent takes it, never a refusal; an unlisted sender, a listed background agent and a script are untouched.
+  2. A listed sender to a front agent: marked or not, fyi or not, a question, an answer, a note, its own project's front agent, the sender as a session id: the background agent takes it, with no refusal for any of these (the one refusal is 18's); an unlisted sender, a listed background agent and a script are untouched.
   3. No background agent, or one that cannot take it (a failed push, a retired session): held for the front agent's next turn, the reply saying why and to use a board item; where nothing can be held for it, the same reply and effect as with
      both switches off (delivered, or that path's own refusal); no send comes back on itself.
   4. A project message that opens "For <front agent>": the same; a front agent whose pane is gone can be held nothing, so the project takes the message.
@@ -25,6 +25,8 @@ Covers:
  15. A background agent whose pane is gone is passed over for the next live one.
  16. A listed sender is matched under its spellings: letter case, an id label, a number suffix, an old name after a rename; a name another session has taken since is not its own.
  17. What a listed sender writes reaches the background agent with its marks, quoted words and flags as written; what that agent can then send on to the front agent is what any background agent can.
+
+  18. A listed sender's decision or step for the person (the mark or needs: decision, no note that nothing is needed) that names no open item of his is refused: nothing sent or held, the whole text in the message log.
 
     tests/run-suite front_reroute   -> exit 0 / 1"""
 import contextlib, datetime, json, logging, os, pathlib, re, sys, threading, time
@@ -231,8 +233,7 @@ switches(["MY-FRONT"])
 fresh(); out = msg("other-front", ASK, "my-front"); settle()
 check("2 an unmarked message goes to the target project's background agent", rerouted(out) and len(got("other-builder")) == 1 and ASK in got("other-builder")[0][1], out)
 for label, text in (("marked, naming his item while he is there", f"{mark()}\na3: decide whether the export ships on Friday"),
-                    ("marked, naming no item", f"{mark()}\ndecide whether the export ships on Friday"),
-                    ("the mark away from the first line", f"hello\n{mark()} decide whether the export ships"),
+                    ("the mark away from the first line", f"hello\n{mark()} a3: decide whether the export ships"),
                     ("a done note", "the build is done, no action needed."),
                     ("a marked note", f"{mark()}\nthe build is done, no action needed.")):
     fresh(); stamp("other-front", 1); out = msg("other-front", text, "my-front"); settle()
@@ -260,7 +261,7 @@ check("2 a listed sender's message to a background agent is delivered as before"
 def held_back(out, front="solo-front", why="projects/solo has no background agent"):
     return (out.startswith(f"held for {front}'s next turn (it could not be rerouted: {why}") and "Put the work on a board item" in out and "Refused" not in out.split(":")[0]
             and got(front) == [] and waiting(front) == 1)
-for label, text, kw in (("unmarked", ASK, {}), ("marked", f"{mark()}\ndecide the export", {}), ("an fyi", ASK, {"fyi": True}), ("a question", "which one?", {"question": True})):
+for label, text, kw in (("unmarked", ASK, {}), ("marked, naming his item", f"{mark()}\na12: decide the export", {}), ("an fyi", ASK, {"fyi": True}), ("a question", "which one?", {"question": True})):
     fresh(); out = msg("solo-front", text, "my-front", **kw); settle()
     check(f"3 no background agent, {label}: held for the front agent, the reply saying why and what to do", held_back(out), out)
 fresh(); failing("other-builder"); out = msg("other-front", ASK, "my-front"); settle()
@@ -794,6 +795,34 @@ fresh(); stamp("other-front", 1); out = msg("other-front", f"{ASK}\n{ACKED}", "o
 check("17 quoted words it relays unmarked are held for the front agent's next turn, no turn", out.startswith("held for other-front's next turn") and got("other-front") == [] and waiting("other-front") == 1 and QUOTE in str(held.take(ID["other-front"], "other-front")), out)
 fresh(); asked("other-front", "my-front"); stamp("other-front", 1); out = msg("other-front", "the second one", "other-builder"); settle()
 check("17 an answer it relays to a question the front agent put to the listed sender is no answer of its own: held, no turn", out.startswith("held for other-front's next turn") and got("other-front") == [] and waiting("other-front") == 1, out)
+
+
+# ---- 18. a listed sender's decision or step for the person that names no open item of his would reach him nowhere: refused
+BARE = f"{mark()}\ndecide whether the export ships on Friday\n{ACKED}"
+def off_board(out): return out.startswith(f"Refused: my-front sends nothing to front agents, so a decision or step for {OWNER} reaches him on the board") and pushes() == [] and waiting_all() == {}
+def logged(): return [r for r in mlog() if r["outcome"].startswith("not delivered: it carries a decision or step")]
+switches(["my-front"])
+for label, text, kw in (("marked, naming no item", BARE, {}), ("the mark away from the first line", f"hello\n{mark()} decide whether the export ships", {}), ("needs: decision with no mark", f"{ASK}\nneeds: decision", {}),
+                        ("naming an item that is not his", f"{mark()}\na4: decide whether the export ships", {}), ("naming a closed item", f"{mark()}\na7: decide whether the export ships", {}),
+                        ("a marked fyi", BARE, {"fyi": True}), ("a marked question", BARE, {"question": True})):
+    for how, to, sent_ in (("by name", "other-front", text), ("as For <front agent>", "projects/beta", f"For other-front, {text}")):
+        fresh(); stamp("other-front", 1); n0 = len(routing.read("projects/beta")); out = msg(to, sent_, "my-front", **kw); settle()
+        check(f"18 {label}, {how}: refused, nothing sent, held or left for the router, and logged", off_board(out) and len(routing.read("projects/beta")) == n0 and len(logged()) == 1 and len(mlog()) == 1, (out, mlog()))
+fresh(); out = msg("other-front", BARE, "my-front"); settle()
+check("18 the message log keeps the whole text, quoted words included, and the reply says what to do", [r["text"] for r in logged()] == [BARE] and "send it again naming that item" in out, (out, mlog()))
+fresh()
+try: _messaging._message("other-front", BARE, "my-front"); kind_ = ""
+except _messaging.Refused as e: kind_ = e.kind
+check("18 the refusal has a kind of its own", kind_ == "reroute-decision-off-board", kind_)
+for label, to, prep in (("a project with no background agent", "solo-front", contextlib.nullcontext), ("the hold off", "other-front", hold_off), ("a front agent nothing can be held for", "quiet-front", contextlib.nullcontext)):
+    with prep():
+        fresh(); stamp(to, 1); out = msg(to, BARE, "my-front"); settle()
+    check(f"18 {label}: refused all the same", off_board(out), out)
+fresh(); out = msg("other-builder", BARE, "my-front"); settle()
+check("18 to a background agent it is delivered as before", out.startswith("delivered") and len(got("other-builder")) == 1, out)
+for label, table, sender, kw in (("a sender the key does not list", (["my-front"], None), "second-front", {}), ("both switches off", (None, None), "my-front", {}), ("a script", (["my-front"], None), "my-front", {"origin": "home-test"})):
+    switches(*table); fresh(); out = msg("other-front", BARE, sender, **kw); settle()
+    check(f"18 {label}: not this refusal", "sends nothing to front agents" not in out and logged() == [], out)
 
 settle()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

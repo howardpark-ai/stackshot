@@ -717,6 +717,17 @@ def _reroute_hold(why: str, project: str, to: str = "") -> "_Hold":
     return _Hold(f"it could not be rerouted: {why}", project, _REROUTE_TAIL, say_why=True, to=to)
 
 
+def _refuse_unseen_decision(listed: str, to: str, text: str, sender: str) -> None:
+    """A listed sender's message goes to no front agent (`[front] to_background_senders`), so a decision or step only the person can take reaches him through the board alone. A message that carries one (held._owner_mark: the mark, or
+    needs: decision), is no note that nothing is needed from him and names no open item of his is refused: nothing is sent or held, and the message log keeps its words."""
+    carries = _held._owner_mark()
+    if not carries.search(text) or _own_no_action(carries.sub("", text)) is not None or _his_items_named(text):
+        return
+    _log_not_delivered(sender, to, text, f"not delivered: it carries a decision or step for {OWNER} and names no open item of his")
+    raise Refused("reroute-decision-off-board", f"Refused: {listed} sends nothing to front agents, so a decision or step for {OWNER} reaches him on the board, and this message names no open item of his: it went to nobody (the message log keeps it). "
+                  f"Put it on a board item (create or update: needs=decision with an ask, or mover={OWNER}), then send it again naming that item by its plain id. If nothing is needed from him, take {_FOR_OWNER} and needs: decision out.")
+
+
 def _holdable(front: str, idx: dict[str, dict[str, Any]]) -> bool:
     """Can a message be held for the front agent `front`'s next turn? The hold is on, the agent has a row, its hook fetches held lines (held.can_fetch), and the recipient check a send to it meets (`_dead_recipient`:
     retired, or its pane gone) lets it by."""
@@ -898,7 +909,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     """(the owner's decision): a front agent, a session he talks to, hears a peer's message with a turn only when it needs him. A message addressed to a project page goes to the
     project (the router rules it) and never reaches this gate. What the gate cannot give a turn it handles another way and tells the sender (`_handled`), and it refuses only what nothing can carry. In order:
       before everything else, from a front agent that `[front] to_background_senders` lists (none by default), to any front agent, marked or not, fyi or not: passed to the target project's background agent (_Pass, a reroute), else held for the
-        target's next turn (_Hold); when neither can carry it (no live background agent, and nothing can be held for the target, `_holdable`) the call is handled as with both switches off (_AsSwitchedOff);
+        target's next turn (_Hold); a decision or step for him that names no open item of his is refused first (`_refuse_unseen_decision`); when neither can carry it (no live background agent, and nothing can be held for the target, `_holdable`) the call is handled as with both switches off (_AsSwitchedOff);
       next, for a front agent that `[front] result_turn_agents` lists (none by default): a message from a session it handed work to (`handed_to`: it wrote to that session within `[front] result_turn_hours`, or the message names an open item the session moves that the agent itself handed it, by the item's hand-off record)
         is a turn, whether or not it carries the mark and whether or not the person is there (`result_turn`: not an fyi, not a script's, not the person's, not a peer front agent's; at most `[front] result_turn_cap_per_hour` turns per sender, the rest handled by the rules below): `_Turn`, delivered
         past the builder-report, status-shape and item-of-his tests below, as a line of kind `exempt` the pane's digest never files. The loop it could make (the agent's reply starts the sender, whose reply starts the agent) is stopped by that cap and by the sender's `fyi=true`;
@@ -928,6 +939,7 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     back = background_of(project)
     sname = (_sr._role_name(roles, sender, str((idx.get(sender) or {}).get("name") or "")) or "") if sender.strip() else ""
     if listed := _to_background_sender(sender, idx, roles):          # a sender that sends nothing to front agents: before the mark checks and the answer rule, whatever the message says
+        _refuse_unseen_decision(listed, to, text, sender)
         rerouted = _reroute_front(listed, name, project, _live_background(project), _holdable(to, idx))
         if rerouted is None:          # neither the background agent nor a hold can carry it
             raise _AsSwitchedOff()
@@ -1381,6 +1393,7 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
                 page = to.rstrip("/").removesuffix(".md")
                 lsender = "" if _FORWARDING.get() or page not in _anc.registry() else _to_background_sender(sender, idx, roles_)
                 if lsender:
+                    _refuse_unseen_decision(lsender, to, raw, sender)
                     reported = _reroute_front(lsender, tname, page, _live_background(page), _holdable(tname, idx), tname)      # None: nothing can carry it, so it goes the way it goes without the switch
                 if reported is None:
                     reported = _builder_report(tname, raw, sender, idx, roles_, via=to.rstrip("/"))
