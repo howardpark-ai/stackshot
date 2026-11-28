@@ -9,6 +9,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     item.*     the item page: its state line, checklist, ask, sidebar, folds and the History's lines (item.log.*)
     wait.*     the item page's wait block (what it waits on, who watches, the chases) and the words that describe a wait
     answer.*   the item page's answer and comment boxes
+    brief.*    the item brief: the home page's panel and the item's brief page; js.brief.* are the words its script says
     watch.*    the item page's For you control
     more.*     the item page's More details fold
     link.*     the short labels of a bare address
@@ -830,4 +831,32 @@ CATALOG: dict[str, str] = {
     "probe.f.what": "Two buttons: one runs window.open, the other sets location.href.",
     "probe.f.open": "window.open",
     "probe.f.href": "location.href",
+
+    # ------------------------------------------------------------------ the item brief (ui/brief.py, ui/brief_assets.py)
+    "brief.prev": "Previous item",
+    "brief.next": "Next item",
+    "brief.full": "Full screen",
+    "brief.close": "Close",
+    "js.brief.open": "item contents ›",
+    "js.brief.loading": "Loading…",
+    "js.brief.next": "Next item ›",
+    "js.brief.all_done": "All answered.",
+    "js.brief.changed": "This item changed since you opened it.",
+    "js.brief.show_latest": "Show the latest",
+    "js.brief.sent": "Sent.",
+    "js.brief.sent_unread": "Sent. The item could not be read again.",
+    "js.brief.fail_load": "This item could not be read.",
+    "js.brief.retry": "Try again",
+    "js.brief.open_page": "Open item page",
+    "js.brief.unsure": "No reply came back, so this may or may not have been recorded. Check the item before you send it again.",
+    "js.brief.was_sending": "A send was under way when the page was left. Check the item before you send it again.",
+    "js.brief.repick": "The question changed since you picked {what}. Pick again.",
+    "js.brief.pick_gone": "Your pick, {what}, was not sent: the item no longer asks that question.",
+    "js.brief.unsent": "Unsent note",
+    "js.brief.use_held": "Put it in the box",
+    "js.brief.discard": "Discard",
+    "js.brief.dismiss": "Dismiss",
+    "js.brief.held_row": "An unsent note is kept with this item: open its contents to see it.",
+    "js.brief.toast": "{item}: {why}",
+    "js.brief.open_item": "Open item",
 }

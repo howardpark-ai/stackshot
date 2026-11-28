@@ -257,7 +257,8 @@ def keys_in(text):
 check("the key scan reads both keys of a conditional (the first literal, and the one after else), and only the first argument", keys_in('_t("a.b" if c(x, y) else "c.d", n=1)') == {"a.b", "c.d"}
       and keys_in("_t('a.b', k='x.y' if c else 'z.w')") == {"a.b"} and keys_in("_t(f'a.{n}')") == set() and keys_in("SST('js.a',{b:SST('js.b')})") == {"js.a", "js.b"})
 used = set()
-for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/i18n.py", "stackshot/web/uiprefs.py", "stackshot/web/itempage.py"):
+for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/i18n.py", "stackshot/web/uiprefs.py", "stackshot/web/itempage.py",
+            "stackshot/web/ui/brief.py", "stackshot/web/ui/brief_assets.py"):
     used |= keys_in(pathlib.Path(STACK, rel).read_text(encoding="utf-8"))
 check("every key a page or a script asks for by its literal name is in the English catalog", not [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)], [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)])
 check("the state words and the panel sections the pages build a key for are all there", all(f"state.{k}" in EN for k in ("you", "agent", "release", "wait", "done", "dropped", "superseded", "closed"))
@@ -875,7 +876,8 @@ check("…and the age is never a word of any translation (the template's own mar
 
 # every key the stage added to the table is asked for somewhere (a literal key in the source, or a dict of keys the source reads): none is dead
 _all_keys = list(EN); _block = _all_keys[_all_keys.index("item.unknown") + 1:]
-_src_all = "\n".join(pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/itempage.py"))
+_src_all = "\n".join(pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/itempage.py",
+                                                                                      "stackshot/web/ui/brief.py", "stackshot/web/ui/brief_assets.py"))
 _unused = [k for k in _block if k not in used and not re.search(r"""['"]""" + re.escape(k) + r"""['"]""", _src_all)]
 _STAGE_PREFIXES = ("item.log.", "item.when.", "js.answer.", "home.rendered_line", "home.command", "link.mockup_", "link.session_", "item.due_", "item.no_agent", "item.cloud", "item.work", "wait.")      # the groups that stage added: each one must still be found after item.unknown, so the scan cannot go quiet by finding no block
 _missing_prefix = [pf for pf in _STAGE_PREFIXES if not any(k.startswith(pf) for k in _block)]
