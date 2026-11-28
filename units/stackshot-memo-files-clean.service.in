@@ -1,0 +1,21 @@
+# stackshot-memo-files-clean.service — one pass over the memo-box files (`stackshot memo-files-clean`): the files of an item are removed 30 days after the item closed, and an upload never sent with a note after 24 hours.
+# The run prints one line (what it removed and the size still in use). It changes the files under <paths.state>/memo-files only and calls no model. Started by stackshot-memo-files-clean.timer.
+# Install: ./install.sh units (an install run with STACKSHOT_READ_ONLY=1 leaves it out; on a standby the program changes nothing: its copy of the data is the server's to change)
+[Unit]
+Description=stackshot — remove memo-box files 30 days after their item closed
+# model lane: none — no model is called: the unit removes files
+X-Model-Lane=none
+X-Model-Note=no model call: removes memo-box files whose item closed 30 days ago
+# the job's project, as the Agents tab shows it (<scope>/<project>); a timer without it is reported as no-project
+X-Project=@AUDIT_PROJECT@
+X-Runs-With=servers
+# X-Runs-With=servers: the job runs with the stackshot server and moves when the server moves
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10min
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+# ~/.local/bin first, as in the other units (a user manager started after a reboot has no ~/.local/bin on its PATH)
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot memo-files-clean

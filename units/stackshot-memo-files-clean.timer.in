@@ -1,0 +1,14 @@
+# stackshot-memo-files-clean.timer — the pass over the memo-box files once a day, at 04:20 (a run missed while the machine was off is made up at the next start).
+# Install: ./install.sh units — an install run with STACKSHOT_READ_ONLY=1 leaves it out
+[Unit]
+Description=stackshot — remove memo-box files 30 days after their item closed
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=0
+Unit=stackshot-memo-files-clean.service
+
+[Install]
+WantedBy=timers.target

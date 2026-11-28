@@ -84,18 +84,19 @@ def render_out(cfg, *names, env=None):
     return r.returncode, r.stdout, r.stderr
 
 BASE = ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path"]
+MEMOU = ["stackshot-memo-files-clean.service", "stackshot-memo-files-clean.timer"]      # the memo-box files' daily clean-up: on every box unless the run has STACKSHOT_READ_ONLY=1
 rc, units, out = render(conf("off.toml"))
 check("off: render succeeds", rc == 0, out[-400:])
-check("off: the server units and the puller, no portal-sync, no anchor-hub", units == BASE + ["stackshot-puller.service"], units)
+check("off: the server units and the puller, no portal-sync, no anchor-hub", units == BASE + ["stackshot-puller.service"] + MEMOU, units)
 
 rc, units, out = render(conf("portal.toml", account_id="0123abcd"))
-check("account_id set: the portal-sync unit joins", rc == 0 and units == BASE + ["stackshot-portal-sync.service", "stackshot-puller.service"], units)
+check("account_id set: the portal-sync unit joins", rc == 0 and units == BASE + ["stackshot-portal-sync.service", "stackshot-puller.service"] + MEMOU, units)
 
 rc, units, out = render(conf("hub.toml", enabled="true"))
-check("anchor_hub enabled: anchor-hub's unit joins", rc == 0 and units == BASE + ["anchor-hub.service", "stackshot-puller.service"], units)
+check("anchor_hub enabled: anchor-hub's unit joins", rc == 0 and units == BASE + ["anchor-hub.service", "stackshot-puller.service"] + MEMOU, units)
 
 rc, units, out = render(conf("all.toml", account_id="0123abcd", enabled="true"))
-check("both on: all six, in the order units installs them", rc == 0 and units == BASE + ["stackshot-portal-sync.service", "anchor-hub.service", "stackshot-puller.service"], units)
+check("both on: all six, in the order units installs them", rc == 0 and units == BASE + ["stackshot-portal-sync.service", "anchor-hub.service", "stackshot-puller.service"] + MEMOU, units)
 
 t = re.sub(r'(?m)^enabled = false[^\n]*\n', "", toml); (T / "nokey.toml").write_text(t, encoding="utf-8")
 rc, units, out = render(str(T / "nokey.toml"))
@@ -114,7 +115,7 @@ check("render never called sudo", not (T / "sudo-called").exists())
 # ---- user units, the only kind
 check("the example has no [units] section", re.search(r"(?m)^\[units\]", toml) is None)
 SERVER = ["stackshot.service", "stackshot-reload.service", "stackshot-reload.path", "stackshot-portal-sync.service"]
-ALL = SERVER + ["anchor-hub.service", "stackshot-puller.service"]
+ALL = SERVER + ["anchor-hub.service", "stackshot-puller.service"] + MEMOU
 def split_units(text):
     """render's stdout → {unit: its text}, split on the header lines."""
     out = {}
@@ -241,7 +242,7 @@ check("units (user): every systemctl call carries --user", calls and all(c.start
 check("units (user): daemon-reload, and the server and the reload path enabled", "--user daemon-reload" in calls and "--user enable --quiet stackshot.service stackshot-reload.path" in calls, calls)
 check("units (user): sudo never called", not (T / "sudo-called").exists())
 rc, out, calls = units(ucfg)
-check("units (user) twice: everything unchanged the second time", rc == 0 and "installed" not in out.replace("not installed", "") and out.count(": unchanged") == 7, out[-800:])
+check("units (user) twice: everything unchanged the second time", rc == 0 and "installed" not in out.replace("not installed", "") and out.count(": unchanged") == 7 + len(MEMOU), out[-800:])
 rc, out, calls = units(ucfg, "--start")
 check("units (user) --start: the server, the reload path, anchor-hub and the puller restarted through the user manager",
       rc == 0 and all(f"--user restart {n}" in calls for n in ("stackshot.service", "stackshot-reload.path", "anchor-hub.service", "stackshot-puller.service")), (calls, out[-400:]))
@@ -299,7 +300,7 @@ AUD = ["stackshot-audit.service", "stackshot-audit.timer"]
 rc, units_, out = render(conf("aud-off.toml"))
 check("audit off (the example's default): no audit units rendered", rc == 0 and not set(AUD) & set(units_), units_)
 rc, units_, out = render(conf("aud-on.toml", audit="true"))
-check("audit on: the service and the timer join, last", rc == 0 and units_ == BASE + ["stackshot-puller.service"] + AUD, units_)
+check("audit on: the service and the timer join, last", rc == 0 and units_ == BASE + ["stackshot-puller.service"] + AUD + MEMOU, units_)
 acfg = conf("aud-at.toml", audit="true", at="06:30", tz="Asia/Dubai")
 rc, tout, _ = render_out(acfg, "stackshot-audit.timer")
 check("the timer: OnCalendar from [audit] at in the instance timezone, persistent, naming its service",
@@ -368,7 +369,7 @@ PUSHU = ["stackshot-standby-push.service", "stackshot-standby-push.timer"]
 rc, units_, out = render(conf("push-off.toml"))
 check("push_to empty (the example's default): no push units rendered", rc == 0 and not set(PUSHU) & set(units_), units_)
 rc, units_, out = render(conf("push-on.toml", push="user@standby-host"))
-check("push_to set: the service and the timer join, after the puller", rc == 0 and units_ == BASE + ["stackshot-puller.service"] + PUSHU, units_)
+check("push_to set: the service and the timer join, after the puller", rc == 0 and units_ == BASE + ["stackshot-puller.service"] + PUSHU + MEMOU, units_)
 pcfg = conf("push-ref.toml", push="user@standby-host")
 for n in PUSHU:
     rc, one, _ = render_out(pcfg, n)
@@ -410,6 +411,25 @@ rc, out, calls = units(conf("push-u-blank.toml", push="   "), env=PH)
 check("units, push_to only blanks counts as empty", rc == 0 and not any((pdir / n).exists() for n in PUSHU), (calls, out[-300:]))
 check("the push pair: sudo never called", not (T / "sudo-called").exists())
 
+# ---- the memo-box files' clean-up pair: on every box that is not a read-only standby, removed from one
+MH = {**UENV, "HOME": str(T / "uhome-memo")}; mdir_ = T / "uhome-memo/.config/systemd/user"
+rc, out, calls = units(conf("memo-u.toml"), env=MH)
+check("units: the memo-files pair is installed, the timer enabled and started, the service never started or enabled",
+      rc == 0 and all((mdir_ / n).is_file() for n in MEMOU) and "--user enable --now --quiet stackshot-memo-files-clean.timer" in calls
+      and not any("stackshot-memo-files-clean.service" in c for c in calls), (calls, out[-500:]))
+rc, mt, _ = render_out(conf("memo-u.toml"), "stackshot-memo-files-clean.timer"); rc2, ms, _ = render_out(conf("memo-u.toml"), "stackshot-memo-files-clean.service")
+check("the timer is daily and persistent; the service runs `stackshot memo-files-clean` as a oneshot with the labels of the other timers' services",
+      "\nOnCalendar=*-*-* 04:20:00\n" in mt and "\nPersistent=true\n" in mt and "\nType=oneshot\n" in ms and re.search(r"(?m)^ExecStart=\S+ run --project " + re.escape(STACK) + r" --locked stackshot memo-files-clean$", ms)
+      and "\nX-Model-Lane=none\n" in ms and "\nX-Runs-With=servers\n" in ms, (mt, ms))
+rc, out, calls = units(conf("memo-u.toml"), env=MH)
+check("units twice: the memo pair unchanged, the timer not restarted", rc == 0 and "stackshot-memo-files-clean.timer: unchanged" in out and "--user restart stackshot-memo-files-clean.timer" not in calls, (calls, out[-500:]))
+rc, out, calls = units(conf("memo-u.toml"), env={**MH, "STACKSHOT_READ_ONLY": "1"})
+check("units on a read-only standby: the pair disabled, stopped and removed, said once; none is installed there",
+      rc == 0 and "--user disable --now --quiet stackshot-memo-files-clean.timer" in calls and not any((mdir_ / n).exists() for n in MEMOU)
+      and "stackshot-memo-files-clean.timer, stackshot-memo-files-clean.service: disabled and removed (STACKSHOT_READ_ONLY=1)" in out, (calls, out[-500:]))
+rc, out, calls = units(conf("memo-u.toml"), env={**MH, "STACKSHOT_READ_ONLY": "1"})
+check("units on a standby with none installed: skipped, no call", rc == 0 and "stackshot-memo-files-clean.service: skipped (STACKSHOT_READ_ONLY=1)" in out and not any("stackshot-memo-files-clean" in c for c in calls), (calls, out[-500:]))
+
 # ---- the minute runner's unit: only with [runner] process = "unit", never on a standby; nothing else about the unit set moves
 MIN = "stackshot-minute.service"
 def mhome(n, **extra): return {**UENV, "HOME": str(T / f"uhome-m{n}"), **extra}      # a home of its own per case: the units installed there are the case's
@@ -434,7 +454,7 @@ rc, before_default, _ = render_out(mc, env=UENV)
 before = {n: render_out(mc, n, env=UENV)[1] for n in EXISTING + ["stackshot.service.d-portal-sync.conf"]}
 rc, defl, _ = render(mc, env=UENV)
 check("inline: the default render lists every other unit and no minute unit", rc == 0 and MIN not in defl and "stackshot-minute" not in before_default
-      and defl == SERVER + ["anchor-hub.service", "stackshot-puller.service"] + AUD, defl)
+      and defl == SERVER + ["anchor-hub.service", "stackshot-puller.service"] + AUD + MEMOU, defl)
 rc, mone, _ = render_out(mc, MIN, env=UENV)
 check("inline: the unit renders on request all the same, like any unit named explicitly", rc == 0 and mone.startswith("# Rendered by install.sh from units/stackshot-minute.service.in"), mone[:200])
 mc = conf("m-cfg.toml", account_id="0123abcd", enabled="true", audit="true", runner="unit")
@@ -488,7 +508,7 @@ check("`stackshot minute` is a program of the package", re.search(r'(?m)^    "mi
 IC = conf("m-ic.toml", account_id="0123abcd", enabled="true")      # inline, hub and portal on: the largest set at the default
 rc, out, calls = units(IC, env=mhome(1))
 got = sorted(p.name for p in mdir(1).iterdir() if p.is_file())
-check("units at inline: exactly the unit files it always installed, none of them naming a minute unit", rc == 0 and got == sorted(EXISTING[:6]) and not any("stackshot-minute" in (mdir(1) / n).read_text() for n in got), (rc, got, out[-400:]))
+check("units at inline: exactly the unit files it always installed, none of them naming a minute unit", rc == 0 and got == sorted(EXISTING[:6] + MEMOU) and not any("stackshot-minute" in (mdir(1) / n).read_text() for n in got), (rc, got, out[-400:]))
 check("units at inline: no systemctl call names the minute unit and none asks the user manager about a standby", not minute_calls(calls) and not any("show stackshot.service" in c for c in calls), calls)
 check('units at inline: one skipped line, as the other optional units say', 'stackshot-minute.service: skipped ([runner] process is not "unit")' in out and out.count("stackshot-minute") == 1, out[-500:])
 rc, out, calls = units(IC, "--start", env=mhome(1))

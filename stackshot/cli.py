@@ -1041,6 +1041,7 @@ PROGRAMS = {
     "publish": ("stackshot.web.publish", "the stackshot publisher"),
     "standby-copy": ("stackshot.tools.standby_copy", "one consistent copy of the server's data for a standby, and `standby-copy --verify DIR` to check a received one (docs/standby-copy.md)"),
     "standby-push": ("stackshot.tools.standby_push", "push one consistent copy of the server's data to a standby over ssh, on the settings of [standby_copy] (docs/standby-copy.md)"),
+    "memo-files-clean": ("stackshot.tools.memo_files_clean", "the daily pass over the memo-box files: remove them 30 days after the item closed and unsent uploads after 24 hours (docs/memo-files.md)"),
     "render": ("stackshot.web.render", "the board's text renderer"),
 }
 
