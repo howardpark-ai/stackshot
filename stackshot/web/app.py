@@ -43,6 +43,7 @@ from stackshot.web.routes import ui_api as _routes_ui_api
 from stackshot.web.routes import board_pages as _routes_board_pages
 from stackshot.web.routes import answer_frame as _routes_answer_frame
 from stackshot.web.routes import canvas as _routes_canvas
+from stackshot.web.routes import brief as _routes_brief
 
 _ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMxZjFmMjEiLz48cGF0aCBkPSJNMTUgMzRsMTIgMTIgMjItMjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2YwYTA2YSIgc3Ryb2tlLXdpZHRoPSI4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4K"  # the board's favicon (<state>/site/favicon.svg), same mark everywhere
 
@@ -251,5 +252,6 @@ def build(
     _routes_join.register(mcp)      # `GET /join`, the setup page an invite's link names, only on a board that can invite (web/routes/join.py); before the catch-all
     _routes_answer_frame.register(mcp)      # before the catch-all of board_pages, which answers the address while [ui] answer_frame_origins is empty
     _routes_canvas.register(mcp)      # before the catch-all too
+    _routes_brief.register(mcp, contact_label=contact_label)      # /items/<key>/brief, before the catch-all too
     _routes_board_pages.register(mcp, contact_label=contact_label)
     return mcp

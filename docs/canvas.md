@@ -20,6 +20,8 @@ The address is written in one place, `PATH` in `service/canvas.py`. All of them 
 
 The shell is a page of the board's own with no script: a way back to the board, the canvas's number and title, a link to its item when it has one, one history control that lists the versions newest first by the time each was replaced, and the page in a frame. Changing version loads another shell. The bar is never written into a stored page, so the raw address gives the page alone, as it was saved, plus [what a page is given when it needs it](#what-a-page-is-given).
 
+The item's [brief](board-ui.md) (the panel on home and `/items/<key>/brief`) shows the item's canvas: the highest-numbered canvas with a current page that names the item (`service/canvas.for_item`), as its raw address in the same sandboxed frame, with a link to the shell under it.
+
 ## What keeps a page apart from the board
 
 A canvas is a page somebody else wrote, served from the board's address. It may run its own script; it must not read or change the board.

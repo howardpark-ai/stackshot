@@ -17,6 +17,9 @@ becomes live. Nobody commits to `main` directly; nobody works in the production 
    **A change to the item page's answer box** also runs `tests/run-suite answer_back_check` (the same browser): it starts
    the server in-process on a temporary config and checks that an answer replaces the page in history and Back lands on the board.
    **A change to the home page's answer forms** also runs `tests/run-suite home_step_send_check` (the same browser): it checks that a step row's Done is enabled with the box empty and after typing, that its Send note is disabled until the box has text, and that a decision row's Send stays disabled until a card is picked or a note is typed. **A change to the answer forms or to the home page's live refresh** also runs `tests/run-suite decision_pick_check` (the same browser): a picked card always reaches the item with its note, across a refresh that passes between the pick and Send.
+   **The item brief** (the home page's panel and `/items/<key>/brief`) has one too, `tests/brief_check.py` (`.github/workflows/brief.yml`, on a pull request that changes `stackshot/`, the check or what it stands on):
+   the panel and the bottom sheet, Escape and Back, the drafts, a send and a second one, a failed load, the installed app, the live refresh and the full page, and that each guard's check
+   fails with its line taken out of the served script. Its screenshots are the run's artifact.
    **The answer frame** has a browser check of its own that CI runs, `tests/answer_frame_check.py` (`.github/workflows/answer-frame.yml`, on a pull request that changes `stackshot/`, the check or what it stands on):
    the messages to the parent page, the size at 390 px, one answer from a pick and Send, two frames of one item, and who may frame it. Its screenshots are the run's artifact.
    **Canvases** have a browser check that CI runs the same way, `tests/canvas_check.py` (`.github/workflows/canvas.yml`): the shell at 390 px, and that a stored page cannot read or write the board nor send its frame to another origin.
@@ -350,7 +353,7 @@ produce.
 
 ## Where CI runs: GitHub's hosted runners
 
-Every job of the workflows (`tests.yml`, `clean-text.yml`, `answer-frame.yml`, `canvas.yml`) runs on GitHub's hosted runners (`ubuntu-latest`). No repository variable is needed for that.
+Every job of the workflows (`tests.yml`, `clean-text.yml`, `answer-frame.yml`, `canvas.yml`, `explain.yml`, `brief.yml`) runs on GitHub's hosted runners (`ubuntu-latest`). No repository variable is needed for that.
 
 - **A trial from a branch**: `gh workflow run tests.yml --ref <branch>`. `tests.yml` also takes `-f suites="pilot release"` (names, space-separated) for a manual run of those suites, plainly; with no names it runs every suite, plainly, without the suite map. The suite map itself is `gh workflow run suitemap-refresh.yml --ref main`, a measured run of every suite that saves and publishes the map.
   `clean-text.yml` on a manual run checks the branch's commits against `main`.
