@@ -3,7 +3,7 @@
 its config or its units, so it has no --apply. One thing it may write: it reads the config notes through `uv run` in the checkout, which first brings that
 checkout's Python environment up to date when it is behind (FRONTDOOR_SWITCH_PYTHON names another command).
 
-    python3 tools/frontdoor_preflight.py --backup-dir DIR [--baseline FILE] [--confirm NAME ...]
+    python3 tools/frontdoor_preflight.py (--backup-dir DIR | --backup-log FILE) [--baseline FILE] [--confirm NAME ...]
 
 One line per check. PASS or FAIL for what the script reads itself; MANUAL for what only a person can see, until --confirm NAME says it holds:
     go            the owner's go for the switch is given
@@ -12,7 +12,11 @@ One line per check. PASS or FAIL for what the script reads itself; MANUAL for wh
     signed-in     the owner is signed in on a second device
     no-long-call  no long tool call is running (the front door's replay window is 300 s)
 
---backup-dir (or FRONTDOOR_BACKUP_DIR) is the folder of the board's daily backups: the newest file there is dated today in [instance] timezone.
+Where today's backup of the board shows (one of the two at least; with both, either one passes the line), "today" being in [instance] timezone:
+--backup-dir (or FRONTDOOR_BACKUP_DIR) is a folder of the board's daily backups: the newest file there is not empty and dated today.
+--backup-log (or FRONTDOOR_BACKUP_LOG) is the log of a backup job that keeps its copy elsewhere, one line a run, tab-separated: the time (ISO 8601 with
+its UTC offset), the job, ok|skipped|failed, the bytes sent, a note. The last line of the job "stackshot" is ok, of more than 0 bytes and dated today.
+Only the log is read: the copy itself is not fetched or checked. Neither the cut-over nor the way back reads a daily backup, so none has to be on this machine.
 --baseline is a saved list of the config notes to compare with; without it the notes are printed (the snapshot script saves them as the baseline).
 
 Exit 0: every line passes. 1: a check failed. 2: the script cannot run. 3: every check passes and MANUAL lines are left.
@@ -29,6 +33,7 @@ import frontdoor_switch as fs
 
 # the merge that brought what the switch uses: the front door's unit templates, the real-call check, `release.sh hold` and `stackshot frontdoor-token`
 NEEDED_COMMIT = "e7b4353d3be4a0e5219c8f01cce16f563f6083f9"
+BACKUP_JOB = "stackshot"              # the name of the board's lines in a backup log
 MANUAL = {
     "go": "the owner's go for the switch is given",
     "token-choice": "the owner's answer on accept_portal_token is written down",
@@ -61,7 +66,27 @@ def newest_backup(folder: Path, cfg: dict | None) -> tuple[bool, str]:
     return day == datetime.now(fs.zone(cfg)).date(), f"the newest, {newest.name}, is dated {day.isoformat()}"
 
 
-def checks(co: Path, cfg_path: Path, backups: Path, baseline: Path | None) -> list[tuple[str, bool]]:
+def logged_backup(log: Path, cfg: dict | None) -> tuple[bool, str]:
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return False, f"cannot read the backup log {log}: {e.strerror}"
+    runs = [cols for cols in (x.split("\t") for x in text.splitlines()) if len(cols) > 1 and cols[1] == BACKUP_JOB]
+    if not runs:
+        return False, f"no run of {BACKUP_JOB} in {log}"
+    try:
+        stamp, _, result, sent = runs[-1][:4]
+        when, size = datetime.fromisoformat(stamp), int(sent)
+    except ValueError:
+        when = None
+    if when is None or when.tzinfo is None:
+        return False, f"the last run of {BACKUP_JOB} in {log} cannot be read"
+    day = when.astimezone(fs.zone(cfg)).date()
+    ok = result == "ok" and size > 0 and day == datetime.now(fs.zone(cfg)).date()
+    return ok, f"the last run of {BACKUP_JOB} in {log.name} is dated {day.isoformat()}: {result}, {size} bytes"
+
+
+def checks(co: Path, cfg_path: Path, backups: Path | None, backup_log: Path | None, baseline: Path | None) -> list[tuple[str, bool]]:
     rows: list[tuple[str, bool]] = []
     cfg = fs.read_toml(cfg_path)
     rows += [(f"config before the switch: {name}", ok) for name, ok in fs.single_user_checks(cfg)]
@@ -96,27 +121,30 @@ def checks(co: Path, cfg_path: Path, backups: Path, baseline: Path | None) -> li
         saved = [x.rstrip() for x in baseline.read_text(encoding="utf-8").splitlines() if x.strip()]
         rows.append((f"the config notes are the baseline's ({len(saved)} lines saved)", ok and notes == saved))
 
-    ok, line = newest_backup(backups, cfg)
-    rows.append((f"a backup of today is there ({line})", ok))
+    found = [look(path, cfg) for look, path in ((newest_backup, backups), (logged_backup, backup_log)) if path is not None]
+    rows.append((f"a backup of today is there ({'; '.join(line for _, line in found)})", any(ok for ok, _ in found)))
     return rows
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="tools/frontdoor_preflight.py", description="What has to hold before a live switch to the front door. It changes nothing of the board, its "
                                  "config or its units; reading the config notes runs `uv run` in the checkout, which may first sync that checkout's Python environment.")
-    ap.add_argument("--backup-dir", metavar="DIR", default="", help="the folder of the board's daily backups (default: FRONTDOOR_BACKUP_DIR)")
+    ap.add_argument("--backup-dir", metavar="DIR", default="", help="a folder of the board's daily backups (default: FRONTDOOR_BACKUP_DIR)")
+    ap.add_argument("--backup-log", metavar="FILE", default="", help="the log of a backup job that keeps its copy elsewhere (default: FRONTDOOR_BACKUP_LOG)")
     ap.add_argument("--baseline", metavar="FILE", help="a saved list of the config notes to compare with")
     ap.add_argument("--confirm", action="append", default=[], choices=list(MANUAL), metavar="NAME", help="confirm a manual line: " + ", ".join(MANUAL))
     a = ap.parse_args(argv)
     try:
         cfg_path = fs.config_path()
         folder = a.backup_dir or os.environ.get("FRONTDOOR_BACKUP_DIR", "").strip()
-        if not folder:
-            raise fs.Usage("--backup-dir DIR is required (or FRONTDOOR_BACKUP_DIR): the folder of the board's daily backups")
+        log = a.backup_log or os.environ.get("FRONTDOOR_BACKUP_LOG", "").strip()
+        if not folder and not log:
+            raise fs.Usage("--backup-dir DIR or --backup-log FILE is required (or FRONTDOOR_BACKUP_DIR, FRONTDOOR_BACKUP_LOG): where today's backup of the board shows")
         baseline = Path(os.path.expanduser(a.baseline)) if a.baseline else None
         if baseline is not None and not baseline.is_file():
             raise fs.Usage(f"--baseline names no file: {baseline}")
-        rows = checks(fs.checkout(), cfg_path, Path(os.path.expanduser(folder)), baseline)
+        folder, log = (Path(os.path.expanduser(x)) if x else None for x in (folder, log))
+        rows = checks(fs.checkout(), cfg_path, folder, log, baseline)
     except fs.Usage as e:
         return fs.cannot(e)
 

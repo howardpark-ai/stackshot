@@ -233,7 +233,7 @@ Run them on the board's machine with `python3` (3.11 or later) and `STACKSHOT_CO
 
 | Script | What it does |
 | --- | --- |
-| `tools/frontdoor_preflight.py --backup-dir DIR` | what has to hold before the first step; read-only |
+| `tools/frontdoor_preflight.py --backup-log FILE` or `--backup-dir DIR` | what has to hold before the first step; read-only |
 | `tools/frontdoor_snapshot.py --expect MEMBERS,ALIASES,ADDRESSES --apply` | the snapshot, then the front door's secrets and members file |
 | `tools/frontdoor_cutover.py --snapshot DIR --apply` | the cut-over as one run, with the way back built in |
 | `tools/frontdoor_undo.py --apply` | the way back to the single-user board on 8020; `--saved` runs it on the saved copy whatever the config on disk says; `--drop-saved` removes the saved config of a switch that is kept |
@@ -253,10 +253,19 @@ All four use the same exit codes:
 
 ### Before the cut-over
 
-1. `tools/frontdoor_preflight.py`: the config is a single-user one, the checkout is new enough, no release hold, queue or running release, ports 8021, 8025, 8030 and 8031 are free, the board's, the minute runner's and the portal sync's units are installed, no override of an earlier way back, the config notes can be read (`--baseline FILE` compares them), and the newest file in the backup folder (`--backup-dir` or `FRONTDOOR_BACKUP_DIR`) is of today. What only a person can see is a `MANUAL` line until `--confirm NAME` says it holds. It changes nothing of the board, its config or its units; reading the config notes runs `uv run` in the checkout, which may first sync that checkout's environment.
+1. `tools/frontdoor_preflight.py`: the config is a single-user one, the checkout is new enough, no release hold, queue or running release, ports 8021, 8025, 8030 and 8031 are free, the board's, the minute runner's and the portal sync's units are installed, no override of an earlier way back, the config notes can be read (`--baseline FILE` compares them), and a backup of today is there ([The backup line](#the-backup-line)). What only a person can see is a `MANUAL` line until `--confirm NAME` says it holds. It changes nothing of the board, its config or its units; reading the config notes runs `uv run` in the checkout, which may first sync that checkout's environment.
 2. Hold releases ([Holding releases](#holding-releases)).
 3. `tools/frontdoor_snapshot.py`: first the member list, before anything is written. `members.json` is the one that is there, else it is made from the members as the board reads them (`[[members]]`, else `[instance] owner` and `owner_aliases` and `[auth] allowed_emails`; sessions listed as a member's `agents` are not carried over). It has to hold `--expect`'s number of members, aliases and addresses, and the front door has to read every entry. A file that is there and stays also has to let each member the config gives reach the board `main`, found by name or sign-in address. Two data folders that would get the same name in the archive, or one inside the other's, are refused. Then a new folder under `FRONTDOOR_SNAPSHOT_ROOT` (default `~/.local/share/stackshot-runs/frontdoor-switch`) with an archive of `[paths] repo` and `state` (or each `--data PATH`), a copy of the config, the checkout's commit and the config notes. A data folder that is a link is followed; a link inside the data that leads outside the folders archived is refused (give where it leads with `--data` too). Every file that was there both before and after `tar` ran has to be in the archive, and only a snapshot whose every check passed gets the file `snapshot-complete`. Then `identity.key`, `verify.key`, `members.json` and `board-token` in `FRONTDOOR_SECRETS_DIR` (default `~/.config/stackshot/frontdoor`). Keys and members that are there already are kept, a `board-token` that is also another file (a link to `oauth.env`, to a key, or to a file the config names) is refused, and the printed removal command names only the files this run made. No value is printed. A signal that asks the run to end ends the program it runs and prints those removal lines; the snapshot it began is not marked complete.
 4. Add the front door's tables to the config, check them, and turn on the front door, the sign-in service and a splitter on a test port such as 8025 ([The splitter](#the-splitter)).
+
+#### The backup line
+
+The pre-flight needs one of these two at least; with both, either one passes the line. "Today" is the day in `[instance] timezone`, so a run before the day's backup job fails.
+
+- `--backup-log FILE` (or `FRONTDOOR_BACKUP_LOG`), for a backup job that sends its copy off the machine and keeps none: the job's log, one line a run, tab-separated: the time (ISO 8601 with its UTC offset), the job's name, `ok`, `skipped` or `failed`, the bytes sent, a note. The last line of the job `stackshot` has to be `ok`, of more than 0 bytes and of today, so a failed or skipped run after a good one fails the line. A job should write `ok` only after the upload has succeeded: the pre-flight reads the log alone and does not fetch or check the copy.
+- `--backup-dir DIR` (or `FRONTDOOR_BACKUP_DIR`), for backups kept in a folder: the newest file there that is not empty is of today.
+
+Neither the cut-over nor the way back reads a daily backup, so none has to be fetched to the machine for the switch. The way back runs on the reverted config or on a saved copy of the one in the snapshot (step 3), and restores no data; the snapshot's own archive is the local copy of the data.
 
 ### The cut-over
 

@@ -12,7 +12,8 @@ the exit code says so. No script commits or pushes anything. A secret value is n
 Environment:
   STACKSHOT_CONFIG              the instance's stackshot.toml (required)
   FRONTDOOR_PUBLIC_URL          the public address of the board (https://...); required by --apply of the cut-over and the undo
-  FRONTDOOR_BACKUP_DIR          the folder of the board's daily backups (pre-flight, when --backup-dir is not given)
+  FRONTDOOR_BACKUP_DIR          a folder of the board's daily backups (pre-flight, when --backup-dir is not given)
+  FRONTDOOR_BACKUP_LOG          the log of a backup job that keeps its copy elsewhere (pre-flight, when --backup-log is not given)
   FRONTDOOR_SNAPSHOT_ROOT       the folder the snapshots go into (default ~/.local/share/stackshot-runs/frontdoor-switch)
   FRONTDOOR_SECRETS_DIR         the folder of the front door's secrets (default ~/.config/stackshot/frontdoor)
   FRONTDOOR_SWITCH_CHECKOUT     the checkout whose install.sh, release.sh, git history and Python are used (default: the one this file is in)
