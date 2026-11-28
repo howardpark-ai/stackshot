@@ -197,6 +197,10 @@ jobs:
       - name: audit the selection
         if: always() && hashFiles('.suitemap/new.json') != '' && hashFiles('.suitemap/old.json') != ''
         run: uv run --locked --only-group tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
+      # The ceiling lock: the files that pull the most suites on their own may not pull more than tests/suitemap_ceilings.json says, by the map just made.
+      - name: the fan-out ceilings
+        if: always() && hashFiles('.suitemap/new.json') != ''
+        run: uv run --locked --only-group tests python tests/suitemap.py lock --map .suitemap/new.json
   # A failed refresh is raised as an issue, and closed again by the next green run. It needs `issues: write` and nothing else; every value goes in through env.
   report:
     needs: [shards, measure, refresh]

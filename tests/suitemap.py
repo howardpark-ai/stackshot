@@ -106,6 +106,12 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           a commit does not resolve (nothing was checked). A suite the
                                                           new map has no clean measurement for (`ok: false`) is not counted:
                                                           the selection runs it always, so it says nothing about reach
+  tests/suitemap.py lock [--map MAP]                     the ceiling lock: each file of tests/suitemap_ceilings.json has a fan-out (the suites the map picks when
+                                                          only that file changes: the most that run one of its functions, plus those that read it whole; a data
+                                                          file with a fixture link counts the suites that read the link too), and exit 1 when one is above its ceiling
+                                                          or names a file this checkout lacks. Reads only the map and the data file, no git. A ceiling is lowered by
+                                                          editing its number; raising one is a change of that file, and its pull request says why. CI's refresh runs it
+                                                          on the map it has just made
 
 The rules, per changed file F (git diff --name-status -M), the first that applies:
   1. no map, a map of another format, a commit that does not resolve           → all (and one line says the pick is wider than CI's, which has a map)
@@ -3598,6 +3604,57 @@ def audit(args):
     return 0
 
 
+CEILINGS = "tests/suitemap_ceilings.json"   # file -> the most suites the map may pick when only that file changes (see `lock`)
+
+
+def fan_out(m, path):
+    """the suites the map m picks when only `path` changes, by the map alone: for a .py file the most suites that ran one of its functions (the module level, which every importer ran,
+    is not a function: an edit inside a function is the common one, and what `selection` takes as its own scope), together with the suites that read it whole; for any other file the suites
+    that opened it, and those that opened its fixture link (DATA) too"""
+    S = m["suites"]
+    if path.endswith(".py"):
+        whole = {s for s, e in S.items() if path in e.get("whole", ())}
+        per = {}
+        for s, e in S.items():
+            for q in e.get("py", {}).get(path, ()):
+                if q:
+                    per.setdefault(q, set()).add(s)
+        return max([len(v | whole) for v in per.values()] + [len(whole)])
+    probe = {path, DATA[path]} if path in DATA else {path}
+    return len({s for s, e in S.items() if probe & set(e.get("files", ()))})
+
+
+def lock(args):
+    path = args.map or ci_map_path()
+    m, why = read_map(path)
+    if m is None:
+        print(f"suitemap: lock: no map to measure ({why}): {path}", file=sys.stderr)
+        return 1
+    try:
+        with open(os.path.join(ROOT, CEILINGS)) as f:
+            ceilings = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"::error::suitemap: lock: {CEILINGS} is not readable ({type(e).__name__}: {e})")
+        return 1
+    if not isinstance(ceilings, dict) or not ceilings:
+        bad = [f"{CEILINGS}: not a table of file: ceiling"]
+    else:
+        bad = [f"{CEILINGS}: {k!r} has no whole number above 0 as its ceiling" for k, v in ceilings.items() if type(v) is not int or v < 1]
+        bad += [f"{CEILINGS}: {k} is no file of this checkout (renamed or deleted: change the line)" for k in ceilings if not os.path.exists(os.path.join(ROOT, k))]
+    rows = []
+    for k in sorted(ceilings) if not bad else ():
+        n = fan_out(m, k)
+        rows.append((k, n, ceilings[k]))
+        if n > ceilings[k]:
+            bad.append(f"{k} picks {n} suite(s) when only it changes, above its ceiling {ceilings[k]} ({CEILINGS}); a change that raises a ceiling says why in its pull request")
+    for k, n, c in rows:
+        print(f"{k}: {n} (ceiling {c}{', lower it' if n < c else ''})")
+    for b in bad:
+        print(f"::error::{b}")
+    summary(["### Fan-out ceilings", *(f"**{b}**" for b in bad), "", "| file | picks | ceiling |", "|---|---|---|", *(f"| `{k}` | {n} | {c} |" for k, n, c in rows)])
+    return 1 if bad else 0
+
+
 LAUNCH_FETCH_TIMEOUT = 60   # seconds each gh call of the fetch before a launch may take
 
 
@@ -3650,6 +3707,7 @@ def main():
     p.add_argument("--base", metavar="REV", help="the commit the change starts from, fetched from origin when this checkout lacks it (default: the merge base of origin/main and --to)")
     p = sub.add_parser("fetch"); p.add_argument("--sha"); p.add_argument("--repo")
     p = sub.add_parser("warm"); p.add_argument("--rev", default="HEAD")
+    p = sub.add_parser("lock"); p.add_argument("--map")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
     if no_suites(args):   # before a launcher is asked to run it elsewhere: a run of nothing is refused where it was typed
@@ -3667,7 +3725,7 @@ def main():
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
-    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "complete": complete, "select": select, "fetch": fetch, "audit": audit, "warm": warm}[args.cmd](args)
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "complete": complete, "select": select, "fetch": fetch, "audit": audit, "lock": lock, "warm": warm}[args.cmd](args)
 
 
 if __name__ == "__main__":
