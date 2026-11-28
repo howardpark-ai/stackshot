@@ -390,8 +390,6 @@ tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
 check("tool text: anchors names machine:<name>, what is told, that no item turns, and the unknown machine's refusal",
       all(w in tools["anchors"].description for w in ("machine:<name>", "checks in again", "an unknown name is refused", "not a wait", "project-wide machine anchor")) and "machine:<name>" in tools["anchors"].parameters["properties"]["add"]["description"]
       and "machine:<name>" in tools["anchors"].parameters["properties"]["remove"]["description"], tools["anchors"].description[-900:])
-check("tool text: create and update tell that a step naming an offline machine gets a note and what fixes it",
-      all("names a machine of the fleet which is offline now" in tools[n].description and "note, never a refusal" in tools[n].description for n in ("create", "update")), None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

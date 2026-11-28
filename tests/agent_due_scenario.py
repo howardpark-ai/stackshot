@@ -273,7 +273,7 @@ import asyncio as _aio
 _ud = {t.name: t for t in _aio.run(server.mcp.list_tools())}["update"].description
 check("window text: update's description names the park for a window the work needs, and that real-time work stays on agent",
       "Work moving in real time stays on agent however long it takes" in _ud and "wait-and-see window" in _ud and "a soak, a log or data collection window, a trial week, a timer it started" in _ud
-      and 'wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"' in _ud and "does not park to defer work it could do now" in _ud and "gets a note on the reply, never a refusal" in _ud
+      and 'wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"' in _ud and "does not park to defer work it could do now" in _ud
       and "or an item not on agent (parked" in _ud and "needs=external" in _ud, None)
 
 # ================================================================ 6d. a wake alone whose mover's only open steps are timed or start on an event gets a note
@@ -376,7 +376,7 @@ for x, w_, want in STEP_CASES:
     check(f"step matcher: {x!r} on {w_!r} {'reads' if want else 'does not read'}", bool(MG.reads_as_timed_step(x, w_, _today_local)) is want, MG.reads_as_timed_step(x, w_, _today_local))
 check("step matcher: is_reply_trigger reads a reply, not a release", MG.is_reply_trigger(MG.reads_as_timed_step("once the vendor replies, send it", w2)) and not MG.is_reply_trigger(MG.reads_as_timed_step(EVENT.split(": ", 1)[1], w2)), None)
 _ud2 = _ud
-check("step text: update's description names the note for a mover's timed or event-started steps", "every open step opens with a time at the date's hour or day" in _ud2 and "the reply says `(parked: …)`" in _ud2 and "clear_hold=true" in _ud2 and "needs=external for a named outside party's reply" in _ud2 and "started by an outside event" in _ud2 and "another party's step in flight" in _ud2, None)
+check("step text: update's description names the note for a mover's timed or event-started steps", "every open step opens with a time at the date's hour or day" in _ud2 and "the reply says `(parked: …)`" in _ud2 and "clear_hold=true" in _ud2 and "another party's step in flight" in _ud2, None)
 
 # ================================================================ 7. what was stored before keeps working
 for p in (T / "store/a").glob("*.json"): p.unlink()

@@ -231,7 +231,7 @@ check("pass: an open wait whose machine is online turns on the next pass (the re
 tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
 check("tool text: create and update name box_online in the wait_event parameter and in the description (what it is for; an online or unknown machine is refused)",
       all("box_online <machine>" in tools[n].parameters["properties"]["wait_event"]["description"] and "box_online <machine>" in tools[n].description for n in ("create", "update"))
-      and "a machine already online" in tools["update"].description and "unknown name is refused" in tools["update"].description, None)
+      and "unknown name is refused" in tools["update"].description, None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

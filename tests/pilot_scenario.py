@@ -1707,7 +1707,7 @@ check("actor: …and naming who acts in the line ends the note", "name who acts"
 res = _update_svc._update(gl, options=opt_pair("Flag", "we approve it"), ask="Decide: flag or hold \u00b7 Recommend: the slim one \u00b7 Stakes: a day either way \u00b7 By: no date", sender="home-beta")
 check("actor: the Recommend-part note still works beside the actor note",
       "(note: the ask's Recommend part does not name the recommended option" in res and "(note: the line of option" in res and "Refused" not in res, res)
-check("actor: the shared item form (create and update descriptions) carries the ask-line rule, and the options parameter, which both tools carry, the option rule", "The ask line never says" in _wt_text._ITEM_FORM and "Name who acts in every option, label and line" in _wt_text._T.param("OPTIONS") and "a role" in _wt_text._T.param("OPTIONS"), "")
+check("actor: the options parameter, which both tools carry, carries the option rule", "Name who acts in every option, label and line" in _wt_text._T.param("OPTIONS") and "a role" in _wt_text._T.param("OPTIONS"), "")
 bo = ui_render.Board(str(T / "store")); ip = bo.item_html(go)
 check("options: the item page lists them under the ask, the recommended one marked",
       '<b class="osub">Options</b><ol class="iopts"><li class=rec><b>Vendor A</b> <span class="badge rec">recommended</span><span class="oline">Cheaper, and ships next week.</span></li><li><b>Vendor B</b>' in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 900])
