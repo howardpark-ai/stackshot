@@ -200,6 +200,30 @@ def part_file():
     reset_members({"alice2": {**inv}})
     check("remove: an admin's own entry is not removed", "admin" in str(raised(invites.remove, "x@example.com", replace(S, admins=("alice2",)))) and "alice2" in members())
 
+    # a person removed and invited again: the new registration is the new person's own
+    reset_members()
+    invites.register("new@example.com", "alice", S); invites.register("new@example.com", "alice", other)
+    invites.admit("new@example.com", "111", True)
+    invites.remove("new@example.com", S)
+    ino = os.stat(REAL_MEMBERS).st_ino
+    e = raised(invites.register, "new@example.com", "alice", S)
+    check("re-invite: a board taken off an entry that keeps the earlier account is refused with the way out", isinstance(e, invites.InviteError) and "remove new@example.com from every board first" in str(e)
+          and members()["new@example.com"]["boards"] == ["side"] and os.stat(REAL_MEMBERS).st_ino == ino, (e, members()))
+    check("re-invite: the earlier account is not given the board again, and keeps the other", invites.admit("new@example.com", "111", True) == "" and members()["new@example.com"]["boards"] == ["side"])
+    invites.remove("new@example.com", other)
+    check("re-invite: removed from every board, the entry is gone and a new registration has no account", invites.register("new@example.com", "alice", S) == (True, False)
+          and members()["new@example.com"]["invited"]["google_sub"] == "", members())
+    check("re-invite: the new person's sign-in is the one recorded, and the earlier account is then refused", invites.admit("new@example.com", "222", True) == ""
+          and members()["new@example.com"]["invited"]["google_sub"] == "222" and invites.admit("new@example.com", "111", True) == "other_account")
+    reset_members()
+    invites.register("new@example.com", "alice", S); invites.register("new@example.com", "alice", other)
+    invites.remove("new@example.com", S)
+    check("re-invite: an entry whose account was never recorded takes the board again", invites.register("new@example.com", "alice", S) == (True, False)
+          and members()["new@example.com"]["boards"] == ["side", "main"], members())
+    reset_members()
+    invites.register("new@example.com", "alice", S); invites.admit("new@example.com", "111", True)
+    check("re-invite: a person who joined on one board is added to another as before", invites.register("new@example.com", "alice", other) == (True, True))
+
     for label, text, word in (("a name written twice", '{"a@example.com": ["main"], "a@example.com": ["side"]}', "twice"),
                               ("a name written twice inside an entry", '{"a": {"boards": ["main"], "boards": ["side"]}}', "twice"),
                               ("a file that is not JSON", '{"a": ', "not valid JSON"),
