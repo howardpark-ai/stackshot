@@ -573,21 +573,28 @@ def presence_minutes() -> float:
         return PRESENCE_MINUTES
 
 
-def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None) -> bool:
+def presence_here(who: str, now: float | None = None, idx: dict[str, Any] | None = None, unread: bool = False) -> bool:
     """is the owner there for this pane: the stamp file <state>/prompts/<session id> (written by the prompt hook of the config repo; stackshot only reads it; with [agents_box] ssh set, a copy of the one on that box) holds epoch seconds
     within [presence] minutes. The pane's session id comes from the CLI registry (service/handoff.py `handoff_pane_row`: ~/.claude/sessions/<pid>.json). A pane this box does not run, a missing, empty or
-    unreadable file, a stamp from the future or an old one: not there."""
+    unreadable file, a stamp from the future or an old one: not there. `unread` is the answer instead wherever it cannot be told (no pane row: none here, or a row file or registry that cannot be read; a stamp that does not read or is from the future;
+    no stamp folder, or one with no stamp at all, as an expired copy of the agents box's is): a caller for which "cannot tell" counts as there passes True. An old stamp, or none beside other panes' stamps, is not there for every caller."""
     h = _hooks()
     try:
         row = h.handoff_pane_row(who, idx)
         sid = str((row[1] if row else {}).get("sessionId") or "")
         if not sid or "/" in sid or sid.startswith("."):
-            return False
-        ts = float((_ab.prompts_dir() / sid).read_text(encoding="utf-8").strip().split()[0])
+            return unread
+        stamps = _ab.prompts_dir()
+        try:
+            ts = float((stamps / sid).read_text(encoding="utf-8").strip().split()[0])
+        except FileNotFoundError:
+            return unread and not any(stamps.iterdir())
         now = time.time() if now is None else now
-        return 0 <= now - ts <= presence_minutes() * 60.0
-    except Exception:  # noqa: BLE001  — no stamp, no presence
-        return False
+        if not ts <= now:
+            return unread
+        return now - ts <= presence_minutes() * 60.0
+    except Exception:  # noqa: BLE001  — no stamp that reads, no presence, unless the caller says otherwise
+        return unread
 
 
 def present_fronts(now: float | None = None, idx: dict[str, Any] | None = None) -> list[str]:
@@ -758,6 +765,12 @@ def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> 
     except Exception as e:  # noqa: BLE001  — the line is a record; the gate's verdict stands without it
         print(f"front gate: {gid} board line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return out
+
+
+def front_trace(front: str, back: str, note: str, gid: str, retired: bool = False) -> None:
+    """A message rerouted from the front agent `front` to the background agent `back` (`[front] to_background_senders`, `[front] idle_peers_to_background`) leaves on each open item it names (`gid`, comma-separated) the History
+    line that holding it for `front` leaves (`_front_board_line`). Nothing is sent or filed for `front`, and no need or mover changes. `retired`: `back` turned out retired. Never raises."""
+    _front_board_line(gid, front, False, f"{back} turned out retired" if retired else f"it went to {back}, the project's background agent", note)
 
 
 def _front_held_log(gid: str, owner: str, kind: str, reason: str, note: str, filed: bool = False) -> None:
