@@ -14,6 +14,8 @@
 # same name through the chain-global helper beside it (the user's global core.hooksPath, else the XDG hook directory), with the
 # same arguments and the same lines on standard input. Both run, so every refusal shows; the push is refused if either refuses.
 # Nothing happens when there is no such hook.
+# When a pushed commit is the checked-out one it also runs `tools/prepush --hook` (the retired-terms lint, a few seconds, no
+# test suite): that lint reads the files here, so for any other pushed commit it is not run, and the hook says so.
 set -u
 # Standard input is read by two consumers, so it is kept in a file first.
 refs=$(mktemp "${TMPDIR:-/tmp}/pre-push.XXXXXX") || exit 1
@@ -39,10 +41,13 @@ else
         done
     done
 fi
+head=$(git rev-parse -q --verify HEAD)
+here= elsewhere=
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     case $local_sha in *[!0]*) ;; *) continue ;; esac            # all zeros: a delete
     name=${remote_ref#refs/heads/}; name=${name#refs/tags/}
+    if [ "$(git rev-parse -q --verify "$local_sha^{commit}")" = "$head" ]; then here=1; else elsewhere=1; fi
     if [ "${remote_sha:-$zero}" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
         python3 "$root/tools/clean_text.py" --branch "$name" --commits "$remote_sha..$local_sha" </dev/null >&2 || status=1
     elif [ -n "$scope" ]; then
@@ -52,4 +57,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
 done <"$refs"
 [ "$status" -eq 0 ] || echo "pre-push: the push was refused; fix the text named above (git rebase -r or git commit --amend), or rename the branch." >&2
+if [ -f "$root/tools/prepush" ]; then
+    if [ -n "$here" ]; then
+        python3 "$root/tools/prepush" --hook </dev/null >&2 ||
+            { status=1; echo "pre-push: the push was refused: tools/prepush --hook failed (above)." >&2; }
+    elif [ -n "$elsewhere" ]; then
+        echo "prepush: the pushed commit is not the checked-out one, so the retired-terms lint was not run" >&2
+    fi
+fi
 exit "$status"

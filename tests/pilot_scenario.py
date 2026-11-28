@@ -543,13 +543,13 @@ check("not a hub: the keeper's line stays on the Projects page", "<li>work-ospre
 bs.proj["projects/alpha"]["agents"] = {"work-osprey-main": "does the work", "work-osprey-x": "keeps the kept page"}
 bs.proj["projects/alpha"]["back_agents"] = {"work-osprey-x": "keeps the kept page"}   # the registry's shape: agents = all, back_agents = the background subset
 ar = alpha_rows(bs)
-check("hub row: a keeper that owns nothing and is not listed has no line; the -main agent is the one front line, untagged", '<li title="does the work">work-osprey-main</li>' in ar and ">work-osprey</li>" not in ar and 'class="rtag"' not in ar.split("work-osprey-main")[0] and "steward" not in ar.lower(), ar)
-check("hub row: the lead shows the full label, and no suffix is built on a keeper that does not lead", ">work-osprey-main</li>" in ar and ">-main</li>" not in ar, ar)
+check("hub row: a keeper that owns nothing and is not listed has no line; the -main agent is the one front line, untagged", re.search(r'<li>work-osprey-main <span class="xp"[^>]*>.*?>does the work</span></span></li>', ar) is not None and ">work-osprey</li>" not in ar and 'class="rtag"' not in ar.split("work-osprey-main")[0] and "steward" not in ar.lower(), ar)
+check("hub row: the lead shows the full label, and no suffix is built on a keeper that does not lead", '<li>work-osprey-main <span class="xp"' in ar and ">-main</li>" not in ar and ">-main <" not in ar, ar)
 check("hub row: a running background agent follows the front agents, dimmed and tagged", 0 <= ar.find("work-osprey-main") < ar.find("work-osprey-x")
-      and re.search(r'<li class=dimline title="keeps the kept page">work-osprey-x <span class="rtag"[^>]*>background</span></li>', ar) is not None, ar)
+      and re.search(r'<li class=dimline>work-osprey-x <span class="rtag"[^>]*>background</span> <span class="xp"[^>]*>.*?>keeps the kept page</span></span></li>', ar) is not None, ar)
 bm = ui_render.Board(f"{tmp}/store"); bm.proj["projects/alpha"]["agents"] = {"work-osprey-aaa": "helps", "work-osprey-main": "does the work"}
 _am = alpha_rows(bm)
-check("hub row: the -main agent leads, even when another agent sorts before it", 0 <= _am.find(">work-osprey-main</li>") < _am.find(">work-osprey-aaa</li>"), _am)
+check("hub row: the -main agent leads, even when another agent sorts before it", 0 <= _am.find(">work-osprey-main ") < _am.find(">work-osprey-aaa "), _am)
 check("board.md lists the background agent, not the keeper that owns nothing and is not listed", "`a/work-osprey`" not in bs.markdown() and "-x`" in bs.markdown(), [l for l in bs.markdown().splitlines() if "alpha" in l][:4])
 check("lines() carries a background agent's mandate", {x[0]: x[6] for x in bs.lines("projects/alpha", bs.by_proj["projects/alpha"])}.get("a/work-osprey-x") == "keeps the kept page")
 _r0 = bs.by_proj["projects/alpha"][0]
@@ -584,9 +584,9 @@ _sc = lambda b: re.findall(r'<td class="sess">(.*?)</td>', idx(b))
 am = alpha_rows(bsm)
 am = alpha_rows(bsm)
 _ilm = il(bsm); _lm = [x[0] for x in _ilm]
-check("hub row, keeper = -main: it appears once, as the plain lead line with its full label", _lm.count("a/work-osprey-main") == 1 and _lm[0] == "a/work-osprey-main" and _ilm[0][7] == "" and _ilm[0][6] == "does the work" and am.count("work-osprey-main") == 1 and 'rtag">keeper' not in am, (_lm, am))
+check("hub row, keeper = -main: it appears once, as the plain lead line with its full label", _lm.count("a/work-osprey-main") == 1 and _lm[0] == "a/work-osprey-main" and _ilm[0][7] == "" and _ilm[0][6] == "does the work" and am.count(">work-osprey-main ") == 1 and 'rtag">keeper' not in am, (_lm, am))
 check("…the other agents follow as lines of their own, the background one with an item tagged; the Projects page lists them with the front agent before the background one",
-      "a/work-osprey-aaa" in _lm and {x[0]: x[7] for x in _ilm}.get("a/work-osprey-x") == "background" and 0 <= am.find(">work-osprey-main</li>") < am.find(">work-osprey-aaa</li>") < am.find("work-osprey-x"), (_lm, am))
+      "a/work-osprey-aaa" in _lm and {x[0]: x[7] for x in _ilm}.get("a/work-osprey-x") == "background" and 0 <= am.find(">work-osprey-main ") < am.find(">work-osprey-aaa ") < am.find("work-osprey-x"), (_lm, am))
 check("…and nothing on the index says steward (a role no session has any more)", "steward" not in " ".join(_sc(bsm)).lower() and "steward" not in ui_render._ROLE_TIP and "steward" not in ui_render._ROLE_TIP.get("background", ""), _sc(bsm))
 _pm = bsm.routing_html("projects/alpha"); _sm = _pm[_pm.find("<h2>Sessions"):_pm.find("<h2>Anchors")]
 check("…the project page lists it once under Agents, with no Steward group", _sm.count("work-osprey-main</span>") == 1 and _sm.find(">Agents</h3>") < _sm.find("work-osprey-main</span>") < _sm.find(">Background agents</h3>") and "steward" not in _sm.lower(), re.sub(r"<[^>]*>", "|", _sm))
@@ -2422,7 +2422,9 @@ check("audit: the server's answer shows 10 s — 409 / 503 warn, 404 hides the l
       "else if(s===409||s===503)say(t||SST('panel.audit.http',{n:s}),true)" in AJ and "if(s===404){E.hidden=true;if(P)P.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
 check("audit: the variants — running since, did not finish (warn), the shortlist (a group's name, its audits, its findings in 24 h, a dash where no log is kept) and the note under it",
       "num(d.running_since)?SST('panel.audit.running_since',{at:clock(d.running_since)}):SST('panel.audit.running')" in AJ and "sp('a-run a-bad',SST('panel.audit.unfinished'))" in AJ
-      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h',SST('panel.audit.h_found'))" in AJ and "if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))" in AJ
+      and "sp('val a-n'+(g.found?' hit':'')+(none&&why?' a-none':''),none?'–':String(g.found),none?why:'')" in AJ and "sp('a-h',SST('panel.audit.h_found'))" in AJ
+      and "if(C.note&&NK[C.note]!=='unlogged')f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))" in AJ
+      and "var why=C.note&&NK[C.note]==='unlogged'?SST('panel.audit.dash_help'):'';" in AJ
       and "row('findings'" not in AJ and "row('last audit'" not in AJ)
 check("audit: the Audits page's button shares the script: it finds #audit-now-page and the message line #audit-page-msg, and both buttons cue through the one cue()",
       "document.getElementById('audit-page-msg')" in AJ and "B=[N,P].filter(Boolean)" in AJ and "B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})})" in AJ and AJ.count("function cue()") == 1)
@@ -2430,7 +2432,8 @@ check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTime
       and "function when(ts){var p=pt(ts),k=p.year===pt(Date.now()/1000).year?'date.full':'date.full_year';return SST(k,{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
 check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
-      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ
+      "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}" in AJ
+      and "document.dispatchEvent(new Event('stackshot:redrawn'))}" in AJ
       and "T.textContent=''" not in AJ.replace("else{T.textContent='';T.appendChild(f)}", ""))
 # with the audit on, the static page carries the card already drawn — the script's rows, classes and button
 from stackshot.audit import audit_overview as _ov
@@ -2443,13 +2446,14 @@ _BTN = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'    
 _NM = lambda dis="": '<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now"' + dis + '>Audit now</button></b>'
 _HD = '<div id="audit" class="pc audit" data-tz="Asia/Dubai">' + _NM() + '<span class="a-txt">'
 _CH = '<span class="a-h"></span><span class="a-h">audits</span><span class="a-h">found, 24 h</span>'
-def _CARD(found=None, note="\u2013 keeps no findings log"):
-    """The shortlist the card draws: per group its name, audits and findings in 24 h (0 for a logged group without findings, a dash for the two that keep no log) and the note."""
+def _CARD(found=None):
+    """The shortlist the card draws: per group its name, audits and findings in 24 h (0 for a logged group without findings, a dash for the two that keep no log, which carries what it means)."""
     found = found or {}; o = _CH
     for g in _ov.GROUPS:
         n = found.get(g["key"], 0) if g["log"] else None
-        o += f'<span class="lbl">{g["name"]}</span><span class="val a-n">{len(g["audits"])}</span><span class="val a-n{" hit" if n else ""}">{"\u2013" if n is None else n}</span>'
-    return o + (f'<span class="a-cn">{note}</span>' if note else "")
+        o += f'<span class="lbl">{g["name"]}</span><span class="val a-n">{len(g["audits"])}</span>'
+        o += '<span class="val a-n a-none" title="A dash means the group keeps no findings log.">\u2013</span>' if n is None else f'<span class="val a-n{" hit" if n else ""}">{n}</span>'
+    return o
 _LOG = _AD / "findings-log.jsonl"
 check("audit on, no run yet: visible, the shortlist of the eight groups (a zero for a group that keeps a log and found nothing, a dash for the two that keep none) and the note, no run line",
       _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CARD() + '</span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
@@ -2458,7 +2462,7 @@ check("audit on, no run yet: visible, the shortlist of the eight groups (a zero 
 ha = ui_render.Board(f"{tmp}/store", now=_now).html()
 check("audit on, last run finished: the same shortlist (the card no longer lists the last run), no run line",
       _aw(ha) == _HD + _CARD() + '</span>' + _BTN, _aw(ha))
-check("audit on: the dash is an en dash and never a zero for Fleet and services and Text and rules; the others show a number", _aw(ha).count("\u2013</span>") == 2 and _aw(ha).count('<span class="val a-n">') == 16, _aw(ha))
+check("audit on: the dash is an en dash and never a zero for Fleet and services and Text and rules; the others show a number", _aw(ha).count("\u2013</span>") == 2 and _aw(ha).count('<span class="val a-n">') == 14 and _aw(ha).count('<span class="val a-n a-none" title=') == 2, _aw(ha))
 check("audit on: the line does not move a block's fingerprint (its script keeps it current)", _bm(ha) == _bm(he), (_bm(ha), _bm(he)))
 _av = ha[ha.find('<section id="audit-panel">'):]; _av = _av[:_av.find("</section>") + 10]
 for _rx, _sub in ui_render._VOLATILE: _av = _rx.sub(_sub, _av)

@@ -1443,7 +1443,7 @@ check("a stale snapshot, slow GitHub: the old path took the whole rebuild (3 cal
 check("…serve() answers at once with the last snapshot, 40 s old, a rebuild running, and not 'stale' (a rebuild is on its way)", after_s < 0.15 and sv["ts"] == T0 and sv["age_s"] == 40
       and sv["refreshing"] is True and sv["stale"] is False and len(sv["runners"]) == 10, (after_s, sv.get("age_s"), sv.get("refreshing"), sv.get("stale")))
 h = R2.table_html(sv, CLOCK[0])
-check("…its page says how old it is and that it is refreshing, and has no 'not refreshed since' line", f"Updated {CLK}:00 {ABBR} · 40s ago · refreshing now · page checks every 30 s" in h and "not refreshed since" not in h, h[:200])
+check("…its page says how old it is and that it is refreshing, and has no 'not refreshed since' line", f"Updated {CLK}:00 {ABBR} · 40s ago · refreshing now</p>" in h and "not refreshed since" not in h, h[:200])
 check("…and in the JSON (refreshing, not pending)", R2.data(sv, CLOCK[0])["refreshing"] is True and R2.data(sv, CLOCK[0])["pending"] is False)
 check("…the rebuild lands in the background: the next answer is the new snapshot, not refreshing", settle() and R.serve()["ts"] == T0 + 40 and R.serve()["refreshing"] is False and lists_asked() == 2, (lists_asked(),))
 
