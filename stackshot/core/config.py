@@ -1535,6 +1535,11 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         if (old_owner and old_owner != pe.PLACEHOLDER) or get("instance", "owner_aliases", cfg=cfg) or (isinstance(old_mail, list) and any(e not in owned for e in old_mail)):
             out.append("[[members]] is set, so [instance] owner, owner_aliases and [auth] allowed_emails are not read for a person: move what they hold into it, and drop them")
         listed = get("members", cfg=cfg)
+        first_t = listed[0] if isinstance(listed, list) and listed and isinstance(listed[0], dict) else {}
+        old_login = str(get("github", "owner_login", cfg=cfg) or "").strip()
+        first_login = str(first_t.get("github") or "").strip()
+        if old_login and first_login and first_login.casefold() != old_login.casefold():
+            out.append("[[members]] gives the first member a github login, so [github] owner_login is not read: drop it")
         if isinstance(listed, list) and len(listed) > 1 and not any(isinstance(t, dict) and "agents" in t for t in listed):
             out.append('[[members]] names several members and none lists agents, so no row of Home says an agent acts for a person: add agents = ["<session name>"] to the member a session acts as '
                        "(agents = [] on a member says there is none)")

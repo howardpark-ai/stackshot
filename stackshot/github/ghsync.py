@@ -77,6 +77,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core import members as _members  # noqa: E402  — whose login a comment is written from
 from stackshot.model import option_labels as _ol  # noqa: E402  — the letter an option's label repeats from its badge, dropped on read
 from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy makes no GitHub write
 from stackshot.core import ghbudget as _gb   # noqa: E402  — the hourly ledger of GitHub calls shared with the other readers of the host's token
@@ -784,7 +785,7 @@ _CLIENT: dict[str, GitHub] = {}
 def known_login() -> str:
     """The login the owner writes on GitHub as, without asking GitHub (the router's test of a notice that is the owner's own): [github] owner_login,
     else the login the token of a client of this process already read (GET /user, cached on the client), else ''."""
-    lg = owner_login()
+    lg = _members.login_of()
     return lg or next((c._login for c in _CLIENT.values() if c._login), "")
 
 
@@ -1404,10 +1405,12 @@ def poll_comments(gh: GitHub | None = None, store: Path | None = None, say: Call
         st = {"since": _iso(t0), "started": _iso(t0), "seen": []}
         _save_comments_state(st)
         say(f"comments: reading from {st['since']} on; what came before is history, never delivered")
-    login = owner_login() or gh.login()
-    if not login:
+    login = _members.login_of() or gh.login()      # the first member's: `[[members]] github`, else `[github] owner_login`, else the token's own
+    others = [(lg, p.name) for lg, p in _members.logins() if p.name != _members.first().name]      # every other member's own login
+    if not login and not others:
         say("comments: whose comments to read is unknown ([github] owner_login is unset and GitHub refused GET /user); nothing read")
         return out
+    names = ([(login, _members.first().name)] if login else []) + others
     if on_comment is None:                           # a process with no server in it (a CLI): the comments are the server's to take
         say("comments: no hook to take them (not the server); nothing read")
         return out
@@ -1425,21 +1428,22 @@ def poll_comments(gh: GitHub | None = None, store: Path | None = None, say: Call
         except (TypeError, ValueError):
             cid = 0
         up = _epoch(c.get("updated_at")); latest = max(latest, up)
-        if not cid or cid in seen or not is_owner_comment(c, login) or _epoch(c.get("created_at")) < started:
+        who = next((nm for nm in names if is_owner_comment(c, nm[0])), None) if cid and cid not in seen else None
+        if who is None or _epoch(c.get("created_at")) < started:
             continue                                 # the mirror's own, another user's, a delivered one edited, or history edited late
         n = issue_number(c); gid = item_of_issue(n, store) if n else ""
         if not gid:
             seen.add(cid); out["skipped"] += 1
-            say(f"comments: {login}'s comment {cid} on #{n or '?'} skipped: no item mirrors that issue"); continue
+            say(f"comments: {who[0]}'s comment {cid} on #{n or '?'} skipped: no item mirrors that issue"); continue
         comment = {"id": cid, "text": str(c.get("body") or "").strip(), "url": str(c.get("html_url") or ""),
-                   "ts": _epoch(c.get("created_at")) or t0, "login": login, "issue": n}
+                   "ts": _epoch(c.get("created_at")) or t0, "login": who[0], "issue": n, "by": who[1]}      # `by`: the member whose login wrote it
         try:
             took = bool(on_comment(gid, comment)) if on_comment is not None else False
         except Exception as e:  # noqa: BLE001  — the next read tries it again
-            failed.append(up); say(f"comments: {gid} did not take {login}'s comment {cid} ({type(e).__name__}: {e}); again at the next read"); continue
+            failed.append(up); say(f"comments: {gid} did not take {who[0]}'s comment {cid} ({type(e).__name__}: {e}); again at the next read"); continue
         seen.add(cid)
         if took:
-            out["new"] += 1; say(f"comments: {gid} ← {login}'s comment {cid} on #{n}")
+            out["new"] += 1; say(f"comments: {gid} ← {who[0]}'s comment {cid} on #{n}")
         else:
             out["skipped"] += 1
     out["failed"] = len(failed)

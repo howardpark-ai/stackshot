@@ -23,7 +23,9 @@ font_stack = 'Pretendard,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","
 # name = "member-a"
 # aliases = ["MA"]                        # the other names a line of next may open with for this person
 # emails = ["member-a@example.com"]       # the Google addresses that sign in as this person
-# agents = []                             # the sessions that act as this person, e.g. ["mail-agent"] for one that sends as them: with several members its rows on Home say "acts for member-a"; every other agent is the board's
+# github = ""                             # the GitHub login this person comments from (a comment by it is stored as theirs; a login belongs to one member); the first member's replaces [github] owner_login
+# slack_command = ""                      # an argv that posts this person's urgent For you rows to Slack, instead of [for_you] slack_command ("" = the shared command)
+# agents = []                           # the sessions that act as this person, e.g. ["mail-agent"] for one that sends as them: with several members its rows on Home say "acts for member-a"; every other agent is the board's
 
 [paths]
 repo = "~/stackshot-data"                           # the git checkout the publisher commits into (the store and the rendered board live there)

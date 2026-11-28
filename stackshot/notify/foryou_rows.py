@@ -61,11 +61,12 @@ def key_of(gid: str, kind: str, disc: Any) -> str:
     return f"{gid}:{kind}:{disc}"
 
 
-def row_fields(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, shown: str, url: str, urgent: bool = False) -> dict[str, Any]:
-    """The fields of one row for an event on an item, for foryou.add: the item as a session reads it (`shown`), the item's page (`url`), the line cut to WHAT characters."""
+def row_fields(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, shown: str, url: str, urgent: bool = False, member: str = "") -> dict[str, Any]:
+    """The fields of one row for an event on an item, for foryou.add: the item as a session reads it (`shown`), the item's page (`url`), the line cut to WHAT characters, and the member the row is
+    for (`member`: "" for the first member, whose rows carry none, so a board of one member writes the rows it always wrote)."""
     meta = item.get("metadata") or {}
     return {"key": key_of(gid, kind, disc), "kind": kind, "gid": gid, "item": shown, "project": str(meta.get("project") or ""),
-            "what": _clip_line(what, WHAT), "url": url, "urgent": urgent}
+            "what": _clip_line(what, WHAT), "url": url, "urgent": urgent, **({"member": member} if member else {})}
 
 
 def decision_left(before: dict[str, Any] | None, item: dict[str, Any]) -> bool:

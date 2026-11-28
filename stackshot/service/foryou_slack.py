@@ -18,6 +18,7 @@ from typing import Any
 
 from stackshot.core import agentbox as _ab
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.notify import slack as _slack
 from stackshot.service import foryou as _fysvc
 
@@ -32,8 +33,8 @@ _FORYOU_SLACK_TIMEOUT = 30.0             # seconds a Slack command may run befor
 
 
 def _for_you_slack_on() -> bool:
-    """Is there a Slack path at all ([for_you] slack_command set)? The scenario suite replaces this with the hook."""
-    return bool(str(_cfg.get("for_you", "slack_command") or "").strip())
+    """Is there a Slack path at all ([for_you] slack_command set, or a member's own slack_command)? The scenario suite replaces this with the hook."""
+    return bool(str(_cfg.get("for_you", "slack_command") or "").strip()) or any(p.slack_command for p in _members.members())
 
 
 def _foryou_slack(row: dict[str, Any]) -> None:
@@ -74,8 +75,10 @@ def _foryou_slack_one(rid: int) -> None:
     row = _fysvc.row_by_id(rid)
     if row is None or row.get("slacked"):
         return                             # marked seen meanwhile, or already posted
+    own = (_members.person_of(row.get("member")) if row.get("member") else None) or _members.first()      # a row with no member is the first member's; each posts through its own command, when it has one
+    cmd = own.slack_command
     try:
-        err = _for_you_slack_post(_slack.message(row))
+        err = _for_you_slack_post(_slack.message(row), cmd) if cmd else _for_you_slack_post(_slack.message(row))
     except Exception as e:  # noqa: BLE001
         err = f"{e.__class__.__name__}: {e}"
     tries = _fysvc.slack_result(rid, not err)
@@ -83,14 +86,15 @@ def _foryou_slack_one(rid: int) -> None:
         print(_slack.not_posted(rid, tries, err), file=sys.stderr, flush=True)
 
 
-def _for_you_slack_post(text: str) -> str:
+def _for_you_slack_post(text: str, command: str = "") -> str:
     """THE SLACK HOOK of the For you list. stackshot has no Slack posting path of its own (the Slack receiver only receives Slack, and holds no
     posting credential), and this adds no credential: `[for_you] slack_command` names an argv (a script that already posts, such as the
     one a briefing already uses) that gets the text on its standard input; empty (the default) = no Slack path, the row is on the list only.
+    `command` is a member's own `[[members]] slack_command`, which a row of that member posts through instead of the shared one (the caller passes it only when the member has one).
     The command runs in a session of its own and its output goes to a file, so a child it leaves behind holds no pipe of ours; past
     _FORYOU_SLACK_TIMEOUT the whole process group is killed. → "" when posted, else why not. The scenario suite replaces this function."""
     import shlex
-    cmd = str(_cfg.get("for_you", "slack_command") or "").strip()
+    cmd = command.strip() or str(_cfg.get("for_you", "slack_command") or "").strip()
     if not cmd:
         return _slack.NO_PATH
     with tempfile.TemporaryFile() as err:

@@ -13,7 +13,7 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import instance as _inst
-from stackshot.core.instance import OWNER
+from stackshot.core import members as _members
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
@@ -44,11 +44,12 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
 def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     """ghsync's hook for the owner's own comment on an item's issue. The comment
     is recorded on the item under metadata.answers, the list the board's answer buttons write too (the board's
-    answer box): {ts, kind: "comment", text, via: "github", url, comment_id} (no `by` while one person is served: the comment's login is the first person's, and a record with none reads as theirs), `via` being the flag that it was written
+    answer box): {ts, kind: "comment", text, via: "github", url, comment_id} (`by` is the member whose login wrote it, none for the first member: a record with none reads as theirs), `via` being the flag that it was written
     on GitHub. The save is the server's own (no author): the mirror carries no answers, so the owner's comment is never posted back to the issue. Then the mover and the sessions named in
     its needs are told one line each (tell_comment). Reading only: needs, status and the page stay as they are, and on a board of several members a hand-off to another member stays open. → False when
     no item has the id (the reader skips the comment); True when it is on the item (a second call for the same comment, after
     a restart between the save and the reader's mark, tells nobody again)."""
+    who = _members.person_of(c.get("by")) or _members.person_of_login(c.get("login")) or _members.first()      # the member whose login wrote it (ghsync names them); a comment that names none is the first member's
     with _writes.ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
         try:
             item = _svcstore._load(gid)
@@ -61,20 +62,21 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         if any(a.get("comment_id") == c.get("id") for a in answers):
             return True
         rec = {"ts": float(c.get("ts") or time.time()), "kind": "comment", "text": str(c.get("text") or ""), "via": "github",
-               "url": str(c.get("url") or ""), "comment_id": c.get("id")}      # no `by`: the one login the reader follows ([github] owner_login) is the first person's, and a record with none reads as the first person's
+               "url": str(c.get("url") or ""), "comment_id": c.get("id")}
+        _members.stamp(rec, who.name)      # `by` is the member whose login wrote it; none for the first member, whose records carry no `by` (a record with none reads as theirs)
         rec.update(_answer._question_fields(item, rec["text"]))      # a comment that is nothing but a question is marked, as one typed on the board is
         answers.append(rec)
         meta["answers"] = answers
         try:
             r_ = _ho.pending_his(item)
-            mine = r_ is not None and (not _mgates.many() or _model.names_member(r_.get("to"), OWNER))      # several members: only a hand-off to the commenter, the first member
+            mine = r_ is not None and (not _mgates.many() or _model.names_member(r_.get("to"), who.name))      # several members: only a hand-off to the commenter
             if _handoff.handoff_on() and r_ and mine and float(c.get("ts") or time.time()) >= float(r_.get("at") or 0):      # his comment, made after the hand-off, ends his hand-off record
-                _ho.answered(item, time.time(), f"{OWNER} commented on GitHub", at=float(c.get("ts") or time.time()))
+                _ho.answered(item, time.time(), f"{who.name} commented on GitHub", at=float(c.get("ts") or time.time()))
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         _writes.save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
     _hooks().publish()
-    told = _telling.tell_comment(gid, item, str(c.get("text") or ""))
+    told = _telling.tell_comment(gid, item, str(c.get("text") or ""), who.name)
     with _writes.ITEM_LOCK:      # the sessions told are kept on the comment's record, as for an answer on the board: none of them is told it again in the reply to its next write
         _answer._record_told(gid, rec, told)
     return True

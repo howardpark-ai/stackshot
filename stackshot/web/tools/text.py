@@ -24,7 +24,8 @@ _OPENERS_TXT = ", ".join(f"`{o}:`" for o in _cfg.owner_openers())
 # Said only when the board has more than one member (a restart-only setting): empty, so a one-member board reads the text exactly as before.
 _MEMBERS_NOTE = ("" if len(_members.members()) < 2 else
                  f" The board has several members ({', '.join(p.name for p in _members.members())}): where this text says {OWNER}, it means the member the item is for. A decision, a step of a member's "
-                 "or a line that opens `you:` must name that member (mover=<member>, or open the line with the member's name); `you:` alone is refused, and an ask beside a step names the same member as the step.")
+                 "or a line that opens `you:` must name that member (mover=<member>, or open the line with the member's name); `you:` alone is refused, and an ask beside a step names the same member as the step. "
+                 f"A message to a front agent for a member carries that member's mark on its first line ({', '.join(_members.for_mark(p) for p in _members.members())}); the agent takes any member's.")
 
 
 _HOST = _sc.bash_host() or "the Linux host"

@@ -11,9 +11,11 @@ import sys
 import time
 from typing import Any
 
+from stackshot.core import members as _members
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model.ids import _item_url
 from stackshot.notify import foryou_rows as _rows
@@ -41,6 +43,21 @@ def _foryou_key(gid: str, kind: str, item: dict[str, Any]) -> str:
 _FORYOU_FAILED: set[str] = set()         # keys of closes whose row could not be written (the fallback in tell_close_owner reads it)
 
 
+def item_member(item: dict[str, Any], kind: str = "") -> _members.Person:
+    """The member a notice about an item is for: the member a decision asks (`member_gates.asked_member`, for `kind` "decision"), else the member the item's mover names, else the member a session
+    that moves it acts as (`[[members]] agents`), else the item's member (`model.item_person`: a line of next, else the first member). The first member on a board of one."""
+    meta = item.get("metadata") or {}
+    if kind == "decision":
+        return _members.person_of(_mgates.asked_member(meta)) or _members.first()
+    return _members.person_of(_model.clean(meta.get("mover"))) or _members.agent_member(_model.clean(meta.get("mover"))) or _model.item_person(meta)
+
+
+def _row_member(item: dict[str, Any], kind: str) -> str:
+    """The member a row is for, as the row stores it: `item_member`; "" for the first member, whose rows carry no name (a board of one member writes the rows it always wrote)."""
+    name = item_member(item, kind).name
+    return "" if name == _members.first().name else name
+
+
 def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, urgent: bool = False) -> dict[str, Any] | None:
     """One row for a watched item's event (None when the item is not watched or the event already has its row). A write that fails is
     raised after a close's key is noted in _FORYOU_FAILED, so the close can still reach someone (tell_close_owner)."""
@@ -48,7 +65,7 @@ def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any
     if not watched:
         return None
     try:
-        row = _fy.add(**_rows.row_fields(gid, item, kind, what, disc, _gh.shown(gid), _item_url(gid), urgent))
+        row = _fy.add(**_rows.row_fields(gid, item, kind, what, disc, _gh.shown(gid), _item_url(gid), urgent, _row_member(item, kind)))
     except Exception:
         if kind == "closed":
             if len(_FORYOU_FAILED) > 500:

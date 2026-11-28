@@ -4,7 +4,8 @@ Every other module asks here; none reads `[instance] owner`, `[instance] owner_a
 sign-in addresses. The list is built from, in this order:
 
 1. `[[members]]` in the config: one table per person, `name`, `aliases` (a list), `emails` (a list of the Google addresses that sign in as that person) and `agents` (a list of the sessions
-   that act as that person, one that sends as them for example; every other agent is the board's);
+   that act as that person, one that sends as them for example; every other agent is the board's), `github` (the login that person comments from on GitHub) and `slack_command` (the command
+   that posts that person's urgent rows; the shared `[for_you] slack_command` when none);
 2. else the old keys, as a list of one person: `[instance] owner`, `[instance] owner_aliases` and `[auth] allowed_emails` (all the addresses are that person's);
 3. else the placeholder, one person called `the owner` with no alias and no address (the board says so at its start).
 
@@ -53,6 +54,8 @@ class Person:
     emails: tuple[str, ...] = ()       # the addresses that sign in as this person, as written
     declared: bool = True              # False for the placeholder made when the config names nobody
     agents: tuple[str, ...] = ()       # the sessions that act as this person (`[[members]] agents`); the old keys and a front door's list name none
+    github: str = ""                   # the GitHub login this person comments from (`[[members]] github`); "" = none written here (the first person then falls back to `[github] owner_login`)
+    slack_command: str = ""            # the command that posts an urgent row for this person (`[[members]] slack_command`); "" = the shared `[for_you] slack_command`
 
     @property
     def placeholder(self) -> bool:
@@ -115,7 +118,8 @@ def _build(raw: tuple[Any, Any, Any, Any, Any]) -> list[Person]:
         for t in listed:
             t = t if isinstance(t, dict) else {}
             name = _one_line(t.get("name"))
-            out.append(Person(name, _alias_list(t.get("aliases"), name), _address_list(t.get("emails")), agents=_agent_list(t.get("agents"))))
+            out.append(Person(name, _alias_list(t.get("aliases"), name), _address_list(t.get("emails")), agents=_agent_list(t.get("agents")),
+                              github=_one_line(t.get("github")), slack_command=_one_line(t.get("slack_command"))))
         return out
     name = _one_line(owner)
     return [Person(name or PLACEHOLDER, _alias_list(aliases, name or PLACEHOLDER), _address_list(emails), declared=bool(name))]
@@ -233,6 +237,58 @@ def agent_names() -> list[tuple[str, Person]]:
     return list(out.values())
 
 
+def for_mark(person: Person | None = None) -> str:
+    """The mark a message to a front agent carries on its first line for `person`: `[for <name>]` (the first person's when None)."""
+    return f"[for {(person or first()).name}]"
+
+
+def mark_in(text: Any) -> str:
+    """The mark of any member that `text` holds, exactly as `for_mark` writes it (the first member's first, then the others in list order); "" when it holds none."""
+    t = str(text or "")
+    return next((m for m in (for_mark(p) for p in members()) if m in t), "")
+
+
+def mark_person(text: Any) -> Person | None:
+    """The member whose mark `text` holds (see `mark_in`); None when it holds none."""
+    m = mark_in(text)
+    return next((p for p in members() if for_mark(p) == m), None) if m else None
+
+
+def marks_rx() -> "re.Pattern[str]":
+    """A regex that finds the mark of any member, in any letter case (what held.py reads as a notice for a person)."""
+    return re.compile("|".join(re.escape(for_mark(p)) for p in members()), re.I)
+
+
+def login_of(person: Person | None = None) -> str:
+    """The GitHub login a member comments from: the one `[[members]] github` gives; for the first member, when it gives none, `[github] owner_login` (the key a one-person board has always used); else ""."""
+    p = person or first()
+    if p.github:
+        return p.github
+    return " ".join(str(_cfg.get("github", "owner_login") or "").split()) if p.name == first().name else ""
+
+
+def logins() -> list[tuple[str, Person]]:
+    """Every member that has a GitHub login, with it, in list order (see `login_of`); one login written for two members is the first one's (problems() tells that config)."""
+    out: dict[str, tuple[str, Person]] = {}
+    for p in members():
+        lg = login_of(p)
+        if lg:
+            out.setdefault(lg.casefold(), (lg, p))
+    return list(out.values())
+
+
+def person_of_login(login: Any) -> Person | None:
+    """The member a GitHub login belongs to (any letter case, as GitHub reads logins); None when no member has it."""
+    a = str(login or "").strip().casefold()
+    return next((p for lg, p in logins() if lg.casefold() == a), None) if a else None
+
+
+def agent_member(session: Any) -> Person | None:
+    """The member a session acts as (`[[members]] agents`, by name in any letter case); None for any other session (the board's, which falls back to the first member where a person is needed)."""
+    s = _clean(session)
+    return next((p for a, p in agent_names() if _clean(a) == s), None) if s else None
+
+
 _RX: dict[tuple[tuple[str, ...], bool], Any] = {}
 
 
@@ -281,6 +337,9 @@ def _not_text(i: int, t: dict[str, Any]) -> list[str]:
     out: list[str] = []
     if "name" in t and not isinstance(t["name"], str):
         out.append(f"[[members]] entry {i}: name is not text ({_kind_word(t['name'])}): write it as a quoted string")
+    for key in ("github", "slack_command"):
+        if key in t and not isinstance(t[key], str):
+            out.append(f"[[members]] entry {i}: {key} is not text ({_kind_word(t[key])}): write it as a quoted string")
     for key in ("aliases", "emails", "agents"):
         if key not in t:
             continue
@@ -306,6 +365,7 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
     seen_names: dict[str, int] = {}
     seen_mail: dict[str, int] = {}
     seen_agents: dict[str, int] = {}
+    seen_login: dict[str, int] = {}
     member_words = {_clean(w) for t in listed for w in [t.get("name"), *(t["aliases"] if isinstance(t.get("aliases"), list) else [])] if isinstance(w, str) and w.strip()}
     for i, t in enumerate(listed, 1):
         bad = _not_text(i, t)
@@ -339,4 +399,16 @@ def problems(cfg: dict[str, Any] | None = None) -> list[str]:
                 out.append(f'[[members]] entry {i}: "{a}" is already in the agents of entry {seen_agents[a.casefold()]} (a session acts as one person)')
             else:
                 seen_agents[a.casefold()] = i
+        lg = _one_line(t.get("github"))
+        if lg:
+            if lg.casefold() in seen_login:
+                out.append(f'[[members]] entry {i}: the GitHub login "{lg}" is already entry {seen_login[lg.casefold()]}\'s (a login belongs to one member, whatever its letter case)')
+            else:
+                seen_login[lg.casefold()] = i
+    old = " ".join(str(_cfg.get("github", "owner_login", cfg=cfg) or "").split())
+    first_t = listed[0] if listed else {}
+    if old and not _one_line(first_t.get("github")):
+        for i, t in enumerate(listed[1:], 2):         # `[github] owner_login` is the first member's login: no other member may write it as theirs
+            if _one_line(t.get("github")).casefold() == old.casefold():
+                out.append(f'[[members]] entry {i}: the GitHub login "{_one_line(t.get("github"))}" is `[github] owner_login`, which is the first member\'s')
     return out
