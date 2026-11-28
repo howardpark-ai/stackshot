@@ -384,8 +384,10 @@ def handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any]
         # is no known mover, so nothing is made new from it (a stale record still ends)
         own = not (writer or author) and m0 is not None
         m0 = m0 or ""
-        return _ho.follow(item, m0, m1, time.time(), frm=_ho.SERVER, record=own and before is not None and not _model.is_owner(m0) and not _model.is_owner(m1),
-                          same=ho_same, label=_session_label, ident=ho_ident)
+        did = _ho.follow(item, m0, m1, time.time(), frm=_ho.SERVER, record=own and before is not None and not _model.is_owner(m0) and not _model.is_owner(m1),
+                         same=ho_same, label=_session_label, ident=ho_ident)
+        _ho.stamp_close(item, before, time.time())      # after follow: an untaken record the close ended is in the history by now
+        return did
     except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
         print(f"handoff: {gid} record not followed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
