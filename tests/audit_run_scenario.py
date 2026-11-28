@@ -1181,6 +1181,15 @@ try:
     rec_clear(); out = []
     res = AR.run(dry=True, now=now, items=f26, anchors={}, env=genv, rubric=RUBRIC_TEXT, out=out.append)
     check("the dry run names the same recipient", any("[page-agents] projects/delta" in l and "(to falcon-main)" in l for l in out), out)
+    # a project with a background agent and no front (its mandate has no build/maintain/merge/engineer word): its chores go to that agent, not the scope's general -main agent or [audit] main
+    BREG = {**GREG, "projects/theta": {"session": "theta", "role": "name", "status": "active", "agents": {"theta-docs": "writes the chapters"}, "back_agents": {"theta-docs": "writes the chapters"}}}
+    _anc.registry = lambda: BREG
+    benv = env(sessions=lambda: ({"theta-docs", "delta-main"}, set()), registry=lambda: BREG)
+    benv.fallback = None; benv.builder = None; benv.front_only_of = None
+    check("a background-only project: the audit's tell, its named -main and the chase go to its own lead, the chase unmarked; a project with a front stays as before",
+          benv.main_of("projects/theta") == "theta-docs" and benv.main_named("projects/theta") == "theta-docs" and benv.chase_of("projects/theta") == ("theta-docs", False)
+          and benv.main_of("projects/delta") == "delta-main" and benv.chase_of("projects/delta")[1] is True,
+          (benv.main_of("projects/theta"), benv.main_named("projects/theta"), benv.chase_of("projects/theta"), benv.chase_of("projects/delta")))
 finally:
     _anc.registry = _real_registry
     ROLES.pop("falcon-main", None)

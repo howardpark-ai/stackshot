@@ -209,7 +209,7 @@ def handoff_peer(item: dict[str, Any], who: str) -> bool:
         r = _ho.record_of(item)
         if not r or r.get("taken_at") or not (ho_same(r.get("to"), who) or ho_same(r.get("to_id"), who)) or not front_handed_by_peer(r, who, proj):
             return False      # a taken hand-off is no one's to watch (the stall pass treats the item as any quiet one)
-        main = _anc.fallback_main(proj)      # the same pick the ladder's last rung makes (pane_recovery._recovery_target)
+        main = _anc.chore_main(proj)      # the same pick the ladder's last rung makes (pane_recovery._recovery_target)
         return bool(main) and not (ho_same(main, who) or _hooks().session_id(main) == (_hooks().session_id(who) or who))
     except Exception:  # noqa: BLE001  — an extra: a failed read keeps the exemption
         return False
@@ -234,7 +234,7 @@ def handoff_peer_tried(item: dict[str, Any], quiet: str, gid: str = "", gone: bo
     if gone:
         did += f"; {quiet}'s pane is gone"
     try:
-        main = _anc.fallback_main(str((item.get("metadata") or {}).get("project") or ""))
+        main = _anc.chore_main(str((item.get("metadata") or {}).get("project") or ""))
         self_made = bool(main) and (ho_same(main, r.get("from")) or _hooks().session_id(main) == (_hooks().session_id(str(r.get("from") or "")) or str(r.get("from") or "")))
     except Exception:  # noqa: BLE001
         self_made = False

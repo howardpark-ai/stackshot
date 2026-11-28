@@ -260,7 +260,7 @@ class Env:
             if self.fallback:
                 return self.fallback(project) or _cfg.audit_main()
             from stackshot.anchors import anchors as _anc  # noqa: PLC0415
-            return _anc.fallback_main(project) or _cfg.audit_main()
+            return _anc.chore_main(project) or _cfg.audit_main()
         except Exception:  # noqa: BLE001
             return _cfg.audit_main()
 
@@ -289,9 +289,16 @@ class Env:
             if self.fallback:
                 return str(self.fallback(project) or "").strip()
             from stackshot.anchors import anchors as _anc  # noqa: PLC0415
-            return str(_anc.fallback_main(project, self.registry() if self.registry else None) or "").strip()
+            return str(_anc.chore_main(project, self.registry() if self.registry else None) or "").strip()
         except Exception:  # noqa: BLE001
             return ""
+
+    def is_background_lead(self, project: str, name: str) -> bool:
+        """Is `name` the lead of a project with a background agent and no front (anchors.background_lead)? Not for an environment that names the -main agent itself (`fallback`): its answer stands as given."""
+        if self.fallback:
+            return False
+        from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+        return bool(name) and _anc.background_lead(project, self.registry() if self.registry else None) == name
 
     def chase_of(self, project: str) -> tuple[str, bool]:
         """(who is told a finding its mover did not answer, and the unmoved digest; whether that session is a front agent, so the message is marked `[for <owner>]`). A front-only project (anchors.front_only: no
@@ -303,7 +310,7 @@ class Env:
                 if self.is_front_only(proj):
                     main = self.main_named(proj)
                     if main:
-                        return main, True
+                        return main, not self.is_background_lead(proj, main)
                     if proj not in self._told:
                         self._told.add(proj)
                         print(f"audit run: {proj} is front-only but names no -main agent; its unmoved findings go to {_cfg.audit_builder()}", file=sys.stderr, flush=True)

@@ -73,10 +73,10 @@ def _contact_main(project: str) -> str:
 
 def _main_agent(project: str) -> str:
     """The project's -main agent: the page's front `agents:` entry whose name ends in -main, else its first front agent; for a page with none, its
-    hub's, else the general -main agent of its scope (anchors.fallback_main); "" when none. Front-only: a background agent is never the
-    escalation target (the -main agent is the one the owner talks to)."""
+    hub's, else the general -main agent of its scope (anchors.fallback_main); "" when none. A project with no front agent and a background agent
+    is the exception: its lead is the pick (anchors.chore_main), so its chores do not pass it to the scope's general agent."""
     try:
-        return _anc.fallback_main(project)
+        return _anc.chore_main(project)
     except Exception:
         return ""
 
