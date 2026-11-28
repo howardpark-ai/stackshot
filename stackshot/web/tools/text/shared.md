@@ -389,6 +389,12 @@ Parameter contact (a filing field: it moves no state clock, changes no mover and
 `contact:`): the front agent that {{OWNER}} talks to about the item; the parameter says how it is set and when it
 falls to the project's -main agent.
 
+## text GLOSSARY_FORM trail
+subject and description: a retired role word in either is rewritten to its glossary term when the item is saved, and the
+reply has a `(glossary: …)` line saying which words were rewritten; a word that stands for two or more roles is never
+guessed or refused: it is saved as written and the reply has one line naming the word and its terms, so use the
+exact term next time (words in quotes or backticks are left alone).
+
 ## text ASK_RULE trail
 The server takes an ask off {{OWNER}}'s move in one case only: its author's own plain sentence. A write by the ask's
 author whose whole new text, in every text parameter of the call (description, next, subject, goal and the others; a

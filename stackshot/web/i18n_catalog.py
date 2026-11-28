@@ -18,6 +18,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     search.*   the search page: its filters, summary lines, notes and result rows
     runners.*  the CI runners page: its cards, table, machine lines, switch buttons and as-of lines (js.runners.* are the words its script says)
     page.*     small words several pages share (Archived, none)
+    glossary.* the reply line of a save whose text holds a word that stands for several glossary terms (model/glossary_words.py)
     explain.*  the "?" control that holds a page's explainer text (ui/explain.py): its button's name
     sessions.* the sessions list: its group headings, the session flags and their hovers
     join.*     the setup page an invite's link names (routes/join.py), open to anyone
@@ -66,6 +67,11 @@ CATALOG: dict[str, str] = {
     # ------------------------------------------------------------------ the pages after the item page: sessions, for you, sent notices, said tags (stage 3b)
     "page.archived": "Archived",
     "page.none": "none",
+    "glossary.unclear": "glossary: \"{word}\" in the {where} could mean {terms}; use the exact term next time",
+    "glossary.in.subject": "subject",
+    "glossary.in.description": "description",
+    "glossary.in.both": "subject and description",
+    "glossary.or": " or ",
     "explain.about": "Help: {what}",
     "sessions.agents": "Agents",
     "sessions.background": "Background agents",
