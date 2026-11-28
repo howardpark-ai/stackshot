@@ -247,8 +247,8 @@ runs on every box.
   client.py post terminal-prompt open --session <name|id> --question "<one line>" --sender <label>
   client.py post terminal-prompt clear --session <name|id> --sender <label>
                                 for sala: a pane waits in its terminal for an answer (a question to {OWNER}, a guarded file, plan mode) that no hook can give.
-                                open files one open item per session, in {OWNER}'s Your move list, and prints its id (exit 0): the subject "<session> is
-                                waiting for your answer in its terminal", p1, mover {OWNER}, with the step "Answer <session>'s question in its
+                                open files one open item per session, in {OWNER}'s Your move list, and prints its id (exit 0): the subject "Answer
+                                <session> in its terminal", p1, mover {OWNER}, with the step "Answer <session>'s question in its
                                 terminal", next "{OWNER}: open <the pane's address> and answer: `<question>`" (the address is [client] session_view with the
                                 name, else the words "the pane of <name>"; the question stands as a code span, a backtick in it an apostrophe, and a line
                                 over [metadata.next] line_max has the question cut at a word with an ellipsis), filed under the session's project from the sala
@@ -265,7 +265,7 @@ runs on every box.
   client.py post job-gap clear <timer> <code> [--sender <label>]
                                 for sala's job-gap watcher: a timer or service of a machine has a gap (<code> = no-description | no-lane | bad-lane | not-git |
                                 git-differs; <timer> = the unit's name) or the gap is fixed. open files ONE open item per (timer, code) and prints its id (exit 0): the subject
-                                "<prefix> <timer>: <the gap>" (the project scope's prefix, else [subject] fallback_prefix; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
+                                "<prefix> <the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (the project scope's prefix, else [subject] fallback_prefix; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
                                 script: [job_gap.repos] maps "owner/name" to the page, default none; an instance maps its own repos; any other repo is refused with a 400 that names the known ones), moved by the project's builder (its background agent
                                 whose mandate builds; it is told once, at the create, and is in needs), the project's -main agent its creator (no front agent is woken),
                                 next "<builder>: put <timer>'s unit file in <repo> with an X-Model-Lane= line, linked from there" (the fix for the code), the description bullets
@@ -322,9 +322,17 @@ runs on every box.
                                 whose mover is the person (--mover must be his name) and whose `then` is --then (an agent the project's page lists: it takes the item after his step), with --step as his one step (his name goes before it; one you wrote is not
                                 doubled), under the project's -main agent as its creator, the state your-step, as the terminal prompt's row; --subject is the action and its object with no prefix (the server puts the project scope's prefix
                                 before it); each --line is one fact, a "- " bullet of the description (repeat it; as for item-open: at most [description] max_lines less one, each at most [description] line_max characters, refused and never cut, and not judged by the Goal-first rule a session's description is; the last bullet
-                                is "- Opened by <label> (a script on a client machine)"). While an item with the marker is open a repeat open is a refresh (the description alone changes, never his step or the mover; the same marker on another project is refused); once it is closed an open files
+                                is "- Opened by <label> (a script on a client machine)"). While an item with the marker is open a repeat open is a refresh
+                                (the description changes, never the subject) that may also set the sent step. Once he has finished or answered on the item (his Done, his note that names no later time, any step of his he marked done)
+                                no repeat sets a step on it again, so a script with a version in its step does not bring it back; the close and a new item ask him again. Until then only a step that differs from the one the route last sent is set, so one a session replaced, reworded, dropped
+                                or withdrew, is not asked again; a step a wait dropped before he answered it is asked again by the first repeat after the wait. No step is set while the item reads as waiting, while a decision ask to him is pending, for a
+                                step of none, clear or - (a first open refuses those), or while an open line of his that is not the route's own stands, unless one of his open lines reads as the sent step: then the item is only made to ask it
+                                when it asks him nothing, and a session's current step is never written over. A step not set for one of these reasons is set by a later open once the reason is gone. The route drops no line but its own, and an item that asked the one it drops asks the sent step instead. An item
+                                filed before the route kept these records is read from its first step, the line its create wrote; where that line cannot be told from a session's, no newer step is set while a line of his stands.
+                                Setting a step makes the person the mover again; a stored then stays, and with
+                                none stored the agent that had the item becomes then (or the project's builder in a front agent's place). A repeat's --mover and --then are checked and never written themselves. A refused step changes nothing; the same marker on another project is refused. Once it is closed an open files
                                 a new item. A project holds at most 10 open items of this route. refresh rewrites the description of the marker's open item and nothing else. close completes the open item as done through the update tool's own close
-                                (--reason is one line, cut to [close] reason_max; the default says the script saw the condition gone), ticks his open step and says so in the history, and leaves the item open (ticking nothing) while another writer's step is open on it (a script may refresh with a line saying the condition cleared; the close completes once the others are done, or the agent that holds the item completes it). --sender is the script's own label (default client.py): one word of at most 60
+                                (--reason is one line, cut to [close] reason_max; the default says the script saw the condition gone), ticks his open steps and says so in the history, and leaves the item open (ticking nothing) while another writer's step is open on it (a script may refresh with a line saying the condition cleared; the close completes once the others are done, or the agent that holds the item completes it). --sender is the script's own label (default client.py): one word of at most 60
                                 characters, never the person's name. The server files it through the create tool's own code (its subject and next gates, project page, GitHub mirror; the description's line count and length are the route's own pre-checks), and the row owes no page and tells no session. Exit 0 · 1 and the reason on stderr when
                                 refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be read right now (503, nothing filed).
   client.py message <to> <text> --sender <label> [--fyi | --question]
@@ -489,7 +497,7 @@ CLIENTS = os.path.join(SECRETS, "clients.json")
 TOKENS = os.path.join(SECRETS, "client-tokens")
 TOKEN = os.path.join(SECRETS, "client.token")
 URLF = os.path.join(SECRETS, "client.url")
-READS = ("registry", "rules", "brief", "page-ts", "items", "involved", "item-facts", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
+READS = ("registry", "rules", "brief", "page-ts", "items", "involved", "item-facts", "asks-named", "item-record", "open-records", "anchors-record", "projects-record", "holds", "whoami", "config", "recycle-wanted", "puller-lag", "background-wanted", "project-activity", "roles", "state-files", "project", "projects", "agent-name", "answer", "notice", "for-you", "your-move", "inbox-holds", "inbox-waiting")
 
 
 def _write_private(path: str, text: str) -> None:

@@ -307,6 +307,8 @@ external_days = 3                                   # needs external (on others)
 
 [publish]
 git = true                                          # false: render only, never fetch, commit or push the store (a staging instance)
+pages = false                                       # true (a TOML boolean; anything else is off): publish_pages() commits the page files a brain adopted into this board names under pages/, with the person as
+                                                    # git author (docs/board-and-connector.md). The board's own publish never commits pages/ either way. Read at each use: a reload (SIGHUP) takes a change at once
 debounce_seconds = 5
 every_minutes = 10                                  # the server's own timer, on the dot
 

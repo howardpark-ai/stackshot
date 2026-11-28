@@ -1813,6 +1813,24 @@ s = fast("ssh-unset-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}"
 check("deploy_ssh unset: a rollback is also local, under the lock, no ssh call", s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["locks"] == ["held", "held"] and ssh_all(s) == [] and "reset --keep" not in s["git"], (s["rc"], s["deploys"], s["locks"], ssh_calls(s)))
 s = scenario("ssh-cfg-missing", merge="ok", checks="pending,pass", deploy_ssh=SSHH, deploy_ssh_cfg="missing", extra={"SALA_CODEX_REVIEW": "off"})
 check("a config.py that predates the key reads as unset: the deploy runs here", s["rc"] == 0 and s["deployed"] and ssh_all(s) == [], (s["rc"], ssh_all(s)))
+# deploy_ssh naming this box (the real core/config.py, real_config: release_deploy_ssh reads such a value as unset, whether it is the name itself or a host word that resolves to it through [hosts] lookup)
+import socket as _socket
+ME = _socket.gethostname()
+s = fast("ssh-self", merge="ok", deploy_ssh=ME, real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh names this box: the deploy runs here as when unset (one deploy, pinned), no ssh call, this checkout is not moved and nothing is restarted",
+      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_all(s) == [] and "merge --ff-only" not in s["git"] and "reset --keep" not in s["git"] and restarts(s) == [] and "over ssh" not in s["out"], (s["rc"], s["deploys"], ssh_all(s), s["out"][-300:]))
+s = fast("ssh-self-rb", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", deploy_ssh=ME, real_config=True, localdiff="stackshot/fleet/puller.py", secs=60)   # secs: a hang past 60 s ends the run (TimeoutExpired), which fails the suite
+check("deploy_ssh names this box, main fails: the rollback runs here too, under the lock, finishes (rc 1 = red, not a hang), no ssh call, no lock left held",
+      s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["locks"] == ["held", "held"] and ssh_all(s) == [] and "reset --keep" not in s["git"] and lock_free(s), (s["rc"], s["deploys"], s["locks"], ssh_all(s), s["out"][-300:]))
+s = fast("ssh-self-word", merge="ok", deploy_ssh="host:box", real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh is a host word that resolves to this box: the same as a name for this box, no ssh call, the deploy runs here",
+      s["rc"] == 0 and s["deploys"] == [MERGE] and ssh_all(s) == [] and restarts(s) == [] and "over ssh" not in s["out"], (s["rc"], s["deploys"], ssh_all(s), s["out"][-300:]))
+s = fast("ssh-other-real", merge="ok", deploy_ssh=SSHH, real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh names another host (not this box): the deploy still goes over ssh, exactly as before this change",
+      s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE], (s["rc"], ssh_all(s), s["deploys"], s["out"][-300:]))
+s = fast("ssh-other-word", merge="ok", deploy_ssh="host:far", real_config=True, localdiff="stackshot/fleet/puller.py")
+check("deploy_ssh is a host word that resolves to another host: it goes over ssh to that host",
+      s["rc"] == 0 and ssh_calls(s) == [SSH_FWD], (s["rc"], ssh_all(s), s["out"][-300:]))
 s = fast("ssh-fwd", merge="ok", deploy_ssh=SSHH, localdiff="stackshot/fleet/puller.py,docs/x.md")
 check("deploy_ssh set: the deploy is one ssh call, BatchMode and a 15 s connect timeout, the host, the checkout there and DEPLOY_TO pinned to the merge; deploy.sh ran once, on the far side of it",
       s["rc"] == 0 and ssh_calls(s) == [SSH_FWD] and s["deploys"] == [MERGE] and "deploying on deploy-host over ssh" in s["out"], (s["rc"], ssh_calls(s), s["deploys"], s["out"][-400:]))

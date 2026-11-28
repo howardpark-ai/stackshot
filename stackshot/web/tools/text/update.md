@@ -228,7 +228,7 @@ the nightly run takes 9 minutes" (short `- ` bullets, never a paragraph; every l
 {{CLOSE_FORM}}A new or reworded open step that opens with a front agent is refused on an item another session moves:
 open it with the mover's name, or send `For <agent>,` to its project page (a step it already holds stays). With no
 builder there, its front agents may take the item by mover= or a step behind an open step
-(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the outcome moved. Words are compared: case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are. {{NEXT_FORM}}
+(the item moves to it, told, when the step before is done). A date alone is a wait: the item waits until that date. Work: Written by the mover or a session named in needs. A plain write by a background agent that is not in needs adds it there, and `then` follows the first session in needs; a write that sets needs itself, parks the item or only files it does not: to leave an item again, pass needs without yourself. {{ITEM_FORM}} A description that changes the Goal sentence's words, with no new subject, gets one reply line quoting the stored subject (a note, never a refusal): send subject= if the title's work no longer reaches it. Words are compared: case, the spacing and punctuation between the same words and bold, code or link marks are no change; a word split or joined ("Re-run" to "Rerun") and a changed symbol (% and ~ count) are. A new subject, a changed Goal sentence or a first Goal that leaves an open item titled as a question, a statement or a should sentence gets one such line too: send subject= as the task. {{NEXT_FORM}}
 ask="none" clears it (so does clear_ask=true). A write that leaves an ask standing on an item you move or wrote ends
 with a one-line reminder to withdraw the ask if it is wrong or moot; a write that sets an ask shows {{OWNER}}'s
 comments and notes since the item's last ask, so one that already answers it is seen before you ask again. His note on
@@ -313,9 +313,9 @@ soon, for nothing (a flag set before the provision recycled the box too early). 
 a recycle is never an item of its own (create refuses one), and for a change no item covers, {{WHEN_IDLE}};
 {{FLEET_TOOL}} runs a flagged recycle itself, the board shows one "Pane recycle pending for … ({{FLEET_TOOL}} runs
 it)" status line while an open item not parked carries it, and when {{FLEET_TOOL}} reports the recycle done the
-server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer or a comment on it) is
-answered by the mover on the item itself: rewrite the description, and the options where it is a pick, the description
-saying it answers his question. His question is never posted with said and never taken as his call; only his
+server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer, a note on his step or a comment on it) is
+answered by the mover on the item itself, not only in its own pane: rewrite the description, and the options where it is
+a pick, the description saying it answers his question. A result he asks for there belongs on the item too. His question is never posted with said and never taken as his call; only his
 conclusions are. {{NEEDS_FORM}} {{CHECK_FORM}}check="" changes nothing, and a new check passed replaces the old one.
 
 ## param project

@@ -293,8 +293,8 @@ def part_button_set():
     ALL = {"home": home, "landed": landed, "foryou": foryou, "a1": pg["a1"], "a2": pg["a2"], "a3": pg["a3"], "a4": pg["a4"], "a1+watch": pw}
 
     # every button is the one look
-    bad = [(name, c, lab) for name, h in ALL.items() for c, nv, lab, a in buttons(h) if not (c & {"fab", "pgrip", "pmi"}) and "b" not in c and 'id="audit-now"' not in a]
-    check("every button of the board, the Closed page and the item pages is a .b; the round reload button, the summary panel's order controls (the grip and the move menu's items, styled in _PORDER_CSS) and the Audit card's Audit now text link (#audit-now, styled in _RUN_CSS) are the others", not bad, bad[:6])
+    bad = [(name, c, lab) for name, h in ALL.items() for c, nv, lab, a in buttons(h) if not (c & {"fab", "pgrip", "pmi", "xp-b"}) and "b" not in c and 'id="audit-now"' not in a]
+    check("every button of the board, the Closed page and the item pages is a .b; the round reload button, the summary panel's order controls (the grip and the move menu's items, styled in _PORDER_CSS), the explainer's \"?\" (.xp-b, styled in ui/explain.py) and the Audit card's Audit now text link (#audit-now, styled in _RUN_CSS) are the others", not bad, bad[:6])
     old = [(name, sorted(c), lab) for name, h in ALL.items() for c, nv, lab, a in buttons(h) if c & {"pri", "std", "qt", "rec", "sm", "xs"}]
     check("no button carries a look or size class (pri, std, qt, rec, sm, xs)", not old, old[:6])
     check("no page draws the old .abtn or .a-btn class (the .abtns row of buttons is not a button)", all(not re.search(r'class="[^"]*\babtn\b', h) and "a-btn" not in h for h in ALL.values()))

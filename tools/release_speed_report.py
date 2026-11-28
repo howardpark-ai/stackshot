@@ -44,12 +44,16 @@ is `release_speed:<repo>/<median|flakes>`: the same flags give the same marker, 
 
 State file: `${XDG_STATE_HOME:-~/.local/state}/stackshot/release-speed/<repo>.json` (--state-dir replaces the folder), written atomically; it is
 what the next run compares with (the open -> live median and the flake count of the previous run). A previous record that cannot be used is started
-over from with a one-line note. A window with no release in it leaves the previous record as it was. --dry-run prints the report and writes nothing;
---json prints the record instead of the text. `--now ISO` sets the clock, for tests.
+over from with a one-line note. A window with no release in it leaves the previous record as it was, with one exception: an owed item that is paid in
+such a run is removed from it (`open_pending`). --dry-run prints the report and writes nothing; --json prints the record instead of the text.
+`--now ISO` sets the clock, for tests.
 
 GitHub is asked for: one `gh pr list` (the merged pull requests of the window) and the pull-request runs of the window in day-long slices of 100 a
 page (about 10 to 40 calls for a week; a slice GitHub cuts at 1000 is halved). With no `gh`, no login or an answer that cannot be read, the stages
-that need GitHub are left out with a note, the flake count is the log's alone, and the status is 4.
+that need GitHub are left out with a note, the flake count is the log's alone, and the status is 4. A run's stages are only what that run measured.
+When the pull request list itself cannot be read, the last measured open -> live median is kept apart in the record, `open_to_live_kept`
+({"median", "generated": when it was measured}): only a later "since the previous run" line uses it, saying it is from an earlier run and when; it
+raises no flag and goes into no item. When the list is read and only the runs cannot be, the run's own numbers stand and nothing is kept.
 
 Exit status: 0 the report was made (a flag included, and its item opened or answered, or not sent for --no-open), 1 the state folder or file cannot
 be written, 2 a usage, config or logs-folder problem, 3 the report was made but the item was not opened, 4 the report was made but there was
@@ -81,8 +85,8 @@ OPEN_SENDER = "release-speed-report"
 STAGES = [("open_to_green", "PR open -> checks green"), ("green_to_queued", "checks green -> queued"), ("queued_to_merged", "queued -> merged"),
           ("merged_to_live", "merged -> live"), ("live_to_main", "live -> main's check"), ("open_to_live", "PR open -> live")]
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (.*)$")
-START = re.compile(r"release of PR #(\d+) starts in \S+(?: \(([^)]*)\))?")
-CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the updated head)\b")
+START = re.compile(r"release of PRs? (#\d+(?: #\d+)*) starts in \S+(?: \(([^)]*)\))?")     # release.sh: one PR's start, or a group's "PRs #N #M" (every member's log has it)
+CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the (?:updated|pushed) head)\b")
 ENQUEUED = re.compile(r"enqueued: ")
 MERGED = re.compile(r"merged( |$)")
 DONE = re.compile(r"done: ")
@@ -117,7 +121,7 @@ def read_segments(path: str, slug: str | None, notes: list[str]) -> list[dict]:
                     continue
                 s = START.match(m.group(2))
                 if s:
-                    cur = {"pr": int(s.group(1)), "start": ts, "events": [], "slug": s.group(2)}
+                    cur = {"pr": int(s.group(1).split()[0][1:]), "start": ts, "events": [], "slug": s.group(2)}
                     segs.append(cur)
                 if cur is not None:
                     cur["events"].append((ts, m.group(2)))
@@ -439,7 +443,24 @@ def prev_number(prev: dict | None, *path):
     cur = prev
     for p in path:
         cur = cur.get(p) if isinstance(cur, dict) else None
-    return cur if isinstance(cur, (int, float)) and not isinstance(cur, bool) and math.isfinite(cur) else None
+    return cur if isinstance(cur, (int, float)) and not isinstance(cur, bool) and 0 <= cur <= TR.THRESHOLD_MAX else None     # nan, inf and a huge integer fail the range
+
+
+def kept_of(record: dict | None) -> dict | None:
+    """the record's `open_to_live_kept` as {"median", "generated"}; None when it has none that can be used"""
+    med = prev_number(record, "open_to_live_kept", "median")
+    if med is None:
+        return None
+    t = when(record["open_to_live_kept"].get("generated"))
+    return None if t is None or t.tzinfo is None else {"median": med, "generated": t.isoformat(timespec="seconds")}
+
+
+def last_measured(prev: dict | None) -> dict | None:
+    """the last measured open -> live median the previous record knows, as {"median", "generated": when it was measured}: its own measured stage, else what it kept"""
+    med = prev_number(prev, "stages", "open_to_live", "median")
+    if med is None:
+        return kept_of(prev)
+    return {"median": med, "generated": when(prev["generated"]).isoformat(timespec="seconds")}
 
 
 # ---------------------------------------------------------------- the report
@@ -476,7 +497,10 @@ def render(rec: dict, prev: dict | None, days: float | None, notes: list[str]) -
     if prev is not None and days is not None:
         a, b = prev_number(prev, "stages", "open_to_live", "median"), rec["stages"]["open_to_live"]["median"]
         fa = prev_number(prev, "flakes", "total")
-        L.append(f"since the previous run ({days:.1f} days ago): open -> live median {num(a)} -> {num(b)} min; same-commit flakes {num(fa)} -> {f['total']}")
+        before, old = num(a), kept_of(prev)
+        if a is None and old:
+            before = f"{num(old['median'])} (from an earlier run, measured {old['generated']})"
+        L.append(f"since the previous run ({days:.1f} days ago): open -> live median {before} -> {num(b)} min; same-commit flakes {num(fa)} -> {f['total']}")
     elif prev is None:
         L.append("since the previous run: none kept, this run is the baseline")
     L.extend(f"note: {n}" for n in notes)
@@ -507,25 +531,37 @@ def build(args, now: dt.datetime) -> tuple[str, dict, str]:
     greens: dict[str, dt.datetime] = {}
     pr_run_flakes = None
     args.no_data = None
+    kept = None                    # the last measured open -> live median, only for a run that could not read the pull request list
     if not logs["live"] and not logs["not_live"]:
         args.no_data = f"no release in the last {args.days:g} days in {logdir}"
     elif not slug:
         args.no_data = "GitHub was not asked: --github names no repository and the origin remote names none"
     else:
+        listed = False
         try:
             prs = fetch_prs(slug, lo)
+            listed = True
             runs = fetch_runs(slug, lo - dt.timedelta(days=1), hi, [RUNS_PAGES_MAX])
             greens = green_times(runs)
             pr_run_flakes = run_flakes([r for r in runs if (when(r.get("created_at")) or lo) >= lo])
         except ValueError as e:
             args.no_data = f"no GitHub data: {e}"
-            notes.append(f"{args.no_data}: the stages that start at the PR's creation or need a check run are from the logs alone, and the PR-run flakes are not counted")
+            if listed:
+                notes.append(f"{args.no_data}: the pull request list was read and the check runs were not, so the check times are the logs' alone and the PR-run flakes are not counted")
+            else:
+                notes.append(f"{args.no_data}: the stages that start at the PR's creation or need a check run are from the logs alone, and the PR-run flakes are not counted")
+                kept = last_measured(prev)
     stages = summarize(logs["live"], prs, greens, notes)
+    if kept:
+        notes.append(f"open -> live is not measured in this run (the pull request list could not be read): the last measured median, {num(kept['median'])} min, measured "
+                     f"{kept['generated']}, is kept for a later comparison only and raises no flag")
     flakes = {"merge_queue": logs["queue_flakes"], "pr_runs": pr_run_flakes, "main_run": logs["main_flakes"],
               "total": logs["queue_flakes"] + (pr_run_flakes or 0) + logs["main_flakes"]}
     rec = {"format": FORMAT, "repo": repo, "github": slug, "generated": now.isoformat(timespec="seconds"), "window_days": args.days,
            "prs": {"live": len(logs["live"]), "not_live": len(logs["not_live"]), "failed_attempts": logs["failed_attempts"]},
            "stages": stages, "flakes": flakes, "thresholds": th}
+    if kept:
+        rec["open_to_live_kept"] = kept       # never in `stages`: a flag and its item come only from what this run measured
     rec["triggers"] = evaluate(th, rec)
     owed = owed_flags(prev)
     args.item_owed = owed
@@ -621,11 +657,15 @@ def main(argv: list[str] | None = None) -> int:
         if failure or (args.item_triggers and not (res and res["sent"])):
             rec["open_pending"] = args.item_triggers
         empty = rec["prs"]["live"] == 0 and rec["prs"]["not_live"] == 0
-        if not args.dry_run and not empty:             # a window with no release leaves the previous record, and any debt in it, as it was
-            try:
+        prev, _ = read_previous(state_file, rec["repo"])
+        try:
+            if not args.dry_run and not empty:
                 TR.write_state(state_file, rec)
-            except OSError as e:
-                raise Fail(f"cannot write {state_file}: {e.strerror or e}", 1)
+            elif not args.dry_run and prev is not None and "open_pending" in prev and res and res["sent"]:
+                # a window with no release leaves the previous record as it was, but a debt that was paid is cleared in it too
+                TR.write_state(state_file, {k: v for k, v in prev.items() if k != "open_pending"})
+        except OSError as e:
+            raise Fail(f"cannot write {state_file}: {e.strerror or e}", 1)
         if args.json:
             print(json.dumps(dict(rec, item_open=res) if res else rec, sort_keys=True))
         else:

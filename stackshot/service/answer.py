@@ -152,6 +152,8 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     next turn (_tell_aside), never the plain send that starts one. After a Done or a note on his step (`then` is who the item moved to) the then-mover is told too,
     in its own line: the step he did and "it's yours now". After a decision that handed the item to its stored then-mover (`handed`) the same: its line ends "It's yours now". A line that carries his words (a pick, a note, a Done with
     its note) is pushed to a front agent as ever; the bare hand-over of a Done with no note is a progress notice (telling.tell_own_move) when the item holds nothing for him and the front agent's own named step is not the next one: filed for its next turn, or archived with him away; a front agent whose own step is the item's first open named step is given a turn (`named=True`).
+    A line that takes words he typed alone (a comment, an answer with no button) or his note on a step to a session that acts on it also says an answer or result belongs on the item (telling.ON_ITEM); a note the server applied itself and a held
+    line for a session that only keeps up (_tell_aside) do not.
     `said` (with it no `then`): the line in place of the ones above, for an answer on a step more than one member has a part in (_shared_line); `also` is the session that takes the item once the members are through, told that line as the then-mover is.
     → the session ids told: one the front gate archived is left out, so its next write is still told his answer."""
     meta = item.get("metadata") or {}
@@ -174,9 +176,13 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         judge = (f". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to {by} "
                  f"with a new step (step=…); if it says he will do the step at a later time, park the item until then "
                  f"(update until=<that time, YYYY-MM-DDTHH:MM {_cfg.tz_abbr()}>, wait_reason=<what it waits on, at least {_cfg.WAIT_GUARD_REASON_MIN} characters>), "
-                 f"leave his step open and hand no new step back.")
+                 f"leave his step open and hand no new step back. {_telling.ON_ITEM}")
     if said:
         line = f"{said} → {url}"
+    typed = bool(rec.get("text")) and not rec.get("choice") and not rec.get("applied") and not (rec.get("kind") == "step-reply" and then)      # words alone: a comment, an answer typed with no button, a note on a step the item did not move on from (a note he sends the then-mover says it in `judge`)
+    def acting(t: str) -> str:      # the line for a session that acts on his words: typed words alone also say where an answer goes
+        body = t.removesuffix(f" → {url}")
+        return f"{body}{_telling.on_item(body)} → {url}" if typed else t
     yours = ("" if _answers()._answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
     to_then = lambda t: t.replace(f"It goes to {_sr._session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
     told: list[str] = []
@@ -196,7 +202,7 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
         oid = _session_id(owner)
         front = _telling.front_keeper(owner, project)[0]
         mine = oid == thenid
-        base = to_then(line) if mine else line
+        base = acting(to_then(line) if mine else line)
         tell(oid, f"{_FOR_OWNER} {base}" if front else base, yours=mine)
     held: list[str] = []      # front agents named in needs that neither move the item nor take it after this answer: a held line for their next turn (below), never the exempt tell that starts one
     for s in _needs_sessions(meta):
@@ -205,9 +211,9 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
             if sid != thenid and _handover._builder_for_front(s, meta):      # a front agent of a project whose live builder can take the item; a builderless project, a dead builder and every other session are told as ever
                 held.append(s)
                 continue
-            tell(sid, to_then(line) if sid == thenid else line, yours=sid == thenid)
+            tell(sid, acting(to_then(line) if sid == thenid else line), yours=sid == thenid)
     if thenid and thenid not in tried:          # the then-mover is neither the mover nor in needs (a stored `then`): it is told, and its write settles the answer
-        tell(thenid, to_then(line), yours=True)
+        tell(thenid, acting(to_then(line)), yours=True)
     if not tried and not held:
         print(f"answer: {gid} has no mover and names no session to tell", file=sys.stderr, flush=True)
     seen, handed_to = list(tried), list(told)
@@ -414,6 +420,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
                     if said["done"]:        # "ran it": his step is ticked as a Done ticks it (every open line of his), the then-mover is told
                         _handover._check_his_step(meta, rec["step"], now, by=who, member=member)
                         rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
+            if not until:
+                _hs.route_answered(meta)      # a script's route does not ask him again on an item he answered
             _holders._state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)

@@ -103,6 +103,12 @@ def _hooks() -> Hooks:
 
 
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
+ON_ITEM = "An answer or result asked for belongs on the item, not only in your own pane."
+
+
+def on_item(line: str) -> str:
+    """What follows the owner's words on a line that takes his comment or note to a session that acts on it: the full stop they lack, then ON_ITEM."""
+    return ("" if line.rstrip().endswith((".", "!", "?", ")", "…")) else ".") + " " + ON_ITEM
 
 
 # The same ruling on the item's notices: a front agent mover (the mover, or its `then`, or the project's -main agent, never the creator) hears the owner's own answer or comment and nothing else.
@@ -114,11 +120,12 @@ _FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board show
 def tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
     """the owner's comment on GitHub, one line to the item's mover (holder) and to every session named in its needs, each
     once. A front agent mover hears it marked for the owner (_FOR_OWNER), since it is the owner's own words (the mark is for the agent to read; delivery reads the tag, not the mark). The text is clipped
-    to one line; the whole comment is on the item and its issue. → the session ids told."""
+    to one line; the whole comment is on the item and its issue. Each line then says an answer or result belongs on the item (ON_ITEM). → the session ids told."""
     h = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
-    note = f"[stackshot] {OWNER} commented on {_gh.shown(gid)} on GitHub: {_clip_line(text)} → {notice_link(gid)}"
+    said = _clip_line(text)
+    note = f"[stackshot] {OWNER} commented on {_gh.shown(gid)} on GitHub: {said}{on_item(said)} → {notice_link(gid)}"
     told: list[str] = []
     oid = h.session_id(owner) if owner else ""
     if oid:
