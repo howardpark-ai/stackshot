@@ -431,6 +431,20 @@ The front door writes its own: the `preface` of the config, a line naming the ca
 
 Streaming progress and log notifications of a tool call pass through as they arrive; the identity gate is plain ASGI and holds nothing back.
 
+## The home brain probe
+
+`tests/home_brain_probe.py` is a probe run by hand, not a suite (CI never runs it). One command prints PASS or FAIL for each point with the numbers:
+
+```
+python3 tests/home_brain_probe.py --verify <verify-gbrain's verify.py> --gbrain-source <a gbrain checkout> --gbrain-ref <branch, tag or commit> --runner '<remote test runner and its flags> --'
+```
+
+- **Point 1, the tool list of a read-and-write token.** It runs the `verify-gbrain` skill's harness (`--verify` names its `verify.py`), which builds a throwaway brain from the gbrain tree on a remote test host and takes it down after. In it `tests/home_brain_probe_journey.py` makes a second throwaway brain (the harness's own is embedded PGLite, which a second process cannot open while it is served), mints a token with `--scopes read,write` and the default token, serves it with `gbrain serve --http`, and lists its tools with each. It reads the rule from the tree's own tool catalog (each tool's `scope`, `requiredScopes`, `localOnly`, `cliOnly`) and fails when the read-and-write list holds an admin or host-only tool, a name the catalog lacks, or is not inside the default token's list. The numbers: the two tool counts and the tools of read or write scope that were not listed. **Not covered:** the front door in front of that brain. The probe lists gbrain's own `tools/list`, so a front door that changed or filtered the list is not tested here; `tests/frontdoor_scenario.py` checks the door's side with a stand-in brain.
+- **Point 2, a brain tool called with a board: not testable.** A front door serves at most one brain, and a brain tool takes no `board`, so there is nothing to route by; the probe prints `NOT TESTABLE: a front door serves at most one brain (frontdoor_config.py:234-235), brain tools take no board`. It becomes a probe when per-board brain routing is built.
+- **Point 3, the publisher's commit.** The probe runs `publish.publish_pages()` directly, with `[publish] pages` on in a config of its own, against a local bare repository, through `--runner`, the remote test runner of the machine (with none, in the probe's own process). Two people each put a page file under `pages/`; it checks that each commit has the person as author, the board's bot as committer, holds that file only, is on the bare repository, that an unchanged page makes no commit and that a path outside `pages/` is refused. Nothing in the server calls `publish_pages()` yet, so this is the publisher alone.
+
+The exit status is 0 when every testable point passes, 1 when one fails and 2 when a point could not be run (a harness that did not start gives no verdict).
+
 ## Checked by
 
 `tests/frontdoor_run_scenario.py` is the run with real processes: a front door in front of two boards (`main` and `side`), each its own process with its own config, store, port, bearer token, copy of the signing secret and `[behind_frontdoor]` table, and a third board with no table, all on loopback ports chosen at run time under one scratch folder (nothing of an instance is read or written). The test plays the reverse proxy and checks, in a round it runs four times (at the start, then after the front door, `main` and `side` are each stopped by their PID and started again, one after another):
