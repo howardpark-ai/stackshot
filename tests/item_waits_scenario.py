@@ -81,6 +81,7 @@ _web_page_debts._owing_note = lambda debtor: ""
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
 def close_told(since=0): return [t for t in told[since:] if t[3] == "close"]
+def BID(n): return "board" + "#" + str(n)      # an item id as the note shows it, built from pieces
 def upd(i, **kw): return _update_svc._update(f"board#{i}", sender="home-front", **kw)
 OWN = _model.owner_display()
 ZONE_HOURS = 4                                  # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
@@ -358,6 +359,41 @@ check("5 cleared: an id that moves from after to wait_event in one write is stil
 desc_ = {t.name: t.description for t in __import__("asyncio").run(server.mcp.list_tools())}
 check("text: update, create, get and complete teach the new rule", all(w in desc_["update"] for w in ("defers on another item in words", 'after=["board#N"]', "Only the lines the call sets are checked"))
       and "defers on another item in words" in desc_["create"] and "named in next:" in desc_["get"] and "names the closed item" in desc_["complete"], None)
+
+
+# ================================================================ 7. a write that lifts a relay or cue wait names the mover's other items on one
+cue_ = lambda out: [ln for ln in out.splitlines() if ln.startswith("(note: ") and "same cue" in ln]
+W = "the vendor confirms the import"
+item(9201, needs=["external"], mover="team-back", subject="[home] cue one", wait_kind="relay", wait_event=W, until=FUT, next="team-back: ship once the vendor confirms")
+item(9202, needs=["external"], mover="team-back", subject="[home] cue two, same words", wait_kind="relay", wait_event="  The vendor confirms the import. ", until=FUT, next="team-back: ship it")
+item(9203, needs=["external"], mover="team-back", subject="[home] another relay", wait_kind="relay", wait_event="the bank wires the money", until=FUT, next="team-back: ship it")
+item(9204, needs=["external"], mover="home-peer", subject="[home] other mover, same words", wait_kind="relay", wait_event=W, until=FUT, next="home-peer: ship it")
+item(9205, mover="team-back", subject="[home] no wait", next="team-back: ship it")
+item(9206, status="closed", needs=["external"], mover="team-back", subject="[home] closed, same words", wait_kind="relay", wait_event=W, until=FUT, next="team-back: ship it")
+before = {i: raw(i) for i in (9202, 9203, 9204, 9205, 9206)}
+o1 = upd(9201, clear_wait=True, clear_needs=True, next="team-back: ship it")
+n1 = cue_(o1)
+check("7 cue: clearing a relay wait names the mover's other relay items, one line", len(n1) == 1 and "team-back has 3 other open items" in n1[0] and BID(9153) + " (relay: " + BID(61) + " closes)" in n1[0], o1)
+check("7 cue: …each with its board#N and wait wording (a relay of other words too)", BID(9202) + " (relay: The vendor confirms the import.)" in n1[0] and BID(9203) + " (relay: the bank wires the money)" in n1[0], n1)
+check("7 cue: …not the item itself, another mover's, an item with no wait, or a closed one", all(f"{BID(i)} " not in n1[0] for i in (9201, 9204, 9205, 9206)), n1)
+check("7 cue: …it says to lift or rewrite each in this turn and lifts none (the others are as they were)", "lift or rewrite each now, in this turn" in n1[0] and all(raw(i) == before[i] for i in before), n1)
+item(9211, needs=[BACK], mover="team-back", subject="[home] cue event", wait_kind="event", wait_event="release v9 ships", until=FUT, next="team-back: ship it")
+item(9212, needs=[BACK], mover="team-back", subject="[home] cue event same", wait_kind="event", wait_event="Release V9 ships", until=FUT, next="team-back: ship it")
+item(9213, needs=[BACK], mover="team-back", subject="[home] cue event other", wait_kind="event", wait_event="release v10 ships", until=FUT, next="team-back: ship it")
+o2 = upd(9211, clear_wait=True, next="team-back: ship it now")
+n2 = cue_(o2)
+check("7 cue: an event cue is matched on its normalized wording only", len(n2) == 1 and BID(9212) + " (cue: Release V9 ships)" in n2[0] and BID(9213) not in n2[0] and BID(9202) in n2[0], n2)
+item(9221, needs=["external"], mover="team-back", subject="[home] re-dated", wait_kind="relay", wait_event=W, until=FUT, next="team-back: ship it")
+check("7 cue: a write that leaves the wait as it is (a new next line) adds no line", cue_(upd(9221, next="team-back: ship it, then tidy")) == [], None)
+for i in range(9230, 9243):
+    item(i, mover="home-other", needs=["external"], subject=f"[home] mass {i}", wait_kind="relay", wait_event=f"cue {i}", until=FUT, next="home-other: go")
+o3 = upd(9230, clear_wait=True, clear_needs=True, mover="home-other", next="home-other: go now")
+n3 = cue_(o3)
+check("7 cue: at most 10 items are named, with the count of the rest", len(n3) == 1 and "has " + str(12) + " other open items" in n3[0] and n3[0].count(BID(92)) == 10 and "; 2 more" in n3[0], n3)
+item(9250, mover="home-stew", subject="[home] solo", needs=["external"], wait_kind="relay", wait_event="solo cue", until=FUT, next="home-stew: go")
+check("7 cue: no other item of the mover on a wait → no line", cue_(upd(9250, clear_wait=True, clear_needs=True, next="home-stew: go now")) == [], None)
+check("7 cue: the update text tells the caller to list all items on the cue first, then lift or rewrite each in the same turn",
+      "list every item of the same mover on that cue first, then lift or rewrite each one in the same turn" in desc_["update"].replace("\n", " "), None)
 
 
 print(("ok" if not fails else "FAILED") + f": item waits scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
