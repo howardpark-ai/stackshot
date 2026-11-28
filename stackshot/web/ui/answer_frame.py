@@ -49,6 +49,8 @@ def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float |
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
             return ("changed", None) if was and _r.question_ref(r) != was else ("open", ask)
     a = last_answer(r)
+    if a and any(x.get("question") and x.get("ask") and _when_ts(x) > _when_ts(a) for x in _r.answers_of(r)):
+        a = None      # a later question was met with a question: nothing is decided on it, and the older answer is not its answer
     newer = a is not None and since is not None and _when_ts(a) > since
     if was:      # an answer recorded since the frame drew the question is its result, also while the item stays on his move (a step beside the question)
         return ("answered", a) if newer else ("closed", None)

@@ -335,7 +335,9 @@ it)" status line while an open item not parked carries it, and when {{FLEET_TOOL
 server clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. A question {{OWNER}} asks on an item (in his answer, a note on his step or a comment on it) is
 answered by the mover on the item itself, not only in its own pane: rewrite the description, and the options where it is
 a pick, the description saying it answers his question. A result he asks for there belongs on the item too. His question is never posted with said and never taken as his call; only his
-conclusions are. {{NEEDS_FORM}} {{CHECK_FORM}}check="" changes nothing, and a new check passed replaces the old one.
+conclusions are. An answer or comment he types with no option picked that is nothing but a question is marked as one by the server. Typed in place of a decision it takes the item off his call with nothing decided:
+answer it as above, then put the decision back (needs=decision with its ask); the same ask line is accepted at once after the description is rewritten, and refused before. A pick, and words that open with a yes or a
+no, or hold a sentence that asks nothing (or a part set off by a semicolon or a dash), are his decision; a statement joined to its question by a comma alone, with no yes or no in front, reads as a question. {{NEEDS_FORM}} {{CHECK_FORM}}check="" changes nothing, and a new check passed replaces the old one.
 
 ## param project
 Re-files the item under this page, as `(filed on X)` shows it, never the shown top-level key.
