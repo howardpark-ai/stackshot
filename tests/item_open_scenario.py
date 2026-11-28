@@ -1,7 +1,7 @@
 """Scenario test for the script route that opens one board item for a project's background agent (`client.py post item-open`, POST /client/item-open) — fixture data, no live store, no
 network, no server process (the server module is imported and called in-process, on a temporary config; the pages are fixture files in a temporary directory).
 
-Covers: open (one item filed through the create tool's own code: the subject takes the project scope's prefix from the server and replaces a prefix the caller wrote, marked metadata.item_open = the
+Covers: open (one item filed through the create tool's own code: the subject takes no tag from the server and a tag the caller wrote is taken off, marked metadata.item_open = the
 marker, the mover a background agent of the page and in needs, the project's -main agent the creator, one step that names the mover, description bullets ending with the attribution line, no machine
 host name anywhere in the item, the mover told once, nothing owed to the page); a repeat call while the item is open answers it and files nothing, another marker is another item, and the same marker on another project is that project's own item (a call never answers or shows another project's item); a call after the
 item was closed files a new item (the open state is read from the store); a mover that is not a background agent the page lists (a front agent, the owner, another project's agent, a made-up name)
@@ -108,7 +108,7 @@ check("open: 200 with the item id as shown, the marker, the project, the mover, 
       and out["owner"] == "home-sparrow-main" and out["repeat"] is False and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the project page, marked with the marker", it["status"] == "open" and m["project"] == "projects/alpha" and m["item_open"] == "test_trim:alpha", (it["status"], m))
-check("…the subject is the caller's words under the project scope's prefix", it["subject"] == "[home] Deep-scan the alpha suites", it["subject"])
+check("…the subject is the caller's words, no tag put before them", it["subject"] == "Deep-scan the alpha suites", it["subject"])
 check("…the mover is the page's background agent and is in needs; the project's -main agent is the creator; the script is recorded as the writer", sr._session_label(m.get("mover")) == "home-sparrow-builder"
       and [sr._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"] and sr._session_label(m["owner"]) == "home-sparrow-main"
       and it["filed_by"] == "test-trim-job (a script on a client machine)", (m, it.get("filed_by")))
@@ -224,22 +224,22 @@ for key, val in (("needs", ["decision"]), ("owner", "Oliver"), ("priority", "p0"
 st, o = io_(marker="test_trim:nosender", sender=None)
 check("no sender: taken as client.py, recorded as the writer", st == 200 and item(o["item"])["filed_by"] == "client.py (a script on a client machine)" and "- Opened by client.py (a script on a client machine)" in item(o["item"])["description"], (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:prefix", subject="[work] Wrong prefix")
-check("a prefix the caller wrote is replaced by the project scope's own", st == 200 and item(o["item"])["subject"] == "[home] Wrong prefix", (st, o)); close(o["item"]) if st == 200 else None
+check("a tag the caller wrote is taken off and none is put on", st == 200 and item(o["item"])["subject"] == "Wrong prefix", (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:twice", subject="[work] [home] twice")
-check("every prefix the caller wrote is taken off and the scope's goes on once", st == 200 and item(o["item"])["subject"] == "[home] twice", (st, o)); close(o["item"]) if st == 200 else None
+check("every tag the caller wrote is taken off and none is put on", st == 200 and item(o["item"])["subject"] == "twice", (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:nospace", subject="[work][home] z")
-check("prefixes written with no space between them are all taken off, the scope's goes on once", st == 200 and item(o["item"])["subject"] == "[home] z", (st, o)); close(o["item"]) if st == 200 else None
-for i_, (subj, want, why) in enumerate((("[work]z", "[home] [work]z", "a bracket word with text glued to it is part of the subject, not a prefix"), ("[home]-style fix", "[home] [home]-style fix", "a bracket word followed by a hyphen keeps its word"),
-                                        ("[work][home]-style fix", "[home] [home]-style fix", "prefixes in a row come off, the bracket word glued to text after them stays"))):
+check("tags written with no space between them are all taken off, none is put on", st == 200 and item(o["item"])["subject"] == "z", (st, o)); close(o["item"]) if st == 200 else None
+for i_, (subj, want, why) in enumerate((("[work]z", "[work]z", "a bracket word with text glued to it is part of the subject, not a prefix"), ("[home]-style fix", "[home]-style fix", "a bracket word followed by a hyphen keeps its word"),
+                                        ("[work][home]-style fix", "[home]-style fix", "tags in a row come off, the bracket word glued to text after them stays"))):
     st, o = io_(marker=f"test_trim:glued{i_}", subject=subj)
     check(f"{why}: {subj!r}", st == 200 and item(o["item"])["subject"] == want, (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:inner", subject="Fix [work] things")
-check("a prefix inside the subject, not at its start, is left alone", st == 200 and item(o["item"])["subject"] == "[home] Fix [work] things", (st, o)); close(o["item"]) if st == 200 else None
+check("a prefix inside the subject, not at its start, is left alone", st == 200 and item(o["item"])["subject"] == "Fix [work] things", (st, o)); close(o["item"]) if st == 200 else None
 for name, subj in (("only an instance prefix", "[work] "), ("only an instance prefix, no space", "[work]"), ("only two prefixes", "[work] [home] "), ("only prefixes with no space between", "[work][home]"),
                    ("only a prefix and spaces", "   [home]   ")):
     n5b = len(items())
     st, e = io_(marker="test_trim:onlyprefix", subject=subj)
-    check(f"a subject that is {name}: 400 that says so, nothing filed", st == 400 and "only an instance prefix" in e["error"] and open_for("test_trim:onlyprefix") == [] and len(items()) == n5b, (st, e))
+    check(f"a subject that is {name}: 400 that says so, nothing filed", st == 400 and "only a tag" in e["error"] and open_for("test_trim:onlyprefix") == [] and len(items()) == n5b, (st, e))
 st, o = io_(marker="test_trim:s60", sender="s" * 60, description=["- a fact"])
 oi = item(o["item"]) if st == 200 else {"description": ""}
 check("a sender of exactly 60 characters is taken and its attribution line is whole (not clipped by the line limit)", st == 200 and oi["description"].splitlines()[-1] == "- Opened by " + "s" * 60 + " (a script on a client machine)"
@@ -342,8 +342,8 @@ check("item-sync open: 200, opened, the item as shown, the project, the person a
       and so["project"] == "projects/alpha" and so["mover"] == "Oliver" and so["then"] == "home-sparrow-builder" and so["owner"] == "home-sparrow-main" and so["repeat"] is False and len(items()) == ns0 + 1
       and so["item"] == _gh.shown(_model_ids._norm_id(so["item"])), (st, so))
 sit = item(so["item"]); sm = sit["metadata"]
-check("…the item is open, marked item_sync, filed under the project, with the subject under the scope's prefix", sit["status"] == "open" and sm["item_sync"] == "plugin_sync:alpha" and sm["project"] == "projects/alpha"
-      and sit["subject"] == "[home] Press Sync on the plugin page", (sit["status"], sm, sit["subject"]))
+check("…the item is open, marked item_sync, filed under the project, with the subject as the caller wrote it, no tag", sit["status"] == "open" and sm["item_sync"] == "plugin_sync:alpha" and sm["project"] == "projects/alpha"
+      and sit["subject"] == "Press Sync on the plugin page", (sit["status"], sm, sit["subject"]))
 check("…the mover is the person and the then is the agent; the state is your-step with his step", sm.get("mover") == "Oliver" and sr._session_label(sm.get("then")) == "home-sparrow-builder" and sm.get("state") == "your-step"
       and sm.get("step") == "open the plugin page and press Sync" and M.derive(sit).mover == "Oliver", (sm, M.derive(sit).mover))
 check("…his step is the only step, open, and it opens with his name (the caller's words are not doubled)", [(x["text"], x["status"]) for x in _steps_mod.view(sm)] == [("Oliver: open the plugin page and press Sync", "open")], _steps_mod.view(sm))
@@ -415,7 +415,7 @@ for name, kw, needle in (("no marker", dict(marker=""), "marker is required"), (
                          ("no step", dict(step=""), "step is required"), ("no mover", dict(mover=""), "mover is required"), ("no then", dict(then=""), "then is required"),
                          ("a mover that is an agent", dict(mover="home-sparrow-builder"), "mover is Oliver"), ("a then that is not listed", dict(then="no-such-agent"), "not an agent listed"),
                          ("a then of another project", dict(then="heron-engineer"), "not an agent listed"), ("a step with a line break", dict(step="a\nb"), "one line"), ("a step that is only his name", dict(step="Oliver: "), "step is empty"),
-                         ("a subject with a line break", dict(subject="a\nb"), "one line"), ("a subject that is only a prefix", dict(subject="[work] "), "only an instance prefix"),
+                         ("a subject with a line break", dict(subject="a\nb"), "one line"), ("a subject that is only a prefix", dict(subject="[work] "), "only a tag"),
                          ("a sender with a space", dict(sender="a b"), "sender ="), ("a sender that is the person", dict(sender="Oliver"), "Only the board writes as"),
                          ("a description of too many lines", dict(description=[f"- fact {i}" for i in range(9)]), "lines"), ("a description line over the limit", dict(description=["- " + "x" * 200]), "line 1"),
                          ("no description", dict(description=None), "no line of words"), ("a description with a control character", dict(description=["- a\x01b"]), "control character")):
@@ -445,7 +445,7 @@ check("a bare slug names the project; no sender is client.py", st == 200 and o_[
 st, o_ = isy("open", marker="plugin_sync:at", description=["- ask @octocat"])
 check("an @name in a bullet is broken, no bare @ before a word", st == 200 and not bare_at(item(o_["item"])["description"]) and "octocat" in item(o_["item"])["description"], (st, o_)); isy("close", marker="plugin_sync:at")
 st, o_ = isy("open", marker="plugin_sync:prefix", subject="[work] [home] Wrong prefix")
-check("a prefix the caller wrote is replaced by the project scope's own", st == 200 and item(o_["item"])["subject"] == "[home] Wrong prefix", (st, o_)); isy("close", marker="plugin_sync:prefix")
+check("a tag the caller wrote is taken off and none is put on", st == 200 and item(o_["item"])["subject"] == "Wrong prefix", (st, o_)); isy("close", marker="plugin_sync:prefix")
 
 # a cap of 10 open items per project, refreshes and repeats never counted
 ids_ = []

@@ -105,9 +105,12 @@ def similar_note(gid: str, subject: str, project: str) -> str:
         try:
             reg = _anc.registry()
             parent_of = lambda p: _anc.hub_of(p, reg)
+            sc = _anc.scope_ctx()
+            grp = lambda it_: _anc.group_title(it_, sc)
         except Exception:
             parent_of = lambda p: p
-        return _sim._similar_note(gid, subject, project, stored(), parent_of, time.time())
+            grp = None
+        return _sim._similar_note(gid, subject, project, stored(), parent_of, time.time(), grp=grp)
     except Exception:
         return ""
 
@@ -216,11 +219,6 @@ def create_item(
             it = _load(prev); it["gid"] = prev
             return prev, f"already created as {_gh.shown(prev)} (same request_id).\n" + h.fmt(it) + h.nag()
     subject, description, next, ask = (_shown_ids(x) for x in (subject, description, next, ask))   # g7 →
-    if subject.strip() and not by and not any(subject.startswith(pfx) for pfx in _cfg.CFG["subject"]["prefixes"]) and not _fg._SUBJECT_TAGGED.match(subject):
-        pfx_ = _gates.project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
-        if pfx_:
-            subject = pfx_ + subject.lstrip()
-            _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it", fields=["subject"], stored=subject)
     subject_sent = subject       # all its words, for the title note
     subject = _fg.fix_long_subject(subject)       # a subject over the limit is cut at its last word that fits (a pure form fix; the reply says so)
     for f_ in _fg.subject_faults(subject):

@@ -145,7 +145,7 @@ check("6: an unknown notice id answers `no notice <id>` and says what an id look
 check("6: …the same with the word notice before it, and for an id with capitals", err("notice deadbe").startswith("no notice deadbe") and err("DEADBE").startswith("no notice deadbe"))
 e6b = err("a12345")
 check("6: an id that could be an item's and is no item's says so for both", e6b.startswith("no notice a12345 in the routing log") and "no item a12345" in e6b, e6b)
-check("6: an item id still reads as an item (`a2`), and a bad id still gets the item id error", "[home] item 2" in get("a2") and "bad item id" in err("zz-9"), (get("a2")[:200], err("zz-9")))
+check("6: an item id still reads as an item (`a2`), and a bad id still gets the item id error", " · item 2" in get("a2") and "bad item id" in err("zz-9"), (get("a2")[:200], err("zz-9")))
 check("6: the word notice before a known id reads the notice, and a bare id of a notice reads it too", get(f"notice {id_drop}") == t_drop and get(f"  {id_drop.upper()} ") == t_drop)
 
 # ---- 7. the pending states: late, the last try's error, stuck, a pilot notice nobody holds, a count-only line

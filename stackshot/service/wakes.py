@@ -281,7 +281,7 @@ def _queue_line(row: "tuple[str, dict[str, Any], str, str, bool]") -> str:
     meta = it.get("metadata") or {}
     if rem or not _hooks().after_open(meta):
         return ""
-    return f"[stackshot] {_gh.shown(gid)} {what}: {it.get('subject') or ''} ({meta.get('project') or ''}) — {back_words(meta, _gh.shown)} → {_telling.notice_link(gid)}"
+    return f"[stackshot] {_gh.shown(gid)} {what}: {_anc.notice_title(it)} ({meta.get('project') or ''}) — {back_words(meta, _gh.shown)} → {_telling.notice_link(gid)}"
 
 
 def _hold_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]") -> bool:
@@ -317,7 +317,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
             continue
         if not _router_live.holds(project, sid):      # the recipient is the item's mover, so there is no "its own item" to tell directly
             keep.append(row); continue
-        thn, subject = _telling.then_part(it, to=sid), str(it.get("subject") or "")
+        thn, subject = _telling.then_part(it, to=sid), _anc.notice_title(it)
         try:
             nid = _routing.record(project, kind="board", to="", label=f"wake {_gh.shown(gid)}", who="stackshot", text=f"{what}{thn}: {subject}",
                                   url=_telling.notice_link(gid), target="for " + _session_label(sid), pilot=True, live=True)
@@ -337,7 +337,7 @@ def wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], 
         meta = it.get("metadata") or {}
         project, owner = str(meta.get("project") or ""), _telling.holder(it)
         back = f"still active ({_hooks().rmod_whose()[_hooks().rmod_needs_kind({'metadata': meta})]}), check where it stands" if rem else back_words(meta, _gh.shown)
-        subject, thn, oid = str(it.get("subject") or ""), _telling.then_part(it, to=sid), (_hooks().session_id(owner) if owner else "")
+        subject, thn, oid = _anc.notice_title(it), _telling.then_part(it, to=sid), (_hooks().session_id(owner) if owner else "")
         if sid == oid:
             mine = True
             lines.append(f"{_gh.shown(gid)} {what}: {back}")

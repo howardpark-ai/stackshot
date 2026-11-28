@@ -190,7 +190,7 @@ def stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
             ver, conf = _hooks().stall_ver(item), _hooks().stall_confirm(item, mover)
             untaken = float(r.get("at") or 0) if r and not r.get("taken_at") else None
             project = str(meta.get("project") or "")
-            subject = str(item.get("subject") or "")
+            subject = _anc.notice_title(item)
         with _hooks().stall_lock():
             st = _hooks().stall_load()
             rec = _ladder.episode(st.get(gid), mover, ver, _handoff.ho_same, conf, untaken)      # on the one ladder it stays there (`via`), and the ask is not sent again

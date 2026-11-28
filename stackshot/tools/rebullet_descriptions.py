@@ -43,6 +43,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.model import bullet_text as _bt  # noqa: E402
 from stackshot.model import model_guards as _mg  # noqa: E402
 from stackshot.model import rebullet as _rb  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402
 
 
 def load_all(store: Path) -> dict[str, dict[str, Any]]:
@@ -221,7 +222,7 @@ def main(argv: list[str], runner: Callable[[str, str], dict[str, Any]] | None = 
         for g in ids:
             d = str(items[g].get("description") or "")
             why = reason(d, strict=strict, max_lines=max_lines, line_max=line_max)
-            print(f"  {shown(g)}: {why}, {prose_len(d)} characters, {len([x for x in d.splitlines() if x.strip()])} line(s): {str(items[g].get('subject') or '')[:70]}")
+            print(f"  {shown(g)}: {why}, {prose_len(d)} characters, {len([x for x in d.splitlines() if x.strip()])} line(s): {_tl.bare(items[g].get('subject'))[:70]}")
         print("DRY RUN: no model was called and nothing was written. --sample N --store <copy of the store> shows before and after; --apply writes through the server.")
         return 0
     if runner is None and not a.from_:
@@ -245,7 +246,7 @@ def main(argv: list[str], runner: Callable[[str, str], dict[str, Any]] | None = 
                 bad += 1
                 print(f"left alone {shown(g)}: its description changed since the sample was read")
                 continue
-            note = _rb.verdict(old, new, max_lines=max_lines, forbid=forbid, subject=str(it.get("subject") or ""), line_max=line_max, strict=strict)
+            note = _rb.verdict(old, new, max_lines=max_lines, forbid=forbid, subject=_tl.bare(it.get("subject")), line_max=line_max, strict=strict)
             if note:
                 bad += 1
                 print(f"left alone {shown(g)}: the current checks refuse the saved text: {note}")
@@ -256,7 +257,7 @@ def main(argv: list[str], runner: Callable[[str, str], dict[str, Any]] | None = 
             old = str(it.get("description") or "")
             status, new, note = _rb.rewrite(shown(g), it, runner, max_lines=max_lines, forbid=forbid, line_max=line_max, strict=strict)
         if a.sample:
-            rows.append({"shown": shown(g), "gid": g, "subject": str(it.get("subject") or "")[:120], "full_subject": str(it.get("subject") or ""), "before": old, "before_len": prose_len(old),
+            rows.append({"shown": shown(g), "gid": g, "subject": _tl.bare(it.get("subject"))[:120], "full_subject": str(it.get("subject") or ""), "before": old, "before_len": prose_len(old),
                          "before_lines": len([x for x in old.splitlines() if x.strip()]), "status": status, "after": new, "note": note})
             continue
         if status != "ok":

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from stackshot.model import ask_read as _ar  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402
 from stackshot.audit import audit as _audit  # noqa: E402
 from stackshot.model import bullet_text as _bt  # noqa: E402
 from stackshot.waits import dated_wait as _dw  # noqa: E402
@@ -99,7 +100,7 @@ def goal_view(item: dict[str, Any]) -> tuple[str, str] | None:
     """(the subject, the sentence after `Goal:`) of an item whose description opens with a Goal bullet, else None: the two texts the goal-unclear check judges. An item filed before the Goal form
     (or by a script) has no such bullet and is no suspect of the daily check."""
     goal = _bt.goal_of(str(item.get("description") or ""))
-    return (str(item.get("subject") or ""), goal) if goal else None
+    return (_tl.bare(item.get("subject")), goal) if goal else None
 
 
 def goal_sig(subject: str, goal: str) -> str:

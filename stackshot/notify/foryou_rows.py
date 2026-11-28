@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Callable
 
+from stackshot.model import title_label as _tl
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model import member_gates as _mgates
 from stackshot.model.needs import _waits_decision
@@ -74,27 +75,35 @@ def decision_left(before: dict[str, Any] | None, item: dict[str, Any]) -> bool:
     return b.get("status") == "open" and _waits_decision(b.get("metadata") or {}) and not (item.get("status") == "open" and _waits_decision(item.get("metadata") or {}))
 
 
-def changes(before: dict[str, Any] | None, item: dict[str, Any], who: str, shown: Callable[[str], str], parse_ask: Callable[[str], Any]) -> list[tuple[str, str, Any]]:
+def changes(before: dict[str, Any] | None, item: dict[str, Any], who: str, shown: Callable[[str], str], parse_ask: Callable[[str], Any],
+            grp: Callable[[dict[str, Any]], str] | None = None, grp_prefix: Callable[[dict[str, Any]], str] | None = None) -> list[tuple[str, str, Any]]:
     """The rows a change of an item makes, in order: [(kind, line, discriminator)]. `before` is the item as the file held it (None for a create). `who` is the name of whoever wrote it, `shown` turns a store id
-    into the id a session reads and `parse_ask` is the page's parser of an ask line (None when it is misshaped)."""
+    into the id a session reads, `parse_ask` is the page's parser of an ask line (None when it is misshaped), `grp` is the item's title as a line shows it, group and all, with no tag
+    (anchors.group_title; a caller with no project reading falls back to the stored subject with its tag taken off), and `grp_prefix` is the group alone, "<group> · " or ""
+    (anchors.item_group), for the decision row's own decide text, which is not the title but still wants the group beside it."""
     b = before or {}
     bm, am = b.get("metadata") or {}, item.get("metadata") or {}
     bs, as_ = b.get("status"), item.get("status")
     was_dec = bs == "open" and _waits_decision(bm)
     is_dec = as_ == "open" and _waits_decision(am)
-    subject = str(item.get("subject") or "")
+    _subj: list[str] = []
+    def subject() -> str:                   # built only once a row is actually going to be made (grp may read the project files: never pay for a save that makes no row)
+        if not _subj:
+            _subj.append(grp(item) if grp else _tl.bare(item.get("subject")))
+        return _subj[0]
     out: list[tuple[str, str, Any]] = []
     if as_ == "completed" and bs == "open":
         outcome, sup, reason = str(am.get("outcome") or "done"), str(am.get("superseded_by") or ""), str(am.get("reason") or "").strip()
-        out.append(("closed", f"closed by {who} ({outcome}{' by ' + shown(sup) if sup else ''}): {subject}" + (f" — {reason}" if reason else ""), stamp(item)))
+        out.append(("closed", f"closed by {who} ({outcome}{' by ' + shown(sup) if sup else ''}): {subject()}" + (f" — {reason}" if reason else ""), stamp(item)))
     elif as_ == "open" and bs == "completed":
-        out.append(("reopened", f"reopened by {who}: {subject}", stamp(item)))
+        out.append(("reopened", f"reopened by {who}: {subject()}", stamp(item)))
     if is_dec and not was_dec:
         pa = parse_ask(str(am.get("ask") or ""))
-        out.append(("decision", "needs your decision: " + (pa["decide"] if pa else subject), stamp(item)))
+        decide = (grp_prefix(item) if grp_prefix else "") + pa["decide"] if pa else subject()
+        out.append(("decision", "needs your decision: " + decide, stamp(item)))
     wf, wb = am.get("wait_failed"), bm.get("wait_failed")
     if as_ == "open" and isinstance(wf, dict) and wf and wf != wb:
-        out.append(("check_failed", f"{wf.get('what') or 'a wait'} can no longer end: {wf.get('why') or 'it failed'} ({subject})",
+        out.append(("check_failed", f"{wf.get('what') or 'a wait'} can no longer end: {wf.get('why') or 'it failed'} ({subject()})",
                     int(float(wf.get("at") or 0)) or stamp(item)))
     return out
 
@@ -132,6 +141,6 @@ def due_day(due: str) -> dt.date:
     return dt.date.fromisoformat(due[:10])
 
 
-def due_what(when: str, day_words: str, subject: Any) -> str:
-    """The line of a due-date row: "due Thu Mar 5th: <subject>"."""
-    return f"{when} {day_words}: {subject or ''}"
+def due_what(when: str, day_words: str, title: Any) -> str:
+    """The line of a due-date row: "due Thu Mar 5th: <group · title, no tag>". `title` is the caller's group_title(item), not the raw subject."""
+    return f"{when} {day_words}: {title or ''}"

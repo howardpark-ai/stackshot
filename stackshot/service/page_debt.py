@@ -25,6 +25,7 @@ from stackshot.fleet import sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.github import ghsync as _gh
 from stackshot.model import said as _said
+from stackshot.model import title_label as _tl
 from stackshot.model.needs import _needs_of
 from stackshot.projects import brains as _brains
 from stackshot.router import page_debt as _page_debt
@@ -51,7 +52,11 @@ def page_debt_item(gid: str, what: str) -> dict[str, Any]:
         return {"id": _gh.shown(gid), "change": what, "subject": "(the item could not be read)"}
     meta = it.get("metadata") or {}
     said = [f"{e['tag']}: {' '.join(e['quote'].split())[:240]}" for e in _said.entries_of(meta)[-5:] if e.get("quote")]
-    row = {"id": _gh.shown(gid), "subject": str(it.get("subject") or "")[:200], "status": str(it.get("status") or ""), "change": what,
+    try:
+        title = _anc.group_title(it)
+    except Exception:  # noqa: BLE001  — the page debt call still goes with the bare title when the registry cannot be read
+        title = _tl.bare(it.get("subject"))
+    row = {"id": _gh.shown(gid), "subject": title[:200], "status": str(it.get("status") or ""), "change": what,
            "description": str(it.get("description") or "")[:800], "next": str(meta.get("next") or "")[:600], "needs": _hooks().shown_needs(_needs_of(meta)),
            "ask": str(meta.get("ask") or "")[:300], "outcome": str(meta.get("outcome") or ""), "reason": str(meta.get("reason") or "")[:300], "said": said}
     return {k: v for k, v in row.items() if v not in ("", [], None)}

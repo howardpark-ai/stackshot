@@ -906,7 +906,7 @@ B0 = render.Board(str(STORE)); U0 = ui_render.Board(str(STORE)); h0, p0, md0 = U
 check("off: the board writes old ids as before: a row's id a1 at /items/a1, the item page titled s12 with its after link a1, board.md **s12 · …**, no board# anywhere",
       '<a class="ir-link" href="/items/a1" target="_blank" rel="noopener"><span class="ir-id">a1</span>' in h0 and "<title>s12 · item s12</title>" in p0 and '<span class="hid">s12</span>' in p0
       and '<dt>After</dt><dd><a href="/items/a1">a1</a> <span class="dim">(open)</span>' in p0 and '<dt>Waits on</dt><dd><a href="/items/a1">a1</a> <span class="dim">(open)</span>' in p0
-      and "**s12 · [home] item s12**" in md0 and "- after: [a1](#task-a-1)" in md0 and "board#" not in h0 + p0 + md0 + B0.brief(),
+      and "**s12 · home · item s12**" in md0 and "- after: [a1](#task-a-1)" in md0 and "board#" not in h0 + p0 + md0 + B0.brief(),
       (re.findall(r'<a class="ir-link"[^>]*><span class="ir-id">[^<]*</span>', h0)[:3], re.findall(r"<title>.*?</title>", p0)))
 snap("s21 made")
 
@@ -916,7 +916,7 @@ check("dry run: the plan names every open item, in id order, and nothing is writ
       plan["items"] == 5 and plan["created"] == 0 and [p.split(" ")[0] for p in plan["plan"]] == ["a1", "a3", "a5", "s12", "s21"] and not writes() and (STORE / "a/1.json").exists(), (plan, writes()))
 r = G.migrate(STORE, GH, say=lambda s: None)
 check("the open items became #1 onward in id order; the closed ones stayed", r["created"] == 5 and sorted(F.issues) == [1, 2, 3, 4, 5]
-      and [issue(n)["title"] for n in (1, 2, 3, 4, 5)] == ["[home] item a1", "[home] item a3", "[home] item a5", "[home] item s12", "[home] made with the mirror off"]
+      and [issue(n)["title"] for n in (1, 2, 3, 4, 5)] == ["item a1", "item a3", "item a5", "item s12", "made with the mirror off"]
       and (STORE / "a/2.json").exists() and (STORE / "a/4.json").exists() and not (STORE / "a/1.json").exists() and not (STORE / "s/12.json").exists(), (r, sorted(F.issues)))
 b1 = issue(1)["body"]
 check("the body is slim: the marker of the old id, the description, one footer line linking the item's page; no next, ask, options, owner or due",
@@ -933,8 +933,8 @@ check("_norm_id: the old id, the board form, the hash form and g<n> all name the
       and _model_ids._norm_id("#3") == "g3" and _model_ids._norm_id("G4") == "g4" and _model_ids._norm_id("a2") == "a2", [_model_ids._norm_id(x) for x in ("a1", "board#2", "#3", "G4", "a2")])
 refused("a bad id names the board#<n> form", lambda: _model_ids._norm_id("board5"), "board#<n>")
 check("_path resolves an old id kept in a field", _service_store._path("a1") == STORE / "g/1.json" and _service_store._path("a2") == STORE / "a/2.json", _service_store._path("a1"))
-check("get by the old id answers with the item, shown as board#1", _wt_get.stackshot_get("a1").startswith("board#1 [open] [home] item a1"), _wt_get.stackshot_get("a1"))
-check("the board renders the moved items", ui_render.Board(str(STORE)).item("g1")["subject"] == "[home] item a1" and "[home] item a1" in ui_render.Board(str(STORE)).item_html("g1"))
+check("get by the old id answers with the item, shown as board#1", _wt_get.stackshot_get("a1").startswith("board#1 [open] home · item a1"), _wt_get.stackshot_get("a1"))
+check("the board renders the moved items", ui_render.Board(str(STORE)).item("g1")["subject"] == "[home] item a1" and "[home] item a1" not in ui_render.Board(str(STORE)).item_html("g1").split("<aside")[0] and "item a1" in ui_render.Board(str(STORE)).item_html("g1"))
 lk = _wmw._link_ids
 L = lambda shown, gid: f"[{shown}](https://board.example.org/items/{gid})"
 check("href_id: an issue-numbered item's page is its bare number (g1 → 1); an old id keeps its own", G.href_id("g1") == "1" and G.href_id("a2") == "a2" and G.href_id("g") == "g",
@@ -960,7 +960,7 @@ check("home notice: the label prefix for an issue-numbered id is the board's own
 check("the home rows and the parked mark: #1 links /items/1 in a row of the board, and the item that waits on it reads after #1",
       re.search(r'<a class="ir-link" href="/items/1"[^>]*><span class="ir-id">#1</span>', hb) is not None and re.search(r'<span class="hwait">After <a href="/items/1"[^>]*>#1</a></span>', hb) is not None,
       re.findall(r'<span class="hwait">.*?</span>', hb)[:6])
-check("board.md and the brief write board#<n>", "**board#1 · [home] item a1**" in md and "[board#4](#task-g-4)" in md and "- after: [board#1](#task-g-1)" in md and "your move: board#1 [home] item a1" in B.brief() and "**g1 " not in md,
+check("board.md and the brief write board#<n>", "**board#1 · home · item a1**" in md and "[board#4](#task-g-4)" in md and "- after: [board#1](#task-g-1)" in md and "your move: board#1 home · item a1" in B.brief() and "**g1 " not in md,
       (re.findall(r"\*\*[^*]*item a1\*\*", md), B.brief()))
 check("the item page: title and heading board#4, the after link and the 'Waits on' line board#1 at /items/1",
       "<title>#4 · item s12</title>" in p4 and '<span class="hid">#4</span>' in p4 and '<dt>After</dt><dd><a href="/items/1">#1</a> <span class="dim">(open)</span>' in p4
@@ -979,10 +979,10 @@ with TestClient(server.mcp.http_app()) as c:
     r5 = c.get("/items/1", follow_redirects=False); r6 = c.get("/items/g1", follow_redirects=False); r7 = c.get("/items/1.html", follow_redirects=False)
     r8 = c.get("/items/9", follow_redirects=False); r9 = c.get("/items/01", follow_redirects=False)
     check("/items/<old id> → 301 to the new id's page /items/<n>; /items/g<n> follows there and renders; a closed item's old page still serves; an unknown id is 404",
-          r1.status_code == 301 and r1.headers["location"] == "/items/1" and r2.status_code == 200 and "[home] item a1" in r2.text and r3.status_code == 200 and r4.status_code == 404,
+          r1.status_code == 301 and r1.headers["location"] == "/items/1" and r2.status_code == 200 and "item a1" in r2.text and r3.status_code == 200 and r4.status_code == 404,
           (r1.status_code, r1.headers.get("location"), r2.status_code, r3.status_code, r4.status_code))
     check("/items/<n> serves the issue-numbered item; /items/g<n> and /items/<n>.html are 301 to /items/<n>; an unknown number and a padded one are 404",
-          r5.status_code == 200 and "[home] item a1" in r5.text and "<title>#1 · item a1</title>" in r5.text
+          r5.status_code == 200 and "item a1" in r5.text and "<title>#1 · item a1</title>" in r5.text
           and r6.status_code == 301 and r6.headers["location"] == "/items/1" and r7.status_code == 301 and r7.headers["location"] == "/items/1"
           and r8.status_code == 404 and r9.status_code == 404,
           (r5.status_code, r6.status_code, r6.headers.get("location"), r7.status_code, r7.headers.get("location"), r8.status_code, r9.status_code))
@@ -1010,7 +1010,7 @@ job = json.loads(G.pending()[0].read_text())
 check("a create's job: kind created, urgent (it goes at once), no comment and no parts (the issue itself is the creation)", job["kind"] == "created" and job["gid"] == "s22" and job["urgent"] is True and "comment" not in job and "parts" not in job, job)
 r = G.drain(GH, STORE, say=lambda s: None)
 check("drain: one POST, the issue exists with the slim body (marker, description, footer) and no label, the map knows it, the queue is empty",
-      r == {"done": 1, "left": 0, "down": ""} and F.next == 7 and writes() == [("POST", REPO + "/issues")] and issue(6)["title"] == "[home] made with the mirror on"
+      r == {"done": 1, "left": 0, "down": ""} and F.next == 7 and writes() == [("POST", REPO + "/issues")] and issue(6)["title"] == "made with the mirror on"
       and issue(6)["body"].startswith("<!-- stackshot:s22 -->\n\n" + DESC + "\n\n<sub>Mirrored from [s22](https://board.example.org/items/s22) by ")
       and not any(w in issue(6)["body"] for w in ("###", "first step", ASK)) and issue(6)["labels"] == [] and G.issue_of("s22", STORE) == 6 and not comments(6), (r, F.next, issue(6)))
 p22 = ui_render.Board(str(STORE)).item_html("s22")
@@ -1050,7 +1050,7 @@ r = G.drain(GH, STORE, say=lambda s: None)
 check("…and goes out as one PATCH of the issue, the new description in the body, no comment", r["done"] == 1 and writes()[-1:] == [("PATCH", REPO + "/issues/6")] and mine(6) == [("PATCH", REPO + "/issues/6")]
       and "- changed text" in issue(6)["body"] and not comments(6) and issue(6)["labels"] == [], (r, mine(6), issue(6)["body"][:120]))
 _update_svc._update("s22", subject="[home] renamed with the mirror on", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
-check("a new subject is one more PATCH: the title follows, nothing else is sent", issue(6)["title"] == "[home] renamed with the mirror on" and len(mine(6)) == 2 and not comments(6), (issue(6)["title"], mine(6)))
+check("a new subject is one more PATCH: the title follows, nothing else is sent", issue(6)["title"] == "renamed with the mirror on" and len(mine(6)) == 2 and not comments(6), (issue(6)["title"], mine(6)))
 _update_svc._update("s22", description=D("changed text"), sender="home-here")
 check("the same description written again is no change of the issue: no job", qlen() == 0 and len(mine(6)) == 2, (qlen(), mine(6)))
 _wt_complete.stackshot_complete("s22", outcome="done", reason="it shipped", outcome_text="- Shipped and in use", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
@@ -1344,8 +1344,8 @@ check("a reload turns the id switch on", G.issue_ids())
 F.log.clear(); nxt = F.next
 out = _wt_create._create(subject="[home] numbered by GitHub", description=DESC, project="projects/alpha", owner="home-here", next="x", needs="external")
 check("the create waited for the issue: the id is its number, shown board#<n>, the file under g/", out.startswith(f"created board#{nxt} —") and (STORE / f"g/{nxt}.json").exists()
-      and rd("g", nxt)["id"] == str(nxt) and issue(nxt)["title"] == "[home] numbered by GitHub" and G.issue_of(f"g{nxt}", STORE) == nxt, (out[:100], F.next))
-check("get takes board#<n>", _wt_get.stackshot_get(f"board#{nxt}").startswith(f"board#{nxt} [open] [home] numbered by GitHub"))
+      and rd("g", nxt)["id"] == str(nxt) and issue(nxt)["title"] == "numbered by GitHub" and G.issue_of(f"g{nxt}", STORE) == nxt, (out[:100], F.next))
+check("get takes board#<n>", _wt_get.stackshot_get(f"board#{nxt}").startswith(f"board#{nxt} [open] home · numbered by GitHub"))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("the queued create then only brings the body up (the marker), no comment", r["done"] == 1 and f"<!-- stackshot:g{nxt} -->" in issue(nxt)["body"] and not comments(nxt), (r, issue(nxt)["body"][:60], comments(nxt)))
 check("the [ids] letter sequence was not touched", (STORE / "next-id").read_text().strip() == seq, (STORE / "next-id").read_text())
@@ -1389,12 +1389,12 @@ with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/board-tmp-boxa-1", follow_redirects=False); r0 = c.get("/items/l1", follow_redirects=False)
     r5 = c.get("/items/board-tmp-boxa-1/", follow_redirects=False); r6 = c.get("/items/board-tmp-other-1", follow_redirects=False)
 check("while temporary, the tools take board-tmp-boxa#1, board-tmp-boxa-1 and l1 alike, and update by board-tmp-boxa#1 reached it",
-      all(_wt_get.stackshot_get(x).startswith("board-tmp-boxa#1 [open] [home] during an outage") for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1"))
+      all(_wt_get.stackshot_get(x).startswith("board-tmp-boxa#1 [open] home · during an outage") for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1"))
       and all(_model_ids._norm_id(x) == "l1" for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")) and rd("l", 1)["description"] == D("edited while down"),
       [_wt_get.stackshot_get(x)[:50] for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")])
 check("the issue link: a temporary item (no issue yet) shows none on its page, with sync on", G.enabled() and r1.status_code == 200 and ghl(r1.text) == [], ghl(r1.text))
 check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and the trailing-slash form → 301 there; another machine's prefix is 404",
-      r1.status_code == 200 and "[home] during an outage" in r1.text
+      r1.status_code == 200 and "during an outage" in r1.text
       and r0.status_code == 301 and r0.headers["location"] == "/items/board-tmp-boxa-1" and r5.status_code == 301 and r5.headers["location"] == "/items/board-tmp-boxa-1"
       and r6.status_code == 404, (r1.status_code, r0.status_code, r0.headers.get("location"), r5.status_code, r6.status_code))
 # a notice pushed to a session names a temporary item as it is shown and links its item page (the builders called
@@ -1434,7 +1434,7 @@ check("l2 followed as the issue after, and its after list now names g<n>", (STOR
 with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/l1", follow_redirects=False); r2 = c.get(f"/items/g{n1}"); r3 = c.get("/items/board-tmp-boxa-1", follow_redirects=False)
 check("lookups by l1, board-tmp-boxa#1 and board-tmp-boxa-1 resolve to the item: _norm_id, get (shown board#<n>), and /items/l1 and /items/board-tmp-boxa-1 → 301 to its page /items/<n>",
-      all(_model_ids._norm_id(x) == f"g{n1}" and _wt_get.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
+      all(_model_ids._norm_id(x) == f"g{n1}" and _wt_get.stackshot_get(x).startswith(f"board#{n1} [open] home · during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
       and _service_store._path("l1") == STORE / f"g/{n1}.json"
       and r1.status_code == 301 and r1.headers["location"] == f"/items/{n1}" and r3.status_code == 301 and r3.headers["location"] == f"/items/{n1}" and r2.status_code == 200,
       (r1.status_code, r1.headers.get("location"), r3.status_code, r3.headers.get("location"), r2.status_code))
@@ -1499,7 +1499,7 @@ try:
 finally:
     _anc.pilot_root, telling.front_keeper = _pr, _fs
 check("an owner notice (a close on a front agent's item, to its keeper) names the item board#<n>",
-      any(t[1] == "home-keeper" and t[3] == "owner" and t[2] == f"[stackshot] board#{num(g_own)} (mover home-here, a front agent) was completed (done: closed by another session) by home-other: [home] closed by its keeper → https://board.example.org/items/{num(g_own)}"
+      any(t[1] == "home-keeper" and t[3] == "owner" and t[2] == f"[stackshot] board#{num(g_own)} (mover home-here, a front agent) was completed (done: closed by another session) by home-other: home · closed by its keeper → https://board.example.org/items/{num(g_own)}"
           for t in told_stew), told_stew)
 check("a close by the keeper itself on a front agent's item tells nobody, and the reply says the owner is not told",
       told_close == [] and quiet == "\n(its mover home-here is a front agent: not told; the board shows it)", (told_close, quiet))
@@ -2089,7 +2089,7 @@ r = G.drain(GH, STORE, say=lambda s: None, now=T0 + 100)
 check("inside the window: nothing is sent for the issue, the three jobs stay on disk, the drain says so", mine(n_m) == [] and qlen() == 3 and r.get("held") == 3 and 150 < r.get("next_due", 0) < 201, (r, mine(n_m), qlen()))
 r = G.drain(GH, STORE, say=lambda s: None, now=T0 + 400)
 check("when the window has run out: ONE PATCH of the issue for the three jobs, carrying the latest subject and description, and no comment", r["done"] == 3 and qlen() == 0
-      and mine(n_m) == [("PATCH", REPO + f"/issues/{n_m}")] and issue(n_m)["title"] == "[home] merge window renamed" and "- second words" in issue(n_m)["body"] and "first words" not in issue(n_m)["body"] and not comments(n_m),
+      and mine(n_m) == [("PATCH", REPO + f"/issues/{n_m}")] and issue(n_m)["title"] == "merge window renamed" and "- second words" in issue(n_m)["body"] and "first words" not in issue(n_m)["body"] and not comments(n_m),
       (r, mine(n_m), issue(n_m)["title"], comments(n_m)))
 # a change and its undoing inside one window: the fingerprint says the issue is as it was, nothing is sent
 g_v = mk("[home] merge revert"); n_v = G.issue_of(g_v, STORE); F.log.clear(); T1 = time.time()
@@ -2319,7 +2319,7 @@ g_new = G.resolve(g_tmp); n_new = G.issue_of(g_new, STORE)
 check("the waiting worker took the place that freed, then the create queued while it waited (not the rest of its list first), then the other updates; the queue is empty",
       not wk.is_alive() and qlen() == 0 and i_post < i_b2 < i_b3 and all(f"edit of {G.shown(g_)}" in issue(G.issue_of(g_, STORE))["body"] for g_ in bk), (wk.is_alive(), qlen(), i_post, i_b2, i_b3))
 check("the temporary item has its issue and is re-keyed: board#<n>, the temporary id an alias, the local file gone",
-      g_new.startswith("g") and n_new and issue(n_new)["title"] == "[home] created while the hour's writes are spent"
+      g_new.startswith("g") and n_new and issue(n_new)["title"] == "created while the hour's writes are spent"
       and G.load_map(STORE)["aliases"].get(g_tmp) == g_new and not (STORE / "l" / f"{g_tmp[1:]}.json").exists() and (STORE / g_new[0] / f"{g_new[1:]}.json").exists(), (g_new, n_new))
 out_ok = _wt_create._create(subject="[home] created with room again", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("with room under the budget a create takes its issue number straight away", out_ok.startswith("created board#") and "temporary" not in out_ok, out_ok[:120])

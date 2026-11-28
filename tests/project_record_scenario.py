@@ -638,7 +638,7 @@ check("once the page lists the name, the pending claim is pruned and roles read 
 
 # with_pending never raises (the server's gates call session_roles with no try around it): a record that cannot be read gives the no-record result
 RECF = T / "store/project-record.json"; REC_BAK = T / "store/project-record.json.bak-n1"
-real_wp = prj.with_pending; prj.with_pending = lambda reg, made=False: reg
+real_wp = prj.with_pending; prj.with_pending = lambda reg, made=False, marks_=None: reg
 try: baseline = _A.session_roles()
 finally: prj.with_pending = real_wp
 RECF.rename(REC_BAK); RECF.mkdir()

@@ -79,26 +79,26 @@ pg.load_state = lambda sid: {}; pg.save_state = lambda sid, st: None
 def early(sid):
     return pg.early_question({"session_id": sid, "tool_name": "mcp__x__update", "tool_response": "updated a1", "transcript_path": "/none"})
 q = early("front")
-check("1: the early question: the mover reads 'you are still its mover' beside each of its items", all(f'a{n} "[home] item {n}" (you are still its mover)' in q for n in (1, 4, 6)) and "keeper of record" not in q, q)
+check("1: the early question: the mover reads 'you are still its mover' beside each of its items", all(f'a{n} "home · item {n}" (you are still its mover)' in q for n in (1, 4, 6)) and "keeper of record" not in q, q)
 check("1: …an item the session has no role on is not listed", "item 5" not in q and "item 2" not in q and "item 3" not in q, q)
 check("1: …one sentence says what the role means for a hand-back that did not land", "if you handed it on and it still says you are its mover, that write was refused" in q, q)
 qb = early("back")
-check("1: …a session named in needs reads 'named in its needs' beside every item it is named in; one it moves too reads both; one it takes after the wait reads 'then'", 'a4 "[home] item 4" (named in its needs)' in qb
-      and 'a2 "[home] item 2" (you are still its mover; named in its needs)' in qb and 'a8 "[home] item 8" (it comes to you after Oliver (you are its then); named in its needs)' in qb
-      and 'a9 "[home] item 9" (it comes to you after Oliver (you are its then))' in qb and 'a3 "[home] item 3" (you are still its mover)' in qb and "item 5" not in qb, qb)
+check("1: …a session named in needs reads 'named in its needs' beside every item it is named in; one it moves too reads both; one it takes after the wait reads 'then'", 'a4 "home · item 4" (named in its needs)' in qb
+      and 'a2 "home · item 2" (you are still its mover; named in its needs)' in qb and 'a8 "home · item 8" (it comes to you after Oliver (you are its then); named in its needs)' in qb
+      and 'a9 "home · item 9" (it comes to you after Oliver (you are its then))' in qb and 'a3 "home · item 3" (you are still its mover)' in qb and "item 5" not in qb, qb)
 check("1: …the sentence about a refused hand-back comes only where a listed row says 'still its mover'", pg.still_mover_note([back["a4"], back["a8"], back["a9"]]) == "" and pg.still_mover_note([rows["a6"]]) != "" and "was refused" in pg.still_mover_note([back["a3"]]), None)
 ba = pg.board_ask(["a write"], list(rows.values()))
-check("1: the Stop hook's question lists the same set with the same roles before the next step", 'a1 "[home] item 1" (you are still its mover; next: step one of a1)' in ba
-      and 'a6 "[home] item 6" (you are still its mover; next: step one of a6)' in ba and "item 5" not in ba and "was refused" in ba and "keeper of record" not in ba, ba)
+check("1: the Stop hook's question lists the same set with the same roles before the next step", 'a1 "home · item 1" (you are still its mover; next: step one of a1)' in ba
+      and 'a6 "home · item 6" (you are still its mover; next: step one of a6)' in ba and "item 5" not in ba and "was refused" in ba and "keeper of record" not in ba, ba)
 bab = pg.board_ask(["a write"], [back["a4"], back["a8"]])
-check("1: …an item that names the session in its needs keeps its own wording and says it once", 'a4 "[home] item 4" (next: step one of a4; it names you in its needs: ' in bab
-      and 'a8 "[home] item 8" (it comes to you after Oliver (you are its then); next: step one of a8; it names you in its needs: ' in bab and bab.count("named in its needs") == 0, bab)
+check("1: …an item that names the session in its needs keeps its own wording and says it once", 'a4 "home · item 4" (next: step one of a4; it names you in its needs: ' in bab
+      and 'a8 "home · item 8" (it comes to you after Oliver (you are its then); next: step one of a8; it names you in its needs: ' in bab and bab.count("named in its needs") == 0, bab)
 legacy = [{k: v for k, v in rows["a1"].items() if k != "roles"}]
 # a closed item is never listed
 item(7, "home-owner", mover="home-front")
 d7 = json.loads((T / "store/a/7.json").read_text()); d7["status"] = "completed"; (T / "store/a/7.json").write_text(json.dumps(d7))
 check("1: …a closed item the session moved is not listed", "a7" not in {x["shown"] for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}, None)
-check("1: a row from a server that sends no roles reads as it did", 'a1 "[home] item 1" (next: step one of a1)' in pg.board_ask(["a write"], legacy) and pg.role_note(legacy[0]) == "", pg.board_ask(["a write"], legacy))
+check("1: a row from a server that sends no roles reads as it did", 'a1 "home · item 1" (next: step one of a1)' in pg.board_ask(["a write"], legacy) and pg.role_note(legacy[0]) == "", pg.board_ask(["a write"], legacy))
 
 # --- 2: the server logs why a call was refused ---
 def run_mw(name, args, call):

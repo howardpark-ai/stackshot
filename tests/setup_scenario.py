@@ -88,7 +88,7 @@ check("instance: owner, title, timezone, board_url", C["instance"]["owner"] == "
 check("auth: base_url, no emails, claude.ai callbacks kept", C["auth"]["base_url"] == "http://127.0.0.1:18020" and C["auth"]["allowed_emails"] == []
       and "https://claude.ai/api/mcp/auth_callback" in C["auth"]["allowed_client_redirect_uris"], C["auth"])
 check("client.url = the base URL", C["client"]["url"] == "http://127.0.0.1:18020", C["client"])
-check("prefixes default to [todo]", C["subject"]["prefixes"] == ["[todo] "], C["subject"])
+check("no tag is set by default: prefixes is empty", C["subject"]["prefixes"] == [], C["subject"])
 check("no [units] scope key is written (the units are user units; the key is gone)", "scope" not in C.get("units", {}), C.get("units"))
 check("no gbrain mirror; plain flavor", "mirror_repo" not in C["gbrain"] and C["gbrain"]["mirror_url"] == "" and C["pages"]["flavor"] == "plain", (C["gbrain"], C["pages"]))
 ex = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
@@ -112,7 +112,7 @@ check("RULES.md, the first page, session-names.tsv and projects.json are committ
 rules = (DATA / "RULES.md").read_text(encoding="utf-8")
 check("RULES.md's heading is instance.title", rules.splitlines()[0] == "# stackshot: tester", rules.splitlines()[0])
 check("RULES.md: about 25 lines, plain flavor (no gbrain tools)", 15 <= len(rules.splitlines()) <= 40 and "gbrain" not in rules and "add_timeline_entry" not in rules
-      and "`[todo] `" in rules and f"{D}/pages/<key>.md" in rules, len(rules.splitlines()))
+      and "`[todo] `" not in rules and "carries no tag" in rules and f"{D}/pages/<key>.md" in rules, len(rules.splitlines()))
 page = (DATA / "pages/projects/getting-started.md").read_text(encoding="utf-8")
 check("the page has Current state, the timeline marker and one dated bullet", "## Current state" in page and "<!-- timeline -->" in page
       and len(re.findall(r"(?m)^- \*\*\d{4}-\d{2}-\d{2}\*\* \| ", page)) == 1, page)

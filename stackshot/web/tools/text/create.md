@@ -64,7 +64,7 @@ due or before is a deadline, not a wait.
 Create a board item: something {{OWNER}} would ask "is X done?" about (a deliverable a session owns, a decision or
 input he must give, a blocker on someone outside, a handoff between sessions), never a working step.{{OFF_MAP_NOTE}}.
 Right calls (sender = you, the creator, required; project = an existing gbrain page, projects/<slug> or infra/<slug>):
-own work: create(project="projects/widgets", subject="{{PFX0}}Make the export finish in under a minute",
+own work: create(project="projects/widgets", subject="Make the export finish in under a minute",
 sender="my-x", mover="my-x", description="- Goal: the export finishes in under a minute\n- Problem: the nightly run
 takes 9 minutes", next="my-x: profile the nightly run") (description: short `- ` bullets, never a paragraph; every line `- ` included at most
 {{DESC_LINE_MAX}} characters); an item that needs {{OWNER}}'s call: the same call with no mover (he moves it) and
@@ -72,9 +72,9 @@ needs="decision", then="my-x" (who takes it after his answer), ask="Decide: whet
 Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099", options=[{"label": "Approve",
 "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a week", "recommended":
 false}]; a step that waits on another item: next="my-x: ship the export once board#N closes", after=["board#N"],
-until="<day, within {{CAP_DAYS}} days>"; work for the project's builder: leave mover out. subject: {{PFX}}, then the work that closes the
-item, as a task, never a symptom, a statement, a should sentence or a question; the reply names one that reads so (a subject with no scope prefix is
-given the one its project's scope names, and the reply says so). project must exist (create the page first; a page in a second brain is looked up in that brain's own
+until="<day, within {{CAP_DAYS}} days>"; work for the project's builder: leave mover out. subject: the work that closes the
+item, as a task, never a symptom, a statement, a should sentence or a question; the reply names one that reads so; no tag is asked for (the item's group comes from its project; a tag typed at the
+start of a subject anyway is stored as written and hidden wherever the title is shown). project must exist (create the page first; a page in a second brain is looked up in that brain's own
 copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your
 own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID); the server records it as the
 item's creator (a background agent may create items too). mover: who moves the item now (and then= after his answer or

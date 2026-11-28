@@ -12,6 +12,7 @@ from stackshot.web.ui import groups as _grp   # rows in one foldable subsection 
 from stackshot.web.ui import explain as _xp   # the "?" control that holds a page's explainer text (explain.py)
 from stackshot.web.ui import releasing as _rel   # which pull requests are in the release script's queue (an item anchored to one is Queued for release)
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
+from stackshot.model import title_label as _tl   # the leading tag an older title still carries, hidden wherever a title is shown (title_label.py)
 from stackshot.model import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 from stackshot.model import ask_ref as _askref   # the reference of an open question, a hidden field of the forms that answer it (ask_ref.py)
 from stackshot.core import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
@@ -1989,7 +1990,7 @@ class Board:
             g = _gh.norm(t) if t.startswith("board") else t   # → g7, board-tmp-<machine>#3 → l3 (another machine's: no item)
             r = self._mids.get(g)
             if r is None or g == own: return t
-            return f'<a href="{item_href(r)}" target="_blank" rel="noopener" title="{esc(r["subject"])}">{esc(shown(g))}</a>'
+            return f'<a href="{item_href(r)}" target="_blank" rel="noopener" title="{esc(self.titled(r))}">{esc(shown(g))}</a>'
         return self._mention_rx().sub(_m, h)
     def linkify(self, text, own=""): return self.mentions(linkify(text), own)   # free text a session wrote → HTML, mentions linked
     def md_html(self, text, own=""):
@@ -2510,8 +2511,8 @@ class Board:
         for vi, (ts, v) in enumerate(vs):
             m = v.get("metadata") or {}; ev = []
             if prev is None:
-                ev.append(("created", (_t("item.log.created_mover", subject=e(v.get('subject') or ''), whose=e(whose(v)), mover=e(mover_show(mover_of(v))), owner=e(owner(v))) if mover_of(v)
-                                  else _t("item.log.created", subject=e(v.get('subject') or ''), whose=e(whose(v)), owner=e(owner(v))))   # the subject it was born with
+                ev.append(("created", (_t("item.log.created_mover", subject=e(_tl.bare(v.get('subject'))), whose=e(whose(v)), mover=e(mover_show(mover_of(v))), owner=e(owner(v))) if mover_of(v)
+                                  else _t("item.log.created", subject=e(_tl.bare(v.get('subject'))), whose=e(whose(v)), owner=e(owner(v))))   # the subject it was born with
                            + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in _said.new_entries(None, m))))   # his words the first version already held
                 rl = _gh.refile_line(None, m)          # "Refile itself": filed under another project, moved to the owner's
                 if rl: ev.append(("project", e(rl)))
@@ -2584,7 +2585,7 @@ class Board:
                 if proj_key({"metadata": pm}) != proj_key({"metadata": m}):
                     rl = _gh.refile_line(pm, m)        # "Refile itself": the server moved it to its owner's project
                     ev.append(("project", e(rl) if rl else _t("item.log.project", old=e(proj(prev)), new=f"<b>{e(proj(v))}</b>")))
-                if prev.get("subject") != v.get("subject"): ev.append(("edit", _t("item.log.subject_edited", old=e(prev.get('subject') or ''))))
+                if prev.get("subject") != v.get("subject"): ev.append(("edit", _t("item.log.subject_edited", old=e(_tl.bare(prev.get('subject'))))))
                 who_ = shown_ref(" ".join(str(v.get("written_by") or "").split()))
                 for te in _work.tag_events(pm, m):          # a step's status line set, moved or cleared: folded under the step's one line (below), not a line of its own
                     g = groups.get(te["key"])
@@ -2931,6 +2932,7 @@ class Board:
         wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else None if not (_ip.wait_shows_end(w_) or _model.server_end(m)) else (_t("wait.label.end"), _t("item.no_end_date"))), post, who_html) if waiting and w_ else ""
         # ---- the sidebar: mover, owner and creator first, then project, then, priority, wake, anchors, the GitHub issue (and the For you control)
         tk = proj_top(r) or pk                        # the project it shows is the top-level one; the link stays the page the item is filed on (pk), as the gbrain page link below does
+        has_proj_page = (pk in self.proj or tk in self.proj) and bool(self.label_scope(tk))      # the Project field already names it through proj_label, scope and all, but only on a multi-scope instance (label_scope's own rule): the sidebar's own Group field below is left out then, so the group is read once, not twice; a single-scope instance has no scope on the Project row (label_scope hides it there too), so Group still carries it
         if pk in self.proj: prj = f'<a href="{e(under("/" + pk))}">{e(self.proj_label(tk))}</a>'
         elif tk in self.proj: prj = f'<a href="{e(under("/" + tk))}">{e(self.proj_label(tk))}</a>'      # the filed page has no row of its own: the project's page stands in
         elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">{_t("item.page_missing")}</span>'      # the flag sits beside the page that is missing, the one the item is filed on
@@ -2952,7 +2954,7 @@ class Board:
         ml, mv = self.mover_row(r)
         who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
         acnt = f'<span class="count">{alist.count("<li>")}</span>'
-        side = (f'<dl class="sgrp">{who_rows}</dl>' + grp((_t("item.project"), prj)) + grp((_t("item.then"), then_v)) + grp((_t("item.priority"), prio))
+        side = (f'<dl class="sgrp">{who_rows}</dl>' + grp((_t("item.project"), prj), (_t("item.group"), "" if has_proj_page else e(self.item_group(r)))) + grp((_t("item.then"), then_v)) + grp((_t("item.priority"), prio))
                 + grp((wlabel if waiting else _t("item.wake"), wakev))
                 + (f'<dl class="sgrp"><dt>{_t("item.anchors", count=acnt)}</dt><dd><ul class="alist">{alist}</ul></dd></dl>' if alist else "")
                 + grp(("GitHub", ghl))
@@ -3123,7 +3125,7 @@ class Board:
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">'
                 f'<title>{esc(name)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">' + self.page_header() +
-                f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
+                f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub pjgroup">{esc(self.landed_scope(self.row_of(k) or k)[0])}</p>' if len(_prj.scopes()) > 1 and not self.label_scope(k) else "") + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
                 + f'<p class="sub">{_t("routing.sub", summary=esc(summary))}' + ("" if pilot else f' · {_t("routing.no_rulings")}')      # a page the router never rules says so; why is behind the "?"
                 + f' {_xp.explain("routing", _t("routing.help_pilot" if pilot else "routing.help_plain"), _t("routing.sec_notices"))}</p>'
                 + self.sent_notes_html() + fold("items", _t("routing.sec_items"), n_items, items_body, more=(f' <span class="count dim">{_t("routing.verifying", n=n_ver)}</span>' if n_ver else "") + (f' <span class="count dim">{_t("routing.completed", n=n_done)}</span>' if n_done else ""))
@@ -3158,10 +3160,10 @@ class Board:
                  + (f" · {stale} stale" if stale else "")
                  + (f" · {len(self.undelivered)} with an undelivered notice" if self.undelivered else "") + "."]
         lines += _wc.lines()                      # step 4b: what changed in the tools in the last 7 days (whatschanged.py)
-        lines += [f"  your move: {rid_full(r)} {r['subject']} [{self.lab(r)}]" for r, _m in pairs[_home.YOUR_MOVE][:5]]
-        lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · ' + _home.wait_phrase(m_, 'on', shown_full) if _home.wait_phrase(m_, 'on', shown_full) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
+        lines += [f"  your move: {rid_full(r)} {self.titled(r)} [{self.lab(r)}]" for r, _m in pairs[_home.YOUR_MOVE][:5]]
+        lines += [f"  waiting: {rid_full(r)} {self.titled(r)} [{self.lab(r)}]{' · ' + _home.wait_phrase(m_, 'on', shown_full) if _home.wait_phrase(m_, 'on', shown_full) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
         nh = new_holds(self.held, self.now)       # the holds set in the last 24 hours, with their reason
-        lines += [f"  newly parked (24 h): {rid_full(r)} {r['subject']} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
+        lines += [f"  newly parked (24 h): {rid_full(r)} {self.titled(r)} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
         if len(nh) > 8: lines.append(f"  … and {len(nh) - 8} more newly parked")
         if T["open"]:
             lines.append(f"  alive {T['alive']} (your move {T['your_move']}, agents {T['agents']}) · waiting {T['waiting']}")
@@ -3170,7 +3172,7 @@ class Board:
             if n_basis: lines.append(f"  {n_basis} of the doing items have a date that states its reason (wait_basis): the board lists them as waiting until that date, whatever the stored state says")
             if ndated: lines.append(f"  {ndated} of the doing items have a date more than {_wt.dated_wait_min_hours():g} h out and every open step dated for a later day: the board lists them as waiting; park each (update until=..., wait_kind='time', wait_basis=...; within the wait cap's days a park needs his recorded words) or write the step that can run now")
         if self.basis_waits and self.basis_due():     # the weekly list: long waits that stand on a real-world date, for a person to look at
-            lines += [f"  waits on a real-world date: {rid_full(r)} {r['subject']} [wake {self.when(wake_of(r))} · {_wt.basis_of(r['metadata'])}]" for r in self.basis_waits[:8]]
+            lines += [f"  waits on a real-world date: {rid_full(r)} {self.titled(r)} [wake {self.when(wake_of(r))} · {_wt.basis_of(r['metadata'])}]" for r in self.basis_waits[:8]]
             if len(self.basis_waits) > 8: lines.append(f"  and {len(self.basis_waits) - 8} more waits on a real-world date (the board's head lists them)")
         return "\n".join(lines) + "\n"
 
@@ -3189,7 +3191,7 @@ class Board:
                      + [f"[{rid_full(r)}](#{anchor(r)}) ({'parked' if is_held(r) else self.after_words(r)})" for r in sorted(held, key=lambda r: (wake_key(r), r["L"], num(r)))])   # parked: after the active ones
             return "<br>".join(", ".join(links[i:i+per]) for i in range(0, len(links), per)) or "—"
         def m_item(r):
-            m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
+            m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {self.titled(r)}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
             meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({_datewords.numeric_day(due_of(r), now)} {due_of(r):%a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
             if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
@@ -3265,7 +3267,7 @@ class Board:
                 print()
                 for r in self.basis_waits:
                     wb = r["metadata"].get("wait_basis") or {}
-                    print(f"- [{rid_full(r)}](#{anchor(r)}) · {r['subject']} — wake {self.when(wake_of(r))} · {_wt.basis_of(r['metadata'])} · set by {wb.get('by') or 'unknown'}")
+                    print(f"- [{rid_full(r)}](#{anchor(r)}) · {self.titled(r)} — wake {self.when(wake_of(r))} · {_wt.basis_of(r['metadata'])} · set by {wb.get('by') or 'unknown'}")
                 print()
             print("## Machines"); print(); print("| package | " + " | ".join(_cols) + " |"); print("|---|" + "---|" * len(_cols))
             for name in PKG_ORDER: print(f"| {name} | " + " | ".join(_cell(name, L) for L in _cols) + " |")
@@ -3306,7 +3308,7 @@ class Board:
             if done:
                 for r in done:
                     oc, why, by = outcome_of(r)   # how it ended
-                    print(f"- <a id=\"{anchor(r)}\"></a>**{rid_full(r)}** {r['subject']}" + (f" · **{outcome_word(oc)}**" + (f" by {shown_full(by)}" if by else "") + (f": {why}" if why else "") if oc else "")
+                    print(f"- <a id=\"{anchor(r)}\"></a>**{rid_full(r)}** {self.titled(r)}" + (f" · **{outcome_word(oc)}**" + (f" by {shown_full(by)}" if by else "") + (f": {why}" if why else "") if oc else "")
                           + (f" · {m_sref(r)}" if lab(r) else "") + f" · {_datewords.numeric_day(r['_updated'], self.now)} {r['_updated']:%H:%M} {_cfg.tz_abbr(r['_updated'])}")
             else: print("_none_")
         return _b.getvalue()
@@ -3501,7 +3503,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         not his). Inside the machines block, so the block's fingerprint covers it and the in-place update shows or drops it."""
         rs = self.recycle
         if not rs: return ""
-        ids = ", ".join(f'<a class="r-id" href="{item_href(r)}" target="_blank" rel="noopener" title="{esc(r["subject"])}">{esc(rid(r))}</a>' for r in rs)
+        ids = ", ".join(f'<a class="r-id" href="{item_href(r)}" target="_blank" rel="noopener" title="{esc(self.titled(r))}">{esc(rid(r))}</a>' for r in rs)
         return f'<p id="recycle" class="mnote" role="status">{_t("panel.recycle", ids=ids, tool=esc(_cfg.fleet_tool() or _t("panel.fleet_tool")))}</p>\n'
 
     def provision_html(self):
@@ -3513,11 +3515,17 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 
     @staticmethod
     def bare(t):
-        """The subject as these list lines show it: a leading configured tag ("[work] ") dropped, since the scope sub-heading
-        says it now; the stored subject, the item page, tooltips and board.md keep it."""
-        PFX = [str(p) for p in (_cfg.get("subject", "prefixes") or [])]
-        t = str(t or ""); p = next((p for p in PFX if p and t.startswith(p)), "")
-        return t[len(p):] if p and t[len(p):].strip() else t
+        """The title as every screen and text line shows it: a leading tag an older title still carries ("[work] ") hidden (title_label.bare); the stored subject is never changed. The group is the project's (item_group), never read from the title."""
+        return _tl.bare(t)
+    def item_group(self, r):
+        """The group an item is shown under, once, wherever its title is seen: the scope of the board row its page rolls up to, the reading home's subsections use (scope_groups; never a tag typed in the title).
+        "" on a single-scope instance (projects.label_scope's own rule: there is nothing to tell one group from another, so the word is left out, as proj_title already leaves it out of a project's own label)."""
+        if len(_prj.scopes()) < 2: return ""
+        return self.landed_scope(self.row_of(proj_key(r)) or proj_key(r) or "")[0]
+    def titled(self, r):
+        """The title a text line shows: `<group> · <title>` (item_group, then bare), for board.md and the text digest."""
+        sc = self.item_group(r)
+        return f"{sc} · {self.bare(r['subject'])}" if sc else self.bare(r["subject"])
     # ---------------- the home page's three lists (home.py is the pure half) ----------------
     # Every open item is one of
     # alive or waiting (model.py) and sits in exactly one of Your move, On agent and Waiting. A row is two lines: the goal (the subject,

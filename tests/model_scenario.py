@@ -371,7 +371,7 @@ else: _cfg.CFG["model"]["owner_param_until"] = _CUT
 # get: leads with mover and then; the keeper of record among the details
 item(31, needs=["decision"], ask=ASK, subject="[home] get leads"); upd(31, mover="OLIVER", then="team-back")
 g = _wt_get.stackshot_get("a31").split("\n")
-check("get: leads with mover: and then: right after the heading line", g[1] == f"mover: {OWN}" and g[2] == "then: team-back" and g[0].endswith("[home] get leads"), g[:4])
+check("get: leads with mover: and then: right after the heading line", g[1] == f"mover: {OWN}" and g[2] == "then: team-back" and g[0].endswith("home · get leads"), g[:4])
 check("get: no creator line, never `owner:` nor `keeper of record:`", not any(l.startswith("keeper of record: ") for l in g) and not any(l.startswith("owner:") for l in g), g)
 item(32, subject="[home] derived lead", needs=[BACK]); g = _wt_get.stackshot_get("a32").split("\n")
 check("get: a mover the item does not store reads (derived)", g[1] == "mover: team-back (derived)", g[:3])

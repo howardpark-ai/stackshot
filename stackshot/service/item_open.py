@@ -1,7 +1,7 @@
 """item_open.py: `client.py post item-open`, an item a script opens for a background agent of a project.
 
 A timer's script that finds work for a project's background agent asks for one board item of that work. The route is narrow on purpose: the mover must be a background agent the project's page lists, the subject takes
-the project scope's prefix from the server, the description is bullets within the create tool's limits, and the item is marked with the caller's marker (`metadata.item_open`): while an item with that marker is open on
+no tag from the server, the description is bullets within the create tool's limits, and the item is marked with the caller's marker (`metadata.item_open`): while an item with that marker is open on
 the same project a repeat call answers it and files nothing. A front-only project (no builder) whose page lists no background agent has none to take the item: it is filed with the project's -main agent as its mover
 and says so (`metadata.item_open_fallback`), as job_gap.py does. `_ITEMOPEN_LOCK` makes the look for an open item and the write one step. The helpers it files its rows with are service/terminal_prompt.py's.
 
@@ -17,11 +17,11 @@ from typing import Any
 from fastmcp.exceptions import ToolError
 
 from stackshot.anchors import anchors as _anc
-from stackshot.core import config as _cfg
 from stackshot.core.store import _item_files
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import bullet_text as _bt
+from stackshot.model import title_label as _title_label
 from stackshot.model.field_gates import _description_limits
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry
@@ -35,7 +35,7 @@ from stackshot.service import writes as _writes
 
 # ----------------------------------------------------------------------------- an item a script opens for a background agent (client.py post item-open)
 # A timer's script that finds work for a project's background agent (a weekly report past a threshold) asks for one board item of that work. The route is narrow on purpose: the item's mover
-# must be a background agent the project page lists, the subject takes the project scope's prefix from the server, the description is bullets within the create tool's limits, the step names
+# must be a background agent the project page lists, the subject takes no tag from the server, the description is bullets within the create tool's limits, the step names
 # the mover, and the item is marked with the caller's marker: while an item with that marker is open on the same project a repeat call answers it and files nothing, after it is closed a call files a new one; a project holds at most _ITEMOPEN_OPEN_MAX open items of this route.
 _ITEMOPEN_LOCK = threading.Lock()
 _ITEMOPEN_KEYS = ("marker", "project", "subject", "description", "step", "mover", "sender")
@@ -89,8 +89,8 @@ def _itemopen_lines(raw: Any) -> tuple[list[str], str]:
 
 def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py post item-open <marker> --project P --subject S --mover M --step "<M>: ..." --line "..." [--line ...] [--sender L]`: a script asks for ONE board item for a background agent of project P (a front-only project, whose page lists none, files it under its -main agent: see below).
-    body: marker (`<kind>:<what>`, the item's mark), project (an id, a page key or a bare slug), subject (the action and its object, no prefix: the server puts the project scope's prefix before it, and a
-    prefix the caller wrote is replaced), description (the bullets: a list of lines or one text of lines), step (one line that starts `<mover>: `), mover (a background agent listed under `background:` on the
+    body: marker (`<kind>:<what>`, the item's mark), project (an id, a page key or a bare slug), subject (the action and its object, no tag: the server adds none, and a
+    leading tag of the instance's list the caller wrote is taken off), description (the bullets: a list of lines or one text of lines), step (one line that starts `<mover>: `), mover (a background agent listed under `background:` on the
     project's page, nobody else: a front agent, the owner, an unlisted name are refused; in a front-only project, where the page lists none, the name the script gives is replaced by the -main agent), sender (the script's own label, one word; default client.py). Any other key is refused.
     The item is filed through create_item (service/create.py), the create tool's own code, so the subject, description and next gates, the project page and the GitHub mirror all apply and a refusal is the tool's text (400);
     the caller picks no field the tool does not take for a script (no needs, owner, priority, ask or date). The project's front agent (its -main first) is the item's creator and the mover is named in needs, so it is
@@ -151,22 +151,21 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
         mover = owner
         lines = [*lines, f"{key} lists no background agent, so this is with {owner}, its front agent"]
     by = f"{sender} (a script on a client machine)"
-    prefixes = list(_cfg.CFG["subject"]["prefixes"])
+    prefixes = _title_label.prefixes()
     subject = _svcstore._shown_ids(subject)
     bare = [p.strip() for p in prefixes if p.strip()]
     def _prefix_at_start(text: str) -> str:
-        """the instance prefix the text starts with, when it is a prefix of its own: a space, the end of the text or another prefix follows it (so `[work]-style fix` keeps its bracket word)"""
+        """the instance tag the text starts with, when it is a tag of its own: a space, the end of the text or another tag follows it (so `[work]-style fix` keeps its bracket word)"""
         for b in bare:
             if text.startswith(b):
                 rest = text[len(b):]
                 if not rest or rest[0].isspace() or any(rest.startswith(o) for o in bare):
                     return b
         return ""
-    while (hit := _prefix_at_start(subject)):      # every prefix the caller wrote comes off: the scope's prefix is the server's to choose, and goes on once
+    while (hit := _prefix_at_start(subject)):      # a tag the caller still writes comes off: the group is the project's, and a title carries no tag
         subject = subject[len(hit):].lstrip()
     if not subject:
-        return 400, {"error": "subject is only an instance prefix: write the action and its object after it (the server puts the project's prefix on)"}
-    subject = _terminal._terminal_subject_prefix(str(rec.get("scope") or "")) + subject
+        return 400, {"error": "subject is only a tag: write the action and its object (no tag is needed, the project gives the group)"}
     desc = _terminal._terminal_bullets(*lines, _ITEMOPEN_ATTRIBUTION.format(sender=sender))
     try:
         with _ITEMOPEN_LOCK:         # the look for an open item and the write that follows are one step, so two calls for one marker file one item

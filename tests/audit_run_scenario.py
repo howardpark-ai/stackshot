@@ -1272,7 +1272,7 @@ def gitem(i, subject="[home] Make the nightly run finish by 06:00", goal="The ni
 gs = build(gitem(14))
 sus, _skip = AR.suspects(gs, now, env())
 check("goal-unclear: an open item with a Goal bullet and no verdict yet is a suspect, priority 3, with the subject and the Goal sentence as evidence and a stamp",
-      [(s["id"], s["checks"], s["priority"]) for s in sus] == [(f"board#{BID_04}", [GU], 3)] and sus[0]["gsig"] and len(sus[0]["gsig"]) == 12 and "subject: [home] Make the nightly run finish by 06:00" in sus[0]["evidence"][GU]
+      [(s["id"], s["checks"], s["priority"]) for s in sus] == [(f"board#{BID_04}", [GU], 3)] and sus[0]["gsig"] and len(sus[0]["gsig"]) == 12 and "subject: Make the nightly run finish by 06:00" in sus[0]["evidence"][GU]
       and "Goal: The nightly run finishes by 06:00" in sus[0]["evidence"][GU], sus)
 rec_clear(); fake(answers={f"board#{BID_04}": YES(GU, "the subject names the failure, not the result wanted", "model's own fix text")})
 rec = go(gs)

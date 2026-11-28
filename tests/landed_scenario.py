@@ -335,7 +335,7 @@ check("...the counts add up: the subsection counts, the lines under them and the
       all(n == len(ids) for _sc, n, ids in tree) and sum(n for _sc, n, _p in tree) == 9 and page_lines(pm) == 9 and pm.count('class="lclear"') == 9, tree)
 check("...heading order in the document is the scopes only: work, home, ops (no project headings, no h2 per scope)",
       re.findall(r'<h3 class="iscope">([^<]*) <span', newsec(pm)) == ["work", "home", "ops"] and 'lscopehd' not in pm and 'class="lgroup"' not in pm, None)
-check("...the subject's scope prefix is not repeated on the lines (the heading says it); Clear all carries all 9 keys; the heading counts 9",
+check("...the subject's tag is not repeated on the lines (the heading says it); Clear all carries all 9 keys; the heading counts 9",
       "[work]" not in pm and "[home]" not in pm and len(re.search(r'<form class="lmark"[^>]*><input type="hidden" name="keys" value="([^"]*)"', pm).group(1).split(",")) == 9 and '<h2 class="lsec">New <span class="count">9</span></h2>' in pm, txt(pm)[:200])
 agree("mixed scopes: 9 listed under three subsections", 9)
 # the subsections fold like home's (one shared helper, ui/groups.py): native details, open by default, the count in the summary, a key of their own

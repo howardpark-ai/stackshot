@@ -356,6 +356,8 @@ def _row(board: Any, R: Any, h: dict[str, Any], snip: str, ws: list[str], state_
     if kind in ("item", "history"):
         pk = R.proj_top(r)       # the project it shows is the top-level one (an item on a sub-page reads as its project)
         proj = esc(board.proj_label(pk)) if pk else ""
+        grp = "" if pk else esc(board.item_group(r))          # the group once: proj_label already names it (a leading "work/" on a multi-scope instance) when there is a project; an item with none still gets it here
+        proj = " · ".join(x for x in (grp, proj) if x)
         if kind == "history":
             bits = [esc(_i18n.t("search.hist", what=h["sub"] or _i18n.t("search.change"))), esc(board.when(h["t"])) if h["t"] else "", proj]
         else:

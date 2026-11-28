@@ -44,12 +44,18 @@ def _read_note(given: str, gid: str) -> None:
 NAME_LEN = 60          # how much of an item's subject the note of a bare id that closes it shows
 
 
-def name_read(gid: str, subject: str) -> None:
-    """A close that read its item's id from a bare number or #N says which item that was: the note becomes "read N as board#N (<the first 60 characters of the subject>)", so a wrong item is seen at once.
-    Nothing changes when the call read no such id for `gid`."""
+def name_read(gid: str, item: dict) -> None:
+    """A close that read its item's id from a bare number or #N says which item that was: the note becomes "read N as board#N (<group · the first 60 characters of the title, no leading tag>)", so a
+    wrong item is seen at once. Nothing changes when the call read no such id for `gid`."""
+    from stackshot.anchors import anchors as _anc  # noqa: PLC0415  — ids.py is read early; the import stays local to it
+    try:
+        title = _anc.group_title(item)
+    except Exception:  # noqa: BLE001  — a note only: a registry read that fails still names the item by its bare subject
+        from stackshot.model import title_label as _tl  # noqa: PLC0415
+        title = _tl.bare(item.get("subject"))
     parts = [x for x in _calls.unfix("item-id").removeprefix("read ").split(" and ") if x]
     shown = _gh.shown(gid)
-    tag = " (" + " ".join(str(subject or "").split())[:NAME_LEN] + ")"
+    tag = " (" + " ".join(title.split())[:NAME_LEN] + ")"
     parts = [p + tag if p.endswith(" as " + shown) else p for p in parts]
     if parts:
         _calls.fixed("item-id", "read " + " and ".join(parts))

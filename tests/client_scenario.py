@@ -278,7 +278,7 @@ def part_client():
     check("the legacy renderer marks a parked item (parked, wake <day>) or (parked, no wake date) and an after wait \"after a20\", never on hold", re.search(r"\*\*a3 · [^\n]*\*\* \(parked, wake ", md) and re.search(r"\*\*a4 · [^\n]*\*\* \([^)\n]*after a20", md) and "(on hold" not in md and ", on hold" not in md, [l for l in md.split("\n") if "**a3 ·" in l or "**a4 ·" in l])
     check("…and not one set three days ago, one stored before the record, a malformed record or an item that is not held",
           all(f"[a{n}](#task-a-{n})" not in sect for n in (23, 13, 21, 22, 19, 1, 30, 31, 32, 33)), sect)
-    check("the session-start brief lists them too", "  newly parked (24 h): a3 [home] hold fixture 3" in br and "nothing holds it now" in br and "parked for after a20" in br and "a23" not in br, br)
+    check("the session-start brief lists them too", "  newly parked (24 h): a3 home · hold fixture 3" in br and "nothing holds it now" in br and "parked for after a20" in br and "a23" not in br, br)
     (T / "board.md").write_text(md, encoding="utf-8")
     head = _wt_brief.stackshot_brief()
     check("the brief tool's head carries the section (it reads board.md up to the first lane)", head.find("## Newly parked") != -1 and head.find("## Newly parked") < head.find("All open items in full"), head[:300])
@@ -614,7 +614,7 @@ def part_client():
     st, ct, body4 = client_reads_svc._client_get("items", {"key": "nobody-at-all"}); check("items: a session that owns nothing: an empty list", st == 200 and json.loads(body4) == {"items": []}, body4)
     x = {i["gid"]: i for i in json.loads(body)["items"]}
     eb2, od2 = x["a2"].pop("expected_by"), x["a2"].pop("overdue")      # kept as keys, always empty (they go in a later release)
-    check("items: the fields", x["a2"] == {"gid": "a2", "shown": "a2", "subject": "[home] item 2", "needs": ["decision"], "contact": "", "next": "first\nsecond", "state_updated": 100.0, "confirmed": 200.0, "updated": 300.0, "held": False, "list": "your-move",
+    check("items: the fields", x["a2"] == {"gid": "a2", "shown": "a2", "subject": "item 2", "needs": ["decision"], "contact": "", "next": "first\nsecond", "state_updated": 100.0, "confirmed": 200.0, "updated": 300.0, "held": False, "list": "your-move",
           "mover": {"kind": _cfgm.owner_mover_kind(), "who": _core_instance.OWNER}, "wait": "", "scope": "home", "roles": ["then"]}, x["a2"])   # roles = the asking session's live roles (the owner's item, Oliver moves it: keeper only); the stored item state (derived here); the one rule's fields (waiting.py): whose move, by when
     check("items: expected_by and overdue stay as keys and are always empty (no expected time is computed), wait is the empty string", eb2 is None and od2 is None and x["a2"]["wait"] == "" and all(i["expected_by"] is None for i in json.loads(body)["items"]), (eb2, od2))
     check("items: held, from metadata.hold and from the retired status", x["a3"]["held"] and x["a4"]["held"] and not x["a1"]["held"], (x["a3"], x["a4"]))

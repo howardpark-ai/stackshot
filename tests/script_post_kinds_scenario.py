@@ -8,7 +8,7 @@ Part 1, a gap in a scheduled job (job_gap):
 Scenario test for the script post kind a gap in a scheduled job is filed with (`client.py post job-gap open|clear`, POST /client/job-gap, Oliver's pick A) — fixture data, no
 live store, no network, no server process (the server module is imported and called in-process, on a temporary config; the pages are fixture files in a temporary directory).
 
-Covers: open (one open item per (timer, code), marked metadata.job_gap = "<timer>: <code>", subject "[home] <the task>", under the project page that owns the repo, the project's builder the
+Covers: open (one open item per (timer, code), marked metadata.job_gap = "<timer>: <code>", subject "<the task>", under the project page that owns the repo, the project's builder the
 mover and in needs, its -main agent the keeper of record, p2, next "<builder>: <the fix>", description bullets that say the gap and the fix, the script recorded as creator; the builder is told
 once and no front agent is woken, nothing is owed to the page); a repeat open of an open (timer, code) files nothing and answers the same item, another code or another timer is another item;
 clear (closes it: outcome done, a reason within the limit, the end state in outcome_text, the id answered), clear with none open a 200 that says so, an open again after a clear
@@ -180,7 +180,7 @@ def part_job_gap():
           and out["repeat"] is False and out["fallback"] is False and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
     it = item(out["item"]); m = it["metadata"]
     check("the item is open, filed under the repo's project page, marked with the timer and the code", it["status"] == "open" and m["project"] == "projects/alpha" and m["job_gap"] == "sala-foo.timer: no-lane", (it["status"], m))
-    check("…the subject is the task that closes the gap, naming the unit", it["subject"] == "[home] Add X-Model-Lane= to sala-foo.timer", it["subject"])
+    check("…the subject is the task that closes the gap, naming the unit", it["subject"] == "Add X-Model-Lane= to sala-foo.timer", it["subject"])
     check("…p2; the project's builder (the one whose mandate builds, not the notes keeper) is the mover and is in needs", m.get("priority") == "p2" and sr._session_label(m.get("mover")) == "home-sparrow-builder"
           and [sr._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"], m)
     check("…the keeper of record is the project's -main agent (not the builder, not the docs agent); the script is the creator", sr._session_label(m["owner"]) == "home-sparrow-main"
@@ -206,14 +206,14 @@ def part_job_gap():
     st, o3 = jg("open", repo="acme/nobuild")
     check("…even with another repo: the open gap's item is answered", st == 200 and o3["item"] == gid1 and o3["repeat"] is True and len(items()) == n1, (st, o3))
     st, o4 = jg("open", code="not-git")
-    check("another code on the same timer is another item", st == 200 and o4["item"] != gid1 and o4["repeat"] is False and item(o4["item"])["subject"] == "[home] Put sala-foo.timer in git" and len(items()) == n1 + 1, (st, o4))
+    check("another code on the same timer is another item", st == 200 and o4["item"] != gid1 and o4["repeat"] is False and item(o4["item"])["subject"] == "Put sala-foo.timer in git" and len(items()) == n1 + 1, (st, o4))
     st, o5 = jg("open", timer="sala-bar.timer")
-    check("another timer with the same code is another item", st == 200 and o5["item"] not in (gid1, o4["item"]) and item(o5["item"])["subject"] == "[home] Add X-Model-Lane= to sala-bar.timer" and len(items()) == n1 + 2, (st, o5))
+    check("another timer with the same code is another item", st == 200 and o5["item"] not in (gid1, o4["item"]) and item(o5["item"])["subject"] == "Add X-Model-Lane= to sala-bar.timer" and len(items()) == n1 + 2, (st, o5))
     check("…each open gap finds its own item", open_for("sala-foo.timer", "no-lane") == [_model_ids._norm_id(gid1)] and len(open_for("sala-foo.timer", "not-git")) == 1 and len(open_for("sala-bar.timer", "no-lane")) == 1)
     for code, subj in (("no-description", "Add Description= to sala-codes.timer"), ("bad-lane", "Correct X-Model-Lane= of sala-codes.timer"), ("git-differs", "Match sala-codes.timer to its file in git"),
                        ("odd-new-code", "Fix the odd-new-code gap of sala-codes.timer")):
         st, o = jg("open", timer="sala-codes.timer", code=code)
-        check(f"code {code}: its task in the subject", st == 200 and item(o["item"])["subject"] == f"[home] {subj}", (st, o, item(o["item"])["subject"] if st == 200 else ""))
+        check(f"code {code}: its task in the subject", st == 200 and item(o["item"])["subject"] == f"{subj}", (st, o, item(o["item"])["subject"] if st == 200 else ""))
         jg("clear", timer="sala-codes.timer", code=code, repo=None)
     st, o = jg("open", timer="sala-codes.timer", code="odd-new-code")
     oi = item(o["item"])
@@ -232,7 +232,7 @@ def part_job_gap():
         check(f"a timer {bad!r} with an @ that starts a mention: 400, nothing filed", st == 400 and len(items()) == n_m, (st, e))
     st, o = jg("open", timer="sala-job@1.service", detail="the file is /home/@octocat/x.timer, mail me@example.org or ask @octocat")
     oi = item(o["item"])
-    check("an @ between letters or digits in a timer (a template unit) is taken", st == 200 and oi["subject"] == "[home] Add X-Model-Lane= to sala-job@1.service", (st, o, oi["subject"]))
+    check("an @ between letters or digits in a timer (a template unit) is taken", st == 200 and oi["subject"] == "Add X-Model-Lane= to sala-job@1.service", (st, o, oi["subject"]))
     check("…and an @name in the detail is broken in the description (no bare @ before a word), the text otherwise kept", not bare_at(oi["description"]) and "octocat" in oi["description"] and "/home/@​octocat/x.timer" in oi["description"], oi["description"])
     jg("clear", timer="sala-job@1.service", repo=None)
     st, o = jg("open", timer="sala-sender.timer", sender="@octocat-bot")
@@ -324,7 +324,7 @@ def part_job_gap():
     LONG = "sala-" + "very-long-unit-name-" * 5 + "x.timer"          # 105 characters: the subject would be over 80
     st, o = jg("open", timer=LONG, code="no-lane")
     sub = item(o["item"])["subject"] if st == 200 else ""
-    check("a unit name too long for the subject limit still opens: 200, a subject of at most 80 characters that keeps the scope prefix, the task and the cut name", st == 200 and len(sub) <= 80 and sub.startswith("[home] Add X-Model-Lane= to sala-very-long")
+    check("a unit name too long for the subject limit still opens: 200, a subject of at most 80 characters that keeps the task and the cut name", st == 200 and len(sub) <= 80 and sub.startswith("Add X-Model-Lane= to sala-very-long")
           and sub.endswith(" …"), (st, o, sub))
     check("…the mark keeps the whole name and a clear by the whole name closes it", item(o["item"])["metadata"]["job_gap"] == f"{LONG}: no-lane" and jg("clear", timer=LONG, repo=None)[1]["cleared"] == [o["item"]])
     st, o = jg("open", timer="t" * 120, code="a" * 40)
@@ -461,7 +461,7 @@ def part_terminal_prompt():
           and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
     it = item(out["item"]); m = it["metadata"]
     check("the item is open, filed under the session's project from the registry, marked with the resolved session name", it["status"] == "open" and m["project"] == "projects/alpha" and m["terminal_prompt"] == "home-sparrow-builder", (it["status"], m))
-    check("…the subject names the session and what it waits for", it["subject"] == "[home] Answer home-sparrow-builder in its terminal", it["subject"])
+    check("…the subject names the session and what it waits for", it["subject"] == "Answer home-sparrow-builder in its terminal", it["subject"])
     check("…priority p1; the owner is the mover; state your-step with the one-line step, no command", m.get("priority") == "p1" and m.get("mover") == "Oliver" and m.get("state") == "your-step"
           and m.get("step") == "Answer home-sparrow-builder's question in its terminal" and "`" not in m["step"], m)
     check("…next is the one line that links the pane and carries the question", m.get("next") == nxt("home-sparrow-builder", Q), m.get("next"))
@@ -478,8 +478,8 @@ def part_terminal_prompt():
     # ---- 1b. a long pane name: the server's own subject is cut to the limit, never refused
     st, outl = tp("open", LONGNAME, Q)
     itl = item(outl["item"]) if st == 200 else {"subject": ""}
-    check("a pane name too long for the subject limit still opens: 200, a subject of at most 80 characters that keeps the scope prefix and the words after the name",
-          st == 200 and len(itl["subject"]) <= 80 and itl["subject"].startswith("[home] Answer home-sparrow-n") and itl["subject"].endswith(" …" + " in its terminal"), (st, outl, itl["subject"]))
+    check("a pane name too long for the subject limit still opens: 200, a subject of at most 80 characters that keeps the words after the name",
+          st == 200 and len(itl["subject"]) <= 80 and itl["subject"].startswith("Answer home-sparrow-n") and itl["subject"].endswith(" …" + " in its terminal"), (st, outl, itl["subject"]))
     check("…the marker keeps the whole name", itl["metadata"]["terminal_prompt"] == LONGNAME if st == 200 else False)
     st, _c = tp("clear", LONGNAME, None)
     check("…and it clears", st == 200 and _c["cleared"], (st, _c))
@@ -516,8 +516,8 @@ def part_terminal_prompt():
 
     # ---- 4. the project: the registry's, else projects/example-two
     st, ol = tp("open", "home-loner", "Which branch?")
-    check("a session the registry gives no project is filed under projects/example-two, owned by its -main agent, with the subject prefix of the instance", st == 200 and ol["project"] == "projects/example-two"
-          and sr._session_label(item(ol["item"])["metadata"]["owner"]) == "example-two-main" and item(ol["item"])["subject"].startswith("[home] Answer home-loner in its terminal"), (st, ol))
+    check("a session the registry gives no project is filed under projects/example-two, owned by its -main agent, with no tag in the subject", st == 200 and ol["project"] == "projects/example-two"
+          and sr._session_label(item(ol["item"])["metadata"]["owner"]) == "example-two-main" and item(ol["item"])["subject"].startswith("Answer home-loner in its terminal"), (st, ol))
     st, onf = tp("open", "home-nofront", "Which branch?")
     check("…and so is a session whose project lists no front agent", st == 200 and onf["project"] == "projects/example-two", (st, onf))
     st, osl = tp("open", "home-slug", "Which branch?")
@@ -770,20 +770,8 @@ def part_terminal_prompt():
     check("the 404 list of the client API names the new write", "terminal-prompt" in _rt_client._client_post(me, "nope", {})[1]["error"])
     check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(terminal_prompt_svc._terminal_prompt.__doc__.split()))
 
-    # [subject] fallback_prefix: the prefix of an item no session wrote when the project's scope has none of its own
-    _cfgsub = _cfg.CFG["subject"]; _was = dict(_cfgsub)
-    try:
-        _cfgsub["prefixes"] = ["[work] ", "[home] "]
-        _cfgsub.pop("fallback_prefix", None)
-        check("no fallback_prefix set: the scope's prefix when the instance has it, else the first prefix", terminal_prompt_svc._terminal_subject_prefix("home") == "[home] " and terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
-        _cfgsub["fallback_prefix"] = "[home] "
-        check("fallback_prefix set: a scope with no prefix of its own gets it, a scope with one keeps its own", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[home] " and terminal_prompt_svc._terminal_subject_prefix("work") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
-        _cfgsub["fallback_prefix"] = "[away] "
-        check("a fallback_prefix that is not one of the prefixes is ignored: the first prefix", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ", terminal_prompt_svc._terminal_subject_prefix("zzz"))
-        _cfgsub["fallback_prefix"] = ""
-        check("an empty fallback_prefix is none", terminal_prompt_svc._terminal_subject_prefix("zzz") == "[work] ")
-    finally:
-        _cfgsub.clear(); _cfgsub.update(_was)
+    # no tag is put on the server's own subjects, whatever the scope of the project: the group is the project's
+    check("the server files its own items with no tag in front: the terminal-prompt, job-gap and job-alert subjects open with the pane, timer or unit name", not hasattr(terminal_prompt_svc, "_terminal_subject_prefix"))
 
 # ======== part 3: a failed run of a scheduled job (the former job_alert suite) ========
 def part_job_alert():
@@ -811,7 +799,7 @@ def part_job_alert():
           and out["action"] == "opened" and out["failures"] == 1 and out["fallback"] is False and out["item"] == _gh.shown(_model_ids._norm_id(out["item"])), (st, out))
     gid1 = out["item"]; it = item(gid1); m = it["metadata"]
     check("the item is open under the project, marked with the unit and the host", it["status"] == "open" and m["project"] == "projects/alpha" and m["job_alert"] == "nightly.service on host-a", (it["status"], m))
-    check("…the subject names the unit and the machine", it["subject"] == "[home] Fix nightly.service on host-a", it["subject"])
+    check("…the subject names the unit and the machine", it["subject"] == "Fix nightly.service on host-a", it["subject"])
     check("…p2; the project's builder (not the notes keeper) is the mover and is in needs", m.get("priority") == "p2" and sr._session_label(m.get("mover")) == "home-sparrow-builder"
           and [sr._session_label(x) for x in m.get("needs") or []] == ["home-sparrow-builder"], m)
     check("…the keeper of record is the -main agent; the creator reads `job alert (a script on <machine>)`", sr._session_label(m["owner"]) == "home-sparrow-main" and it["filed_by"] == f"job alert (a script on {me})", (m["owner"], it.get("filed_by")))
@@ -841,7 +829,7 @@ def part_job_alert():
     st, o4 = failed(host="host-b")
     check("the same unit on another host is another item", st == 200 and o4["item"] != gid1 and o4["action"] == "opened" and item(o4["item"])["metadata"]["job_alert"] == "nightly.service on host-b", (st, o4))
     st, o5 = failed(unit="weekly.timer")
-    check("another unit on the same host is another item", st == 200 and o5["item"] not in (gid1, o4["item"]) and o5["action"] == "opened" and item(o5["item"])["subject"] == "[home] Fix weekly.timer on host-a", (st, o5))
+    check("another unit on the same host is another item", st == 200 and o5["item"] not in (gid1, o4["item"]) and o5["action"] == "opened" and item(o5["item"])["subject"] == "Fix weekly.timer on host-a", (st, o5))
     check("…three items are open now, one per (unit, host)", len(items()) == n1 + 2 and {open_for("nightly.service", "host-a")[0], open_for("nightly.service", "host-b")[0], open_for("weekly.timer", "host-a")[0]} == {_model_ids._norm_id(x) for x in (gid1, o4["item"], o5["item"])})
     failed(host="host-b", time_="2026-11-23T05:00:00Z"); failed(unit="weekly.timer", time_="2026-11-23T05:00:00Z")
 
@@ -927,7 +915,7 @@ def part_job_alert():
     LONG = "very-long-unit-name-" * 5 + "x.service"          # 105 characters: the subject would be over 80
     st, o = failed(unit=LONG)
     sub = item(o["item"])["subject"] if st == 200 else ""
-    check("a unit name too long for the subject limit still opens: a subject of at most 80 characters that keeps the scope prefix, the cut name and the machine", st == 200 and len(sub) <= 80 and sub.startswith("[home] Fix very-long")
+    check("a unit name too long for the subject limit still opens: a subject of at most 80 characters that keeps the cut name and the machine", st == 200 and len(sub) <= 80 and sub.startswith("Fix very-long")
           and sub.endswith(" … on host-a"), (st, o, sub))
     check("…the mark keeps the whole name, and a job-ok by the whole name closes it", item(o["item"])["metadata"]["job_alert"] == f"{LONG} on host-a" and ok(unit=LONG)[1]["closed"] == [o["item"]])
     st, o = failed(unit="u" * 120, host="h" * 63)

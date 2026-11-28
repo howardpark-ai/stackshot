@@ -38,8 +38,9 @@ from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro      # on a read-only standby copy the index lives in memory only (no file, no directory in the state dir)
+from stackshot.model import title_label as _tl      # the leading tag an older title carries is not indexed or shown (title_label.py)
 
-SCHEMA = 1                   # a change to the tables or to what is indexed bumps it: the next start drops the index and builds it again
+SCHEMA = 2                   # a change to the tables or to what is indexed bumps it (2: an item's title is indexed without the leading tag an older title carries): the next start drops the index and builds it again
 MIN_CHARS = 2                # a query shorter than this finds nothing
 MAX_Q = 200                  # characters of a query read
 MAX_TERMS = 8                # words of a query read
@@ -228,7 +229,7 @@ def _prepare_item(board: Any, r: dict[str, Any], history: bool) -> dict[str, Any
                     events.append((float(ts), str(kind), txt))
         except Exception as e:  # noqa: BLE001  — the History is an extra: an item the store's git cannot read is still found by its own text
             print(f"search: history of {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return {"gid": gid, "sig": sig, "title": f"{_clean(r.get('subject'), 500)} {ids}", "body": body[:CAP["item"]], "events": events, "full": history and bool(events)}
+    return {"gid": gid, "sig": sig, "title": f"{_clean(_tl.bare(r.get('subject')), 500)} {ids}", "body": body[:CAP["item"]], "events": events, "full": history and bool(events)}
 
 
 def _write_item(con: sqlite3.Connection, p: dict[str, Any]) -> None:

@@ -268,7 +268,7 @@ def stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tup
         _writes.save(gid, item, note="stall: " + ("no notice to a front agent" if front else "the notice was sent again"))
         nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
         if not front:
-            lines.append((who, gid, f"{_gh.shown(gid)}: {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")))
+            lines.append((who, gid, f"{_gh.shown(gid)}: {_anc.notice_title(item)} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")))
     print(f"stall: {gid} {who} had no turn for {minutes:g} min: " + ("front agent, history line only" if front else "notice sent again"), file=sys.stderr, flush=True)
     return "resend"
 

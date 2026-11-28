@@ -47,8 +47,8 @@ bin/stackshot setup
 - your name as the board should say it, and your timezone;
 - the public base URL (`https://board.example.com`);
 - the Google account emails allowed to sign in;
-- the subject prefixes your items start with (`[work] `, `[home] `), comma-separated; each is normalised to end in
-  one space;
+- the tags an older title may still open with (`[work] `, `[home] `), comma-separated, none needed; each is normalised to end in
+  one space, and a title that opens with one is shown without it;
 - where the data repository lives (default `~/stackshot-data`) and where the project pages live
   (default `~/stackshot-data/pages`).
 
@@ -221,8 +221,8 @@ register themselves and fetch what waits for them at each prompt.
 
 ## 8. The first item
 
-In any session: call `create` with a subject that starts with one of your prefixes, `project =
-"projects/getting-started"`, and a `next` line. The board at your base URL shows it within seconds,
+In any session: call `create` with a subject naming the finished outcome (no tag: the board shows the item's group
+from its project), `project = "projects/getting-started"`, and a `next` line. The board at your base URL shows it within seconds,
 the data repository has a commit, and a page update is owed for `projects/getting-started`: that is the page
 rule, and `RULES.md` says how it works. By default (`[pilot] writer_owes_page = false`) the page's keeper is
 charged and the router passes it the update; with `writer_owes_page = true` the session that wrote owes it and,

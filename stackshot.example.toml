@@ -120,9 +120,8 @@ deploy_ssh = ""                                     # the ssh host release.sh ru
                                                     # this box's checkout then follows to the same commit and only its puller restarts; a checkout that cannot follow (local changes) pauses the release queue and reports red, `release.sh queue --resume` goes on once it is clean. While it runs, a release also tells that box so (the busy hold and the Queued for release label read it). "" = deploy here (a one-box install). A value naming this box (its name, short name or a loopback name) reads as "" too, unless its user@ part is another user than the one running release.sh (then it is ssh). Set to another box, it also makes `./install.sh units` refuse there (`--force-host` overrides) and `stackshot publish publish`, `bump` and `flush` refuse there (no override; a running server publishes all the same, whatever this value calls its box). Contract: none (a command that is run).
 
 [subject]
-prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these
-fallback_prefix = ""                                # the prefix of an item the server files itself (a pane's terminal prompt, a job gap) for a project whose scope has no prefix of its own; it must be one of `prefixes`, else the first one is used. "" = the first
-max_length = 80                                     # the longest subject (scope prefix counted) a create or an update that sets one takes; a stored longer one is left alone
+prefixes = ["[work] ", "[home] "]                   # tags an older title may still open with: hidden wherever a title is shown; none is asked for or added (an item's group is its project's)
+max_length = 80                                     # the longest subject a create or an update that sets one takes; a stored longer one is left alone
 
 [close]
 reason_max = 120                                    # the longest reason a close takes (complete, or update with status=completed); 0 = no limit. The server's own closes cut to it

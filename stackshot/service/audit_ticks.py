@@ -331,7 +331,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 _bt.mark(meta, now, to, kind, cur["since"])
                 _stall.note(meta, now, f"{_sr._session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_sr._session_label(to)} was told")
                 _writes.save(gid, item, note="audit: busy stretch told")
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            lead = f"{_gh.shown(gid)} \"{_anc.notice_title(items[gid])}\" ({row['project']})"
             line = (f"{lead}: no write on it but the hourly audit lines for about {span}. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on" if kind == _bt.KIND_FRONT else
                     f"{lead}: {_sr._session_label(mover)} has looked busy for about {span} (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing")
             told.setdefault(to, []).append((gid, kind, line))
@@ -461,7 +461,7 @@ def _front_pickup_tick(now: "float | None" = None, items: "dict[str, dict[str, A
             cur = _fp.due({**items, gid: {**item, "gid": gid}}, gid, now, front, idle, present, _handoff.ho_same, marks, skip)      # read again: the item may have been written, held, closed or handed on since
             if cur is None or not _handoff.ho_same(cur["mover"], row["mover"]):
                 continue
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            lead = f"{_gh.shown(gid)} \"{_anc.notice_title(items[gid])}\" ({row['project']})"
             text = f"[stackshot] {_fp.words(cur, lead)}.\nNo reply is owed to the audit; nothing here is for {OWNER}. → {_telling.notice_link(gid)}"
             _fp.mark(gid, now, items)      # before the send, so it is at most once an hour; a delivery that fails turns it into a half-hour backoff below
             res: dict[str, Any] = {}
@@ -610,7 +610,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
             main = mains[row["project"]]
             if main and _model.is_owner(main):
                 main = ""      # the owner is told nothing by this pass, whatever the page names as -main
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            lead = f"{_gh.shown(gid)} \"{_anc.notice_title(items[gid])}\" ({row['project']})"
             if to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the mover it was found with; the stamp goes on the metadata the move saves
                     cur = _hi.due({**items, st.gid: item}, st.gid, now, front)
@@ -764,7 +764,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             main = mains[project]
             if main and _model.is_owner(main):
                 main = ""      # the owner is told nothing by this pass
-            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({project})"
+            lead = f"{_gh.shown(gid)} \"{_anc.notice_title(items[gid])}\" ({project})"
             if row["capped"]:
                 with _writes.ITEM_LOCK:
                     item = _svcstore._load(gid)

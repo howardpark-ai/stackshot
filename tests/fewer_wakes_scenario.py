@@ -452,7 +452,7 @@ finally:
 # the builder's own board notices about an item whose keeper of record is a front agent (telling.tell_owner_change records them as a message to the project): no front turn
 instance =str(_cfg.get("instance", "name") or "stackshot")
 def board_msg(nid, writer, what): return {"id": nid, "ts": 1000.0, "kind": "message", "label": "message to projects/alpha", "who": instance, "to": "", "target": "project-wide", "pilot": True, "live": True,
-                                         "text": f"[board] a40 [home] item 40: {writer} {what} (keeper of record osprey-main may need to act) → https://board.example.org/items/a40"}
+                                         "text": f"[board] a40 home · item 40: {writer} {what} (keeper of record osprey-main may need to act) → https://board.example.org/items/a40"}
 ln = _router.code_rule(KEY, board_msg("b1", "osprey-x", "set next: PR 26 is up"), KEY, cx, [])
 check("2zz: the builder's own update of a front agent's item (a `[board]` notice) is merged: it is the writer, the notice goes to nobody", ln and ln["rule"] == "message-item" and ln["ruling"] == "merged" and not ln["target"], ln)
 ln = _router.code_rule(KEY, board_msg("b2", "home-beta", "set next: look at PR 26"), KEY, cx, [])
@@ -547,7 +547,7 @@ check("3b negative: the builder's own hand-back to the front agent keeper tells 
       not hb_notes("a30", n0) and not hb_pushes("a30", p0) and len(held()) == 1 and "nobody is told" in out_b, (held(), out_b))
 p0, n0 = len(pushes()), len(pushes())
 h = [v for v in held().values() if v["gid"] == "a20"][0]
-check("…the held line is the one the keeper would have heard, due 180 seconds on", h["gid"] == "a20" and h["oid"] == A and h["line"].startswith("[stackshot] a20 is back with you alone (handed back by osprey-front2): [home] item 20; next: ")
+check("…the held line is the one the keeper would have heard, due 180 seconds on", h["gid"] == "a20" and h["oid"] == A and h["line"].startswith("[stackshot] a20 is back with you alone (handed back by osprey-front2): home · item 20; next: ")
       and h["line"].endswith("/items/a20") and abs(h["due"] - (t0 + 180)) < 30, h)
 check("3c: the tick before the window ends sends nothing", telling.handback_tick(now=t0 + 60) == [] and len(held()) == 1 and not hb_notes("a20", n0))
 out = _wt_update.stackshot_update("a20", status="completed", outcome="done", reason="PR 26 is live", description="- The thing works and is in use", sender="osprey-x", done=[2]); settle()      # the hand-back line names the front agent: the builder's close marks it itself (done=[2]), as a close no longer settles another session's step

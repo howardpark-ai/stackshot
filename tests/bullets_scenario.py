@@ -421,9 +421,9 @@ if was_next is None: del n_cfg["line_max"]
 else: n_cfg["line_max"] = was_next
 
 # ---- 6b. short titles and close reasons: a subject over 80 characters and a close reason over 120 are refused where they are written
-subj = lambda n: "[home] " + "s" * (n - 7)         # a subject of exactly n characters, the scope prefix counted
+subj = lambda n: "[home] " + "s" * (n - 7)         # a subject of exactly n characters, an old tag counted (it is stored as written)
 refused("create: a subject of 81 characters is refused, with its length, the limit and the fix", lambda: create(subject=subj(81)),
-        "Refused: the subject is 81 characters and the limit is 80", "scope prefix counted", "Shorten it", "description bullets")
+        "Refused: the subject is 81 characters and the limit is 80", "Shorten it", "description bullets")
 passes("create: a subject of 80 characters passes", lambda: create(subject=subj(80)))
 def long_subject_item(i, subject):
     now = time.time()
@@ -439,7 +439,7 @@ long_subject_item(61, OLD_LONG)
 passes("update: an unrelated write on an item with a stored 137-character subject passes", lambda: _update_svc._update("a61", priority="p2", sender=MAIN))
 passes("…so does one that sets the very subject it has", lambda: _update_svc._update("a61", subject=OLD_LONG, sender=MAIN))
 check("…and the stored subject stays as it was", json.loads((T / "store/a/61.json").read_text())["subject"] == OLD_LONG)
-refused("update: a subject without a scope prefix is still refused first", lambda: _update_svc._update("a61", subject="no prefix", sender=MAIN), "subject must start with one of")
+passes("update: a subject with no tag is accepted: none is asked for", lambda: _update_svc._update("a61", subject="no tag at all", sender=MAIN))
 s_cfg = _cfg.CFG["subject"]; was_s = s_cfg.get("max_length")
 s_cfg["max_length"] = 30
 refused("config: [subject] max_length is the limit", lambda: create(subject=subj(31)), "is 31 characters and the limit is 30")
@@ -567,7 +567,7 @@ check("bare_urls: a URL in [words](url), an image, a code span or a closed fence
 check("bare_urls: <url> is found, an unclosed fence is no fence, a bare URL beside a link is found", BT.bare_urls("- <https://example.com/a>") == ["https://example.com/a"] and BT.bare_urls("```\nhttps://example.com/a\n- x") == ["https://example.com/a"]
       and BT.bare_urls("- [w](https://example.com/a) then https://example.com/b") == ["https://example.com/b"])
 check("bare_urls: no URL, an empty text and a long line of brackets cost nothing", BT.bare_urls("") == [] and BT.bare_urls("- no link, example.com is plain") == [] and BT.bare_urls("[" * 40000 + "`" * 40000) == [])
-check("create and update: the tool text states the 80-character subject limit", all("at most 80 characters" in TOOLS[t] and "prefix counted" in TOOLS[t] for t in ("create", "update")), TOOLS["create"][:300])
+check("create and update: the tool text states the 80-character subject limit", all("at most 80 characters" in TOOLS[t] and "prefix counted" not in TOOLS[t] for t in ("create", "update")), TOOLS["create"][:300])
 check("complete and update: …and the 120-character reason limit", all("at most 120 characters (longer is refused" in TOOLS[t] for t in ("complete", "update")), TOOLS["complete"][:300])
 check("the connector's instructions state them", "`- ` bullets" in server.mcp.instructions and "120 characters" in server.mcp.instructions)
 

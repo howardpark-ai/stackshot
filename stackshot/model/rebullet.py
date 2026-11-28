@@ -23,6 +23,7 @@ from collections import Counter
 from typing import Any, Callable
 
 from stackshot.model import bullet_text as _bt
+from stackshot.model import title_label as _tl
 from stackshot.core import config as _cfg
 from stackshot.model import model_guards as _mg
 
@@ -408,7 +409,7 @@ def verdict(old: str, new: str, *, max_lines: int = 8, forbid: list[str] | tuple
 def build_message(gid_shown: str, item: dict[str, Any]) -> str:
     """The call's message: the item's subject and goal for context, its description as data."""
     m = item.get("metadata") or {}
-    ctx = {"item": gid_shown, "subject": _norm(item.get("subject"))[:200], "goal": _norm(m.get("goal"))[:300]}
+    ctx = {"item": gid_shown, "subject": _norm(_tl.bare(item.get("subject")))[:200], "goal": _norm(m.get("goal"))[:300]}
     return "\n".join(["The item (context only; rewrite the description alone):", json.dumps(ctx, ensure_ascii=False), "",
                       "<description>", str(item.get("description") or "").strip(), "</description>", "", "Answer with the bullets only."])
 
@@ -455,7 +456,7 @@ def rewrite(gid_shown: str, item: dict[str, Any], runner: Callable[[str, str], d
             return "call", "", f"the call ended {res.get('status')}: {str(res.get('note') or '')[:120]}"
         answer = str(res.get("text") or "")
         new = parse(answer)
-        why = "the answer held no bullets" if not new else verdict(old, new, max_lines=max_lines, forbid=forbid, subject=str(item.get("subject") or ""), line_max=line_max, strict=strict)
+        why = "the answer held no bullets" if not new else verdict(old, new, max_lines=max_lines, forbid=forbid, subject=_tl.bare(item.get("subject")), line_max=line_max, strict=strict)
         if not why:
             return "ok", new, "second try" if attempt == 2 else ""
         if attempt == 1 and retry:

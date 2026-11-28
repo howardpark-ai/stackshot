@@ -169,11 +169,11 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
         else:
             meta = item.get("metadata") or {}
             if kind == "main":
-                text = (f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
+                text = (f"[stackshot] {_gh.shown(gid)} \"{_anc.notice_title(item)}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
                         f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
             else:
-                text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
+                text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{_anc.notice_title(item)}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
                         f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
                         f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_telling.notice_link(gid)}")
             th = _telling.tell_own_move(gid, to_id, text, tag=tag, items={gid: item})      # to a -main agent, with nothing for him on the item, a progress notice: filed for its next turn

@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import re
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg, instance as _inst
+from stackshot.core import passmemo as _passmemo
 from stackshot.core.instance import OWNER
 from stackshot.core.store import _item_files
 from stackshot.github import ghsync as _gh
@@ -30,6 +32,7 @@ def _world_waits_text() -> str:
     rows: list[tuple[str, str]] = []
     stuck: list[str] = []
     unwoken: list[str] = []
+    sc = _anc.scope_ctx()
     for gid, _p in _item_files():
         try:
             it = _load(gid)
@@ -38,7 +41,7 @@ def _world_waits_text() -> str:
                 continue
             kind = _watch.stored_kind(m)
             if kind == "relay":
-                rows.append((_model.clean(_watch.relay_day(m)) or "9999", _watch.world_line(_gh.shown(gid), str(it.get("subject") or ""), m)))
+                rows.append((_model.clean(_watch.relay_day(m)) or "9999", _watch.world_line(_gh.shown(gid), _anc.group_title(it, sc), m)))
             if _watch.can_end(m):
                 continue
             it["gid"] = gid
@@ -65,6 +68,11 @@ _BRIEF_DESC = (
 
 
 def stackshot_brief() -> str:
+    with _passmemo.scope():          # the page registry (anchors.scope_ctx/group_title) is worked out once for the whole brief, not once per open item its "mine" loop formats below
+        return _stackshot_brief_body()
+
+
+def _stackshot_brief_body() -> str:
     _oauth._who()
     md = _cfg.path("paths", "markdown")
     head = ""

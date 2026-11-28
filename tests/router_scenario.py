@@ -297,7 +297,7 @@ m9s = rec("projects/delta", "message", "[for Oliver] a9 needs a pick on the vend
 m9n = rec("projects/delta", "message", "a9 needs: decision on the vendor", who="home-beta", to=D)
 m10 = rec("projects/gamma", "message", "a10 is open", who="home-beta", to=G)
 # the cross-project worker: stackshot's own [board] owner notice (who = stackshot, the writer in the text), written by the item's worker / by someone else
-BN = lambda i, who: f"[board] {i} [home] item {i[1:]}: {who} set next: work-plover-engineer: fix the report's header (keeper of record work-osprey-main may need to act) → https://stackshot.example/{i}"
+BN = lambda i, who: f"[board] {i} work · item {i[1:]}: {who} set next: work-plover-engineer: fix the report's header (keeper of record work-osprey-main may need to act) → https://stackshot.example/{i}"
 m11own = rec("projects/alpha", "message", BN("a11", "work-plover-engineer"), who="stackshot")
 m11oth = rec("projects/alpha", "message", BN("a11", "work-osprey-main"), who="stackshot")
 m11hb = rec("projects/alpha", "message", BN("a11", "work-plover-engineer"), who="home-beta")       # the same text from another sender: no writer is read, it goes to the worker
@@ -367,8 +367,11 @@ check("item work (cross-project): board_actor reads the writer of a [board] owne
        and router.board_actor({"who": "stackshot", "text": BN("a11", "not-a-session")}, cx0) == "")(router.Context(), router.Context().index["a11"]), None)
 check("item work (cross-project): the writer is read only when the notice is stackshot's own; a colon in the item's subject does not move the parse",
       (lambda cx0, t0: router.board_actor({"who": "home-beta", "text": BN("a11", "work-plover-engineer")}, cx0, t0) == ""
-       and router.board_actor({"who": "stackshot", "text": "[board] a11 fix: router closed it up: work-osprey-main set next: x"}, cx0, {**t0, "subject": "fix: router closed it up"}) == "work-osprey-main"
-       and router.board_actor({"who": "stackshot", "text": "[board] a11 fix: router closed it up: work-osprey-main set next: x"}, cx0) == "")(router.Context(), router.Context().index["a11"]), None)
+       and router.board_actor({"who": "stackshot", "text": "[board] a11 work · fix: router closed it up: work-osprey-main set next: x"}, cx0, {**t0, "subject": "fix: router closed it up"}) == "work-osprey-main"
+       and router.board_actor({"who": "stackshot", "text": "[board] a11 work · fix: router closed it up: work-osprey-main set next: x"}, cx0) == "")(router.Context(), router.Context().index["a11"]), None)
+check("item work (cross-project): board_actor matches both forms with the item given — the live title (notice_title(t) now) and, when that prefix no longer matches, the plain form that needs no subject at all: a notice queued before this instance started hiding a tag or grouping (the old raw '[work] item 11') and an item moved to another group since the notice was sent (a stale 'home · item 11' prefix on an item that reads 'work' now) are both still read, so a notice from the item's own writer never returns to it misread as someone else's",
+      (lambda cx0, t0: router.board_actor({"who": "stackshot", "text": "[board] a11 [work] item 11: work-osprey-main set next: x"}, cx0, t0) == "work-osprey-main"
+       and router.board_actor({"who": "stackshot", "text": "[board] a11 home · item 11: work-osprey-main set next: x"}, cx0, t0) == "work-osprey-main")(router.Context(), router.Context().index["a11"]), None)
 check("item work: a project with no background agent still passes to the item's owner", ln(m10) == ("code", "message-item", "passed", "work-gamma-main", False), sh.get(m10))
 check("page pass: a nightly-job and a size-watch notice about a page are archived, with no target and never for Oliver", ln(lib) == ("code", "page-pass", "archived", "", False) and ln(bw) == ("code", "page-pass", "archived", "", False) and sh[lib]["reason"] == "page pass", (sh.get(lib), sh.get(bw)))
 check("page pass: a nightly-job run report without a page is not one", sh[lib_run]["source"] == "call", sh.get(lib_run))

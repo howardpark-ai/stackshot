@@ -231,11 +231,10 @@ runs on every box.
                                 under the project's page, with needs = decision, the ask (`Decide: ... · Recommend: ... · Stakes: ... ·
                                 By: ...`, one line) and the options (--option "label=line", 2 to 6 of them, repeated; --recommended
                                 names the label of the one recommended, which is then required). --subject is required: the item's subject,
-                                which must start with one of the instance's subject prefixes (e.g. [alpha] or [beta]: the
-                                project's own; there is no default, since a question filed under the wrong prefix lands in the wrong
-                                place on the board); omitted, the call is refused and the refusal names the prefixes; a subject over [subject] max_length (80, the prefix counted) is cut to it, not refused: write the action and its object, the rest in the description. <label> = the script's own name (default client.py); the
+                                the action and its object, with no tag in front (the item's group is its project's);
+                                omitted, the call is refused; a subject over [subject] max_length (80) is cut to it, not refused: write the action and its object, the rest in the description. <label> = the script's own name (default client.py); the
                                 item records "<label> (a script on <machine>)" as its creator, as `message --sender` does. The server
-                                runs the create tool's own checks (subject prefix, ask form, options, one decision per ask, project
+                                runs the create tool's own checks (subject length, ask form, options, one decision per ask, project
                                 page, page debt, GitHub mirror), so it refuses what the tool would, with the tool's text. Prints exactly
                                 the new item's id (board#N) on stdout, exit 0; the reason on stderr, exit 1, when refused (400 a check of the
                                 tool, 404 no such project, 409 no front agent), not reached ([0]) or when the project record cannot be read
@@ -261,14 +260,14 @@ runs on every box.
                                 pane stopped waiting"); with none open it does nothing and exits 0, printing nothing. --session is a name, an old name, a sala
                                 id or a transcript id: the registry resolves it, so all reach one item. --sender (required) is the script's own label; the item
                                 records "<label> via a script on <machine>". The row owes no page and tells no session (it is a notification, and it opens and
-                                closes with the pane). The server runs the create tool's own checks (subject prefix, description and next gates, project page,
+                                closes with the pane). The server runs the create tool's own checks (subject length, description and next gates, project page,
                                 GitHub mirror), except the guard on alarming words, which does not judge a pane's own question. Exit 0 · 1 and the reason on
                                 stderr when refused (400 a check, 409 no project with a front agent to file under), not reached ([0]) or misused (usage).
   client.py post job-gap open <timer> <code> --repo <owner/name> [--detail "<text>"] [--sender <label>]
   client.py post job-gap clear <timer> <code> [--sender <label>]
                                 for sala's job-gap watcher: a timer or service of a machine has a gap (<code> = no-description | no-lane | bad-lane | not-git |
                                 git-differs; <timer> = the unit's name) or the gap is fixed. open files ONE open item per (timer, code) and prints its id (exit 0): the subject
-                                "<prefix> <the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (the project scope's prefix, else [subject] fallback_prefix; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
+                                "<the task>", as "Add X-Model-Lane= to <timer>" or "Put <timer> in git" (no tag in front; cut to [subject] max_length), p2, filed under the project page that owns --repo (the repository that holds the job's
                                 script: [job_gap.repos] maps "owner/name" to the page, default none; an instance maps its own repos; any other repo is refused with a 400 that names the known ones), moved by the project's builder (its background agent
                                 whose mandate builds; it is told once, at the create, and is in needs), the project's -main agent its creator (no front agent is woken),
                                 next "<builder>: put <timer>'s unit file in <repo> with an X-Model-Lane= line, linked from there" (the fix for the code), the description bullets
@@ -277,7 +276,7 @@ runs on every box.
                                 nothing and prints the same id. clear closes the open item (outcome done, reason within [close] reason_max, the end state in outcome_text, the description unchanged)
                                 and prints its id; with none open it does nothing, prints "no open item" on stderr and exits 0. --sender is the script's own label
                                 (default client.py; sala-unit-gaps): at most 80 characters on one line, never the owner's name (the terminal prompt's gate); the item records
-                                "<label> via a script on <machine>". The row owes no page. The server runs the create tool's own checks (subject prefix, description and next gates,
+                                "<label> via a script on <machine>". The row owes no page. The server runs the create tool's own checks (subject length, description and next gates,
                                 project page, GitHub mirror), except the guard on alarming words. Exit 0 · 1 and the reason on stderr when refused (400 a check, 409 no front agent
                                 to file under), not reached ([0]) or misused (usage).
   client.py post catch (- | --hook <name> --id <id> --t <ISO time with offset> --pane <session> --kind <kind> [--sender <raw sender>] [--outcome <text>] [--first <text>])
@@ -310,7 +309,7 @@ runs on every box.
                                 for a timer's script that finds work for a project's background agent (a project that lists none is a front-only project: the item is filed with its -main agent): open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
                                 test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
                                 background agent under `background:` on the project's page (refused otherwise, the refusal names the listed ones; a front-only project lists none, so the mover becomes its -main agent, named in no needs); it is named in needs and told once, at the create. --step is one line that starts
-                                with the mover's name and a colon. --subject is the action and its object with no prefix: the server puts the project scope's prefix before it. Each --line is one fact, a "- " bullet of the
+                                with the mover's name and a colon. --subject is the action and its object with no tag in front: the server adds none. Each --line is one fact, a "- " bullet of the
                                 description (repeat it; at most [description] max_lines less one, each at most [description] line_max characters as a bullet; too many or too long is refused, never cut); the last bullet is
                                 "- Opened by <label> (a script on a client machine)", so no host name reaches the item or its GitHub issue. --sender is the script's own label (default client.py): one word of at most 60 characters, never the owner's
                                 name. The project's -main agent is the item's creator. The server runs the create tool's own checks (subject, description and next gates, project page, GitHub mirror) except the ones that judge a session's write: a description needs no Goal bullet, and the
@@ -323,8 +322,7 @@ runs on every box.
                                 "<item> opened", "<item> refreshed", "<item> closed", "<item> left open: open steps of others remain" (a close that found another writer's step open) or "no open item for <marker>; nothing was refreshed|closed" (a no-op, no error). <marker> = <kind>:<what> (for example
                                 plugin_sync:stackshot), the item's mark and its only key: refresh and close carry no project, and reach only an item this route opened (a machine token can touch no other item through it). open files an item
                                 whose mover is the person (--mover must be his name) and whose `then` is --then (an agent the project's page lists: it takes the item after his step), with --step as his one step (his name goes before it; one you wrote is not
-                                doubled), under the project's -main agent as its creator, the state your-step, as the terminal prompt's row; --subject is the action and its object with no prefix (the server puts the project scope's prefix
-                                before it); each --line is one fact, a "- " bullet of the description (repeat it; as for item-open: at most [description] max_lines less one, each at most [description] line_max characters, refused and never cut, and not judged by the Goal-first rule a session's description is; the last bullet
+                                doubled), under the project's -main agent as its creator, the state your-step, as the terminal prompt's row; --subject is the action and its object with no tag in front (the server adds none); each --line is one fact, a "- " bullet of the description (repeat it; as for item-open: at most [description] max_lines less one, each at most [description] line_max characters, refused and never cut, and not judged by the Goal-first rule a session's description is; the last bullet
                                 is "- Opened by <label> (a script on a client machine)"). While an item with the marker is open a repeat open is a refresh
                                 (the description changes, never the subject) that may also set the sent step. Once he has finished or answered on the item (his Done, his note that names no later time, any step of his he marked done)
                                 no repeat sets a step on it again, so a script with a version in its step does not bring it back; the close and a new item ask him again. Until then only a step that differs from the one the route last sent is set, so one a session replaced, reworded, dropped

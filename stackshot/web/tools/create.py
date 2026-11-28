@@ -6,7 +6,6 @@ from typing import Annotated, Any
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import step_split as _step_split
 from stackshot.service import create as _create_svc, gates as _gates, released_live as _rlive, writes as _writes
@@ -20,9 +19,7 @@ _evwait_preread = None      # set by register: the server's own, looked up at ea
 _sender_not_owner = None      # set by register: the server's own, looked up at each call
 
 
-_PFX = " or ".join(f"'{p}…'" for p in _cfg.CFG["subject"]["prefixes"])
-_PFX0 = str(_cfg.CFG["subject"]["prefixes"][0])      # the first scope prefix, for the worked example in create's text
-_T = load_text("create", {"DATED_WAIT_MIN_HOURS": f"{_wt.dated_wait_min_hours():g}", "PFX0": _PFX0, "PFX": _PFX, "STEP_SPLIT_OVER": str(_step_split.SPLIT_OVER), "STEP_SPLIT_MAX": str(_step_split.SPLIT_MAX), "STEP_SPLIT_ACTIONS": str(_step_split.MAX_ACTIONS)})
+_T = load_text("create", {"DATED_WAIT_MIN_HOURS": f"{_wt.dated_wait_min_hours():g}", "STEP_SPLIT_OVER": str(_step_split.SPLIT_OVER), "STEP_SPLIT_MAX": str(_step_split.SPLIT_MAX), "STEP_SPLIT_ACTIONS": str(_step_split.MAX_ACTIONS)})
 
 
 _CAP_FORM = _T.piece("CAP_FORM")      # what an item waits on (read by the waiting scenario)

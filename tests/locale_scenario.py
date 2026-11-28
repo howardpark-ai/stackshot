@@ -672,7 +672,7 @@ def _ipx_pat(v):
 IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.queued", "wait.what.news_from", "wait.what.outside_news",
               "item.step_howto", "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
-              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head", "wait.words_behind"}
+              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head", "wait.words_behind", "item.group"}      # left off the Project row when it already names the scope (has_proj_page): every IPX fixture item is filed on a page, so no fixture page ever shows Group; item_group's own reading of the table is checked direct, below
 check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
 # a board of several members heads the words behind a wake for nobody (the source beside them names whose they are): a heading no page of a one-member board draws
 _members_was = _cfg.CFG.get("members")
@@ -788,6 +788,13 @@ with i18n.use("ko"):
     bdx._sess_obj = lambda r: None; d_mn = bdx.mover_row({"gid": "a1", "metadata": {}})
     del bdx._sess_obj
     d_work = bdx.work_html({"gid": "a1", "metadata": {"work": [{"text": "oil the hinges", "agent": "alpha-main", "state": "defined", "ts": 0}]}})
+    ps_ = _cfg.CFG.setdefault("project_scopes", {}); had_order = "order" in ps_; order_old = ps_.get("order")
+    try:
+        ps_["order"] = ["work", "home"]      # every IPX fixture is one scope ([project_scopes] order left at its default), so item.group never shows on a fixture page: forced here, as item.work and item.cloud are
+        d_grp = bdx.item_group({"gid": "a1", "metadata": {"project": "projects/alpha"}})
+    finally:
+        if had_order: ps_["order"] = order_old
+        else: ps_.pop("order", None)
     bdx.anchor_since = None
     d_wn = [bdx._when({"unreadable": {"since": "2026-01-01 00:00", "why": "refused"}}), bdx._when({}), bdx._when({"mode": "poll"})]
     bdx.anchor_since = since_old
@@ -818,6 +825,7 @@ check("due_badge in the test locale: today, overdue and ahead each read from the
 check("mover_row in the test locale: a cloud session names 'cloud' and an item under no session says 'no agent', each from the table",
       f'<span class="dim">· {MARK(EN["item.cloud"])}</span>' in d_mc[1] and "cloud-x" in d_mc[1] and MARK(EN["item.no_agent"]) in d_mn[1] and "cloud-x" not in d_mn[1], (d_mc, d_mn))
 check("work_html in the test locale: the legacy Work field's name from the table, the line's own text as written", f'<dt>{MARK(EN["item.work"])} <span class="count">1</span></dt>' in d_work and "oil the hinges" in d_work, d_work)
+check("item_group reads work from the table too, on a multi-scope instance (no IPX fixture page carries more than one scope)", d_grp == "work", d_grp)
 check("_when in the test locale: an unreadable anchor (its tip with the reason), a quiet one and a polled one read from the table",
       d_wn[0] == f'<span class="aflag" title="{html.escape(_m("item.when.unreadable_tip", since="2026-01-01 00:00", tz=_cfg.tz_abbr(), why="refused"), quote=True)}">{_m("item.when.unreadable")}</span>'
       and d_wn[1] == _m("item.when.quiet") and d_wn[2] == _m("item.when.quiet") + _m("item.when.poll"), d_wn)

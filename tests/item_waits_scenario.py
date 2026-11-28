@@ -218,9 +218,9 @@ check("2 close: the movers of the items that name it are told, one message each"
 peer_gids = by.get(PEER, [("", "")])[0][0].split(",")
 check("2 close: …home-peer gets one batched message for its items (18, 19, 21), not one each", len(by.get(PEER, [])) == 1 and sorted(peer_gids) == ["g18", "g19", "g21"], by.get(PEER))
 pn = by.get(PEER, [("", "")])[0][1]
-check("2 close: …it names the closed item, how it ended, why, and who closed it", "board#17 [home] the item that closes closed (done: the output is in the store)" in pn and "by home-front" in pn, pn)
-check("2 close: …and each item that named it, with where (next or description) and a link", "3 open items you move name it" in pn and "board#18 [home] names it in next (its next names board#17)" in pn
-      and "board#19 [home] names it in the description (its description names board#17)" in pn and "board#21" in pn, pn)
+check("2 close: …it names the closed item, how it ended, why, and who closed it", "board#17 home · the item that closes closed (done: the output is in the store)" in pn and "by home-front" in pn, pn)
+check("2 close: …and each item that named it, with where (next or description) and a link", "3 open items you move name it" in pn and "board#18 home · names it in next (its next names board#17)" in pn
+      and "board#19 home · names it in the description (its description names board#17)" in pn and "board#21" in pn, pn)
 on = by.get(OTHER, [("", "")])[0][1]
 check("2 close: …home-other gets its own, for 9132 alone (singular); 9137 is Oliver's, so its keeper hears it, and that is the closer here", sorted(by.get(OTHER, [("", "")])[0][0].split(",")) == ["g9132"]
       and "An open item you move names it" in on and "open items you move name it" not in on, by.get(OTHER))

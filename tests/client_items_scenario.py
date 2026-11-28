@@ -154,7 +154,7 @@ def old_items(key):
             up = None
         st_, st_derived = _states.of(it, lambda i_: _item_read._after_open(i_.get("metadata") or {}))
         roles = ([_ROLE_MOVER] if is_mover else []) + ([_ROLE_THEN] if is_then else []) + ([_ROLE_NEEDS] if linked else [])
-        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "needs": _hooks().shown_needs(_needs_of(m)),
+        out.append({"gid": gid, "shown": _gh.shown(gid), "subject": _tl.bare(it.get("subject")), "needs": _hooks().shown_needs(_needs_of(m)),
                     **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),
                     "contact": _contacts._contact_label(dict(it, gid=gid)),
                     "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _hooks().rmod_confirmed_at(it, p),

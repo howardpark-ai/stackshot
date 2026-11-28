@@ -233,7 +233,7 @@ got = tick(at(240))
 check("2 4 h: the -main agent is told, once", got == ["a1"] and len(sent) == 1 and S0()[1] == U["home-main"] and S0()[0] == "a1", (got, sent))
 m = S0()[2]
 check("2 the message is the front agent's form: no owner mark (nothing is for him), the stall tag that gets it delivered, the item and its project, the mover, about 4 hours, a request to look, no reply owed, the tag the ladder's notices use",
-      m.startswith("[stackshot] ") and _web_tools_text._FOR_OWNER not in m and '[home] item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
+      m.startswith("[stackshot] ") and _web_tools_text._FOR_OWNER not in m and 'home · item 1' in m and "projects/alpha" in m and "team-back" in m and "about 4 hours" in m and "Please look" in m and "pane is in a turn" in m and "No reply is owed" in m and S0()[3] == "stall", m)
 check("2 one History line says who was told, and the record is on the item (told at 4 h, the stretch counting from the last activity)", len(history(1)) == 1 and "home-main was told" in history(1)[0] and "about 4 hours" in history(1)[0]
       and mt(1).get("busy_tell") == {"at": at(240), "to": "home-main", "kind": "main", "since": now0}, (history(1), mt(1).get("busy_tell")))
 told2 = run(250, 360)

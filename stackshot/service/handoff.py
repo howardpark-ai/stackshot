@@ -482,15 +482,15 @@ def handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool 
     by = str(r.get("from") or "a session")
     if float(r.get("reminded_at") or 0) > float(r.get("resent_at") or 0):      # the later of the two is what this notice is (a reminder's retry stays a reminder; a resend after it is a resend)
         if handoff_peer(item, str(r.get("to") or "")):      # a front agent has no subagent to start: it takes the item by working it, or hands it back
-            return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
+            return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {_anc.notice_title(item)} ({meta.get('project') or ''})"
                     + (f"; next: {nxt}" if nxt else "")
                     + f". Take it by marking a step done, or by writing a work line set to in progress or done (a note does not count), or hand it back (sender={by!r}). → {_telling.notice_link(gid)}")
-        return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
+        return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {handoff_minutes():g} min: {_anc.notice_title(item)} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
                 + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
     words = _clip_line(str(r.get("words") or ""), 240)      # a front agent's hand-off to a sibling carries the owner's words that allowed it
     return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (f", on {OWNER}'s words: \"{words}\"" if words else "") + (" (sent again: your pane restarted before the item was written to)" if again else "")
-            + f": {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
+            + f": {_anc.notice_title(item)} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
             + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
 
 
@@ -778,7 +778,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                     if peer:
                         peer_remind.add(st.gid)
                     _writes.save(st.gid, item, note=f"{st.why}: its mover was reminded, and the clock restarts from the reminder")
-                    to_remind.append((st.gid, st.to, f"{_gh.shown(st.gid)} {item.get('subject') or ''} ({(item.get('metadata') or {}).get('project') or ''}): handed to you by {r.get('from') or 'a session'}",
+                    to_remind.append((st.gid, st.to, f"{_gh.shown(st.gid)} {_anc.notice_title(item)} ({(item.get('metadata') or {}).get('project') or ''}): handed to you by {r.get('from') or 'a session'}",
                                       handoff_text(st.gid, item, r)))
                 elif st.kind == "cold":
                     _hcold.HO_COLD_THREADS[:] = [t for t in _hcold.HO_COLD_THREADS if t.is_alive()]
@@ -793,7 +793,7 @@ def handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: 
                 else:
                     handoff_write_move(item, st, now)
                     _writes.save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
-                    subject, project = str(item.get("subject") or ""), str((item.get("metadata") or {}).get("project") or "")
+                    subject, project = _anc.notice_title(item), str((item.get("metadata") or {}).get("project") or "")
                     to_new.append((st.to, st.gid, f"{_gh.shown(st.gid)} {subject} ({project}): {st.why}" + ("; it comes back to you as its sender" if st.via == "return" else "")))
                     if st.via == "orphan" and (_ho.record_of(item) or {}).get("at") == now and _anc.front_only(project):      # an alive item (this move wrote its hand-off record) of a front-only project: successor.pick says "sent the one hand-off notice" in the History line
                         told_front.add(st.gid)

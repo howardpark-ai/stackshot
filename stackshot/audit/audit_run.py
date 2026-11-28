@@ -92,6 +92,7 @@ from typing import Any, Callable
 from stackshot import paths as _paths
 HERE = _paths.ROOT
 from stackshot.audit import audit as _audit  # noqa: E402
+from stackshot.model import title_label as _tl  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.core.lines import MSG_MAX  # noqa: E402  — the message tool's cap
 from stackshot.model import model as _model  # noqa: E402
@@ -514,7 +515,7 @@ def prompt(item: dict[str, Any], sus: dict[str, Any], mover: str, now: float) ->
     """The message of one call: the item's facts and the candidate checks with their evidence. The rubric is the system prompt."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     last = sus["write"]
-    lines = [f"Item {sus['id']}: {_clip(item.get('subject'), 160)}",
+    lines = [f"Item {sus['id']}: {_clip(_tl.bare(item.get('subject')), 160)}",
              f"Project: {meta.get('project') or '-'}",
              f"State: {meta.get('state') or '-'} · needs: {', '.join(_wt.needs_of(meta)) or '-'} · mover: {mover or '-'}",
              f"Stored wait (in the item's own fields, whatever the steps say): {stored_wait_text(item)}",

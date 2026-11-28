@@ -271,7 +271,7 @@ def _handover_locked(gid: str, now: float, done: list[str], dry: bool, sends: li
         if plan["action"] == "none" or dry:
             return {**row, "action": plan["action"] if dry else "none"}
         to, h = plan["to"], plan["hash"]
-        frm, project, subject = mover, str(meta.get("project") or ""), str(it.get("subject") or "")
+        frm, project, subject = mover, str(meta.get("project") or ""), _anc.notice_title(it)
         did = "; ".join(_clip_line(x, 80) for x in done) or "a step"
         if plan["action"] == "fallback":
             _hv.mark(meta, h, _hv.FALLBACK, to, now, plan["why"])
@@ -337,7 +337,7 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
     ref = _live.pr_shown(key)
     tests = " and main's tests passed" if kind == _sp.PR_RELEASED and key.rsplit("#", 1)[0] == _cfg.canon_repo(_hooks().own_repo()) else ""      # only this repository's release is gated on main's full run
     mover = _telling.holder(it)
-    row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "subject": str(it.get("subject") or ""), "mover": _session_label(mover) if mover else "", "kind": kind, "ref": ref}
+    row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "subject": _anc.notice_title(it), "mover": _session_label(mover) if mover else "", "kind": kind, "ref": ref}
     why = _live.released_skip(it, meta, mover)
     if why:
         proof_log_once(gid, key, why)
@@ -357,7 +357,7 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
         _writes.save(gid, it, note=f"{NAME}: {ref} was closed without being merged, so the step \"{step}\" cannot be ticked by it" + ("" if mover else " (no mover to tell)"), activity=_activity.EVENT)
         if mover:
             send(_telling.tell_woken, gid, _hooks().session_id(mover), f"[stackshot] {_gh.shown(gid)}: {ref} was closed without being merged, so its step \"{step}\" will never be ticked by it. "
-                 f"Reword or drop the step, or give it another proof. {it.get('subject') or ''} → {_telling.notice_link(gid)}", tag="release")
+                 f"Reword or drop the step, or give it another proof. {_anc.notice_title(it)} → {_telling.notice_link(gid)}", tag="release")
             row["told"] = _session_label(mover)
         else:
             row["told"] = ""
@@ -413,7 +413,7 @@ def proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: b
         _writes.save(gid, it, note=(f"step done: {step} ({ref} is {word}{tests}; ticked by {NAME})" if pure
                              else f"{NAME}: told its mover {ref} is {word}{tests}"), activity=_activity.EVENT)
     note = (f"[stackshot] {_gh.shown(gid)}: {ref} is {word}; its step is " + ("ticked" if pure else "not ticked (it names a follow-up)") + "; the item's other open steps remain. "
-            + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_telling.notice_link(gid)}")
+            + (f"Next step: {nxt}. " if nxt else "") + f"{_anc.notice_title(it)} → {_telling.notice_link(gid)}")
     if tell:
         sid = _hooks().session_id(mover)
         send(_telling.tell_woken, gid, sid, note, tag="release", sent=lambda: PROOF_TOLD_SID.__setitem__(gid, (sid, now)))      # a real notice, not the log-only result: the mover's next step waits on it; told is recorded once it was sent

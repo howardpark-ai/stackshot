@@ -8,8 +8,8 @@ Checked here against a scratch state folder and config (no port, no real server,
      no other argument; a tool that is no write is logged too, with sizes; a line that does not parse is skipped on read; the range read takes the month files it spans; kind_of names the refusal kinds and folds the rest
   2  the middleware (web/middleware.py _RefusalLog, run as _wmw._RefusalLog): a refused write is logged as refused and records no correction; a write that went through with a correction carries one reply line saying what the server
      did and how to keep the field as written, and is logged with the fix kinds; a write with none is logged plain and its reply is as it was
-  3  the corrections: a bare item number is read as board#N; a full ISO wake (seconds, a fraction, Z or an offset) is converted to that minute in the instance zone; a subject with no scope prefix
-     takes the project's scope prefix (else the fallback); a script's item (`by`) and a subject that already has a prefix are left alone; a field sent again as written is not touched (it is refused as before)
+  3  the corrections: a bare item number is read as board#N; a full ISO wake (seconds, a fraction, Z or an offset) is converted to that minute in the instance zone; a subject takes no tag
+     (none is asked for or added; a script's item and a subject that still opens with one are stored as written); a field sent again as written is not touched (it is refused as before)
   4  the weekly report (tools/refusal_report.py): the text and its share arithmetic, the week before, the kinds, the senders, the corrections, a late-starting log; sent once per week, not before the
      week is over, not when `enabled` is false, not with no records; --dry-run, --force and --week; the audit.py verb and the audit unit's ExecStartPost
 
@@ -46,7 +46,6 @@ def part_refusal_report():
                      ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
     toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
-    toml, n = re.subn(r'(?m)^fallback_prefix = .*$', 'fallback_prefix = "[home] "', toml); assert n == 1
     toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/no-such-root", "{tmp}/transcripts"]', toml); assert n == 1
     toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); assert n == 1
     toml, n = re.subn(r'(?m)^(\[audit\][^\n]*\n)enabled = false', r'\g<1>enabled = true', toml); assert n == 1
@@ -120,7 +119,6 @@ def part_refusal_report():
         "Refused: next no longer lists 'step one' — mark it done or dropped": "a step left out of next with no done or dropped",
         "Refused: description bullet is 190 characters, the limit is 120": "a description bullet over its limit",
         "Refused: the subject is 91 characters and the limit is 80": "a subject over its limit",
-        "Refused: subject must start with one of ['[work] '] — got 'x'": "a subject without a scope prefix",
         "Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04) — got 'x'": "a wake in the wrong form",
         "bad item id '12' — ids read board#<n>": "an item id in the wrong form",
         "Refused: outcome_text bullet is 190 characters, the limit is 120": "an outcome_text bullet over its limit",
@@ -264,12 +262,12 @@ def part_refusal_report():
     tok = CL.begin()
     try: out_c = _wt_complete.stackshot_complete("6", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: complete reads a bare number and closes the item, and says what it read", rd(6)["status"] == "completed" and [k for k, _ in fx] == ["item-id"] and fx[0][1] == f"read 6 as {BID(6)} ([home] item 6)" and f"read 6 as {BID(6)} ([home] item 6)" in CL.reply_note(fx), (rd(6)["status"], fx))
+    check("3 id: complete reads a bare number and closes the item, and says what it read (its tag hidden)", rd(6)["status"] == "completed" and [k for k, _ in fx] == ["item-id"] and fx[0][1] == f"read 6 as {BID(6)} (work · item 6)" and f"read 6 as {BID(6)} (work · item 6)" in CL.reply_note(fx), (rd(6)["status"], fx))
     check("3 id: …the line is told once however many times the server read the id, and invites no resend of the id", CL.reply_note(fx).count("read 6 as") == 1 and "send it again" not in CL.reply_note(fx), CL.reply_note(fx))
     tok = CL.begin()
     try: _wt_complete.stackshot_complete("#7", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: complete reads #N too, and says so", rd(7)["status"] == "completed" and fx and fx[0][1] == f"read #7 as {BID(7)} ([home] item 7)", (rd(7)["status"], fx))
+    check("3 id: complete reads #N too, and says so, its tag hidden", rd(7)["status"] == "completed" and fx and fx[0][1] == f"read #7 as {BID(7)} (work · item 7)", (rd(7)["status"], fx))
     try: _wt_complete.stackshot_complete("8x", outcome="done", reason="because", sender="team-back", outcome_text="- it ended"); cref = ""
     except ToolError as e: cref = str(e)
     check("3 id: complete still refuses what is no number (8x), and the item stays open", cref.startswith("bad item id '8x'") and rd(8)["status"] == "open", (cref, rd(8)["status"]))
@@ -280,7 +278,7 @@ def part_refusal_report():
     tok = CL.begin()
     try: _wt_complete.stackshot_complete("8", outcome="superseded", reason="because", superseded_by="5", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: superseded_by reads a bare number too, and says so", rd(8)["status"] == "completed" and rd(8)["metadata"].get("superseded_by") and [n for _, n in fx] == [f"read 8 as {BID(8)} ([home] item 8) and 5 as {BID(5)}"], (rd(8)["status"], fx))
+    check("3 id: superseded_by reads a bare number too, and says so, its tag hidden", rd(8)["status"] == "completed" and rd(8)["metadata"].get("superseded_by") and [n for _, n in fx] == [f"read 8 as {BID(8)} (work · item 8) and 5 as {BID(5)}"], (rd(8)["status"], fx))
     tok = CL.begin()
     try: _wt_complete.stackshot_confirm("5", sender="team-back")
     finally: fx = CL.end(tok)
@@ -306,14 +304,16 @@ def part_refusal_report():
     try: _update_svc._update("5", sender="team-back", priority="p2")
     finally: fx = CL.end(tok)
     check("3 id: update reads a bare number, and says so", rd5()["metadata"].get("priority") == "p2" and "item-id" in [k for k, _ in fx], (rd5()["metadata"], fx))
-    # a close names the item it read: the first 60 characters of its subject, so a wrong item is seen at once; a plain read (get, confirm, a note-only update) carries no name
+    # a close names the item it read: the first 60 characters of its subject with its tag hidden, so a wrong item is seen at once; a plain read (get, confirm, a note-only update) carries no name
     long_subj = "[home] " + "w" * 30 + " " + "z" * 40
+    bare_long = "w" * 30 + " " + "z" * 40
     (T / "store/g/10.json").write_text(json.dumps({"id": "10", "subject": long_subj, "description": DESC, "status": "open", "updated": time.time(), "state_updated": time.time(), "confirmed": 1.0,
                                                    "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "team-back: do the thing"}}))
     tok = CL.begin()
     try: _wt_complete.stackshot_complete("10", outcome="done", reason="because", sender="team-back", outcome_text="- it ended")
     finally: fx = CL.end(tok)
-    check("3 id: a close names the item by the first 60 characters of its subject (no more), and tells it once", [n for _, n in fx] == [f"read 10 as {BID(10)} ({long_subj[:60]})"] and len(long_subj) > 60 and "z" * 23 not in fx[0][1] and "z" * 22 in fx[0][1], fx)
+    grouped_long = ("work · " + bare_long)[:60]      # the group (work, from projects/alpha) sits in front, inside the 60-character limit, not on top of it
+    check("3 id: a close names the item by the first 60 characters of its subject with the tag hidden (no more), with its group in front, and tells it once", [n for _, n in fx] == [f"read 10 as {BID(10)} ({grouped_long})"] and len(bare_long) > 60 and len(grouped_long) == 60 and "z" * 40 not in fx[0][1] and "[home]" not in fx[0][1], fx)
     check("3 id: …and the item read is closed (item 10)", rd(10)["status"] == "completed", rd(10)["status"])
     tok = CL.begin()
     try: _wt_complete.stackshot_confirm("5", sender="team-back")
@@ -353,25 +353,25 @@ def part_refusal_report():
         try: iso(badw); msg = ""
         except ToolError as e: msg = str(e)
         check(f"3 wake: {badw!r} is refused naming the two forms", msg.startswith("Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM"), msg)
-    # the subject prefix
+    # the subject: no tag is asked for or added
     def create(subject, **kw):
         return create_svc.create_item(subject=subject, description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: begin", mover="team-back", **kw)
     (g1, out1), fx = collect(lambda: create("Check the nightly job"))
     it = json.loads((T / "store" / g1[0] / f"{g1[1:]}.json").read_text())
-    check("3 subject: a subject with no scope prefix takes the project's scope prefix and the correction is noted", it["subject"] == "[work] Check the nightly job" and [k for k, _ in fx] == ["subject-prefix"] and "[work]" in fx[0][1], (it["subject"], fx))
+    check("3 subject: a subject with no tag is stored as written and no correction is noted", it["subject"] == "Check the nightly job" and fx == [], (it["subject"], fx))
     (g2, _o), fx = collect(lambda: create("[home] Already scoped"))
     it = json.loads((T / "store" / g2[0] / f"{g2[1:]}.json").read_text())
-    check("3 subject: …a subject that has a prefix is left as written, even another scope's", it["subject"] == "[home] Already scoped" and fx == [], (it["subject"], fx))
-    try: create("Filed by a script", by="a watcher (a script on box-a)"); sref = ""
-    except ToolError as e: sref = str(e)
-    check("3 subject: …a script's own item with no prefix is refused as before", sref.startswith("Refused: subject must start with"), sref)
+    check("3 subject: …a subject that still has a tag is left as written, even another scope's", it["subject"] == "[home] Already scoped" and fx == [], (it["subject"], fx))
+    (g3, _o), fx = collect(lambda: create("Filed by a script", by="a watcher (a script on box-a)"))
+    it = json.loads((T / "store" / g3[0] / f"{g3[1:]}.json").read_text())
+    check("3 subject: …a script's own item with no tag is stored as written", it["subject"] == "Filed by a script" and fx == [], (it["subject"], fx))
     for tagged in ("[Work] Fix X", "[work]Fix X", " [work] Fix X", "work: Fix X", "[Home] x", "[other] x", "\u200b[work] x", "\ufeff[work] x"):
-        try: create(tagged); tref = ""
-        except ToolError as e: tref = str(e)
-        check(f"3 subject: {tagged!r} already opens with a tag: refused with the prefix list named, never stacked", tref.startswith("Refused: subject must start with one of ['[work] ', '[home] ']"), tref)
+        (gt, _o), fx = collect(lambda: create(tagged))
+        it = json.loads((T / "store" / gt[0] / f"{gt[1:]}.json").read_text())
+        check(f"3 subject: {tagged!r} opens with a tag: stored as written, no refusal, nothing put before it", it["subject"] == tagged and fx == [], (it["subject"], fx))
     try: create_svc.create_item(subject="No project to name a scope", description=DESC, project="projects/no-such", owner=U["home-front"], next="team-back: begin", mover="team-back"); nref = ""
     except ToolError as e: nref = str(e)
-    check("3 subject: …a project that names no record gets no guess: refused as before", "subject must start with" in nref or "project" in nref, nref)
+    check("3 subject: …a project that names no record is refused for the project, never for a tag", "project" in nref and "subject must start with" not in nref, nref)
     wipe()
 
     # ================================================================ 4. the weekly report

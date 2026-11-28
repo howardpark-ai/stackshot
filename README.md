@@ -29,7 +29,7 @@ Then point your HTTPS front at `127.0.0.1:8020`. In claude.ai, add a custom conn
 bin/stackshot client install
 ```
 
-In any session, call `create` with a subject that starts with one of your prefixes, `project = "projects/getting-started"` and a `next` line. The item shows on the board within seconds. For another machine, mint a token with `bin/stackshot client mint <machine>`; [INSTALL.md](INSTALL.md) has every step, and [docs/windows.md](docs/windows.md) covers a Windows client.
+In any session, call `create` with a subject naming the finished outcome (no tag: the board shows the item's group from its project), `project = "projects/getting-started"` and a `next` line. The item shows on the board within seconds. For another machine, mint a token with `bin/stackshot client mint <machine>`; [INSTALL.md](INSTALL.md) has every step, and [docs/windows.md](docs/windows.md) covers a Windows client.
 
 ## The main parts
 

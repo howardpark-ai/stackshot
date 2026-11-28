@@ -652,6 +652,7 @@ CATALOG: dict[str, str] = {
     "item.no_project": "no project",
     "item.gbrain_page": "gbrain page ↗",
     "item.project": "Project",
+    "item.group": "Group",
     "item.then": "Then",
     "item.priority": "Priority",
     "item.wake": "Wake",
