@@ -19,6 +19,7 @@ from stackshot.core import config as _cfg
 from stackshot.core.instance import OWNER
 from stackshot.model import bullet_text as _bt
 from stackshot.model import faults as _faults
+from stackshot.model import list_repair as _lr
 from stackshot.model import model_guards as _mg
 from stackshot.model import next_rules as _nr
 from stackshot.model import nextlines as _nl
@@ -337,6 +338,21 @@ def _description_limits() -> tuple[int, int]:
 def _next_line_max() -> int:
     """The longest line of next the write takes: [metadata.next] line_max (200); 0 when the refusal is off (line_max = 0, or require_bullets = false)."""
     return int(_cfg.CFG.get("metadata", {}).get("next", {}).get("line_max", 200)) if _bullets_on() else 0
+
+
+def fix_list_shape(desc: str, stored: str | None = None, field: str = "description") -> tuple[str, str]:
+    """A description (or a close's outcome text, `field="outcome_text"`) with a numbered run written on one bullet line, or a doubled bullet mark, put right instead of stored flat (list_repair.repair: the numbered items each on
+    a line of their own, `- - x` as `- x`; nothing else is touched, no word changed), and the reply says so (call_log.fixed, kind list-shape). -> (the text, the History line for the item, "" when the server changed nothing).
+    The text as given when it holds neither shape, when no bullet form is required, or (`stored`) when the repaired text is what the item holds already."""
+    if not desc or not _bullets_on():
+        return desc, ""
+    new, doubled, runs = _lr.repair(desc, _description_limits()[0])
+    if new == desc or (stored is not None and new.strip() == str(stored).strip()):
+        return new, ""
+    said = " and ".join(x for x in (f"{runs} numbered run{'' if runs == 1 else 's'} written on one line put on lines of its own" if runs else "",
+                                    f"{doubled} doubled bullet mark{'' if doubled == 1 else 's'} made one" if doubled else "") if x)
+    _calls.fixed("list-shape", f"the {field}: {said}, no word changed", fields=[field], stored=new, sent=desc)
+    return new, f"{field}: {said} by the server"
 
 
 def fix_long_bullets(desc: str, stored: str | None = None, field: str = "description") -> tuple[str, str]:

@@ -1047,6 +1047,9 @@ def update_unlocked(
         else:
             outcome_text, description = description.strip(), ""
     if closing:                   # a close says how the item ended
+        outcome_text, ol_note = _fg.fix_list_shape(outcome_text, None, "outcome_text")       # the same list repair as a description's
+        if ol_note:
+            _stall.note(meta, time.time(), ol_note)
         outcome_text, ot_note = _fg.fix_long_bullets(outcome_text, None, "outcome_text")       # a bullet over the limit is split like a description's (a pure form fix; the reply says so, and History)
         if ot_note:
             _stall.note(meta, time.time(), ot_note)
@@ -1083,6 +1086,9 @@ def update_unlocked(
     if description:
         if (_writes.session_next() and not reformat and not sender.strip().startswith("a script on ") and description.strip() != str(item_was.get("description") or "").strip()):     # the text the goal gate judges below
             description = _fg.fix_goal_label(description, str(item_was.get("description") or ""))       # a goal word in another form opening the first bullet is written `Goal:` (a pure form fix; the reply says so)
+        description, list_note = _fg.fix_list_shape(description, str(item_was.get("description") or ""))       # a numbered run on one line is put on lines of its own and a doubled bullet mark made one (a pure form fix; the reply says so, and History)
+        if list_note:
+            _stall.note(meta, time.time(), list_note)
         description, split_note = _fg.fix_long_bullets(description, str(item_was.get("description") or ""))       # a bullet over the limit is split at its sentences (a pure form fix; the reply says so, and History)
         if split_note:
             _stall.note(meta, time.time(), split_note)
