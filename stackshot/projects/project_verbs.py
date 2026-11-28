@@ -1104,7 +1104,7 @@ def agent_background(project: str, name: str, *, by: str = "", io: Any = None, n
         lines = [f"{have} on {where}: front -> background"] + [f"roles.json {r['session']}: {_role_words(r['from'])} -> {_role_words(r['to'])}" for r in roles]
         left = []
         if not any(a.get("front") for a in ag.values()):
-            left.append(f"no front agent is left on {where}: a call that files an item for one of its front agents is refused for this project")
+            left.append(f"no front agent is left on {where}: a call that files an item for a front agent takes one of its hub's, else the configured one ([front] agent), and is refused for this project when there is neither (item-sync takes a hub's only)")
         if not _kp.effective_mark(ag, _page_row(ctx, e)):
             left.append(f"{where} has no keeper mark (`project keeper {where} {have}` lays one)")
         if left:

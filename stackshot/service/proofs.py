@@ -2,7 +2,7 @@
 
 A step of next that names the event which completes it (model/step_proof.py) is ticked by the server when the event happens, not when a session remembers to: `pr_released` is a release.sh call or the sweep finding the
 merge in last-good and HEAD (service/released.py), `pr_merged` is GitHub saying the pull request is merged (the done check's own read, `checks.pr_merged`, plus git for this repository's merges the checkout already
-holds). This module holds the write side of a step's explicit proof (`step_proof_set`, `step_proof_prune`), the settle of one item for one event (`proof_item`: a pure proof step is ticked, the mover told once what the next
+holds). This module holds the write side of a step's explicit proof (`step_proof_set`, `step_proof_move`, `step_proof_prune`), the settle of one item for one event (`proof_item`: a pure proof step is ticked, the mover told once what the next
 open step is, the item closed when none is open), the hand-over to the session the next step names (`handover`), and the pass that finds the events that have happened (`sweep_proofs`, the clock `proof_tick`, and the
 `client.py sweep-step-proof` call). A pull request closed without a merge never ticks anything. Reads (git, GitHub) come before the item lock, writes under it.
 
@@ -112,6 +112,14 @@ def step_proof_set(meta: dict[str, Any], steps: list[dict[str, Any]], spec: Any)
     else:
         meta.pop("step_proof", None)
     return note
+
+
+def step_proof_move(meta: dict[str, Any], old: str, new: str) -> None:
+    """A step the server rewords keeps its proof: the one stored under the old words goes under the new ones, so the event that finishes the step still finishes it."""
+    proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
+    if (pv := proofs.pop(_steps.key(old), None)) is not None:
+        proofs[_steps.key(new)] = pv
+        meta["step_proof"] = proofs
 
 
 def step_proof_prune(meta: dict[str, Any], steps: list[dict[str, Any]]) -> str:

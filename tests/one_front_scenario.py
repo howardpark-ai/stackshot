@@ -2,7 +2,8 @@
 
 Covers: `project agent-background` (a listed front agent turned background: the keeper mark and the status stay, a dry run writes nothing, the refusals); a project left with a background agent alone
 and `[front] agent` set (a question to it, a new item, an inbound notice, the configured front as contact); `client.py repoint FROM TO` (a dry run first, what moves on open items, what is left or
-listed, the one notice, a second run).
+listed, the one notice, a second run; a reworded step's proof; a script route's own step; the notice with an issue-numbered item and a failed push; a save that fails part way; a front agent of
+another project as the new session).
 
     tests/run-suite one_front        → exit 0 / 1"""
 import contextlib, hashlib, io, json, logging, os, pathlib, re, subprocess, sys, time
@@ -43,13 +44,16 @@ from stackshot.web.routes import client_api
 from stackshot.projects import pages, project_registry as pr, project_verbs as pv, keeper as kp
 from stackshot.router import page_debt, router
 from stackshot.anchors import anchors
-from stackshot.service import contacts, question, item_open, job_alert, telling
+from stackshot.service import contacts, question, item_open, job_alert, telling, proofs, writes, update
+from stackshot.model import steps as st
+from stackshot.github import ghsync as _gh
 from stackshot.fleet import client, sessions_registry as sr
 from stackshot.core import config as cfg
 from stackshot.core.instance import OWNER
 _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _web_page_debts._owing_note = lambda debtor: ""
 told = []                                              # every notice the server would send: recorded, never sent
+send = telling.tell_woken                              # the real sender, for the check of a push that fails
 telling.tell_woken = lambda *a, **k: told.append((a, k))
 pages.cmd_registry(quiet=True)
 IO = page_debt.PlainIO()
@@ -75,7 +79,7 @@ ag = pr.entries()[GOLF]["agents"]
 check("agent-background: the agent is background in the record, its mandate and keeper mark kept", r["result"] == "background" and ag[SOLO]["front"] is False and ag[SOLO]["mandate_line"] == "talks to the owner about golf" and kp.record_mark(ag)[0] == SOLO, ag)
 check("agent-background: the project keeps its status (not archived), and its page and roles list the agent as background", (pr.entries()[GOLF].get("status") or "active") == "active" and "status: active" in text()
       and SOLO in anchors.registry()["projects/golf"]["back_agents"] and anchors.session_roles()[SOLO]["role"] == "back", (text(), anchors.session_roles().get(SOLO)))
-check("agent-background: the answer names the roles that change and warns that no front agent is left", any(x.startswith(f"roles.json {SOLO}: front") for x in r["lines"]) and "no front agent is left" in r.get("warning", ""), r)
+check("agent-background: the answer names the roles that change and warns that no front agent is left", any(x.startswith(f"roles.json {SOLO}: front") for x in r["lines"]) and "no front agent is left" in r.get("warning", "") and "its hub's, else the configured one ([front] agent)" in r["warning"], r)
 was = sha(); r = pv.agent_background("projects/golf", SOLO, io=IO, by="cli")
 check("agent-background again: already background, nothing written", r["result"] == "already background" and not r["changed"] and sha() == was, r)
 # its mandate rewritten afterwards, with a condition written in another script: both existing commands, and the text read back from the record, the page and the registry
@@ -180,6 +184,82 @@ check("repoint to a front agent from the command line: contact and tell_him foll
 for what, a, b in (("a name no page lists", SIDE, "home-delta-nobody"), ("one session twice", SIDE, SIDE), ("the owner", SIDE, "owner"), ("no name", "", BUILD)):
     s, out = client_api._client_post("a", "repoint", {"from": a, "to": b, "apply": True})
     check(f"repoint refuses {what}", s == 400 and out.get("error"), (s, out))
+
+
+def clear():
+    told.clear()
+    for q in (T / "store").glob("?/*.json"): q.unlink()
+def move(a, b): return client_api._client_post("a", "repoint", {"from": a, "to": b, "apply": True})
+def opens(g): return [x["text"] for x in st.view(rd(g)["metadata"], keeper=rd(g)["metadata"]["owner"]) if x["status"] == st.OPEN]
+
+# a step with an explicit proof keeps it under its new words, through a later write too
+clear()
+old, new, pr5 = f"{SIDE}: merge the change", f"{BUILD}: merge the change", "pr_merged example/repo#5"
+put(6, mover=SIDE, next=old, steps=[{"text": old, "status": "open"}], step_proof={st.key(old): pr5})
+move(SIDE, BUILD)
+m = rd(6)["metadata"]
+check("repoint: a reworded step keeps its proof, and the event still ticks it", m.get("step_proof") == {st.key(new): pr5}
+      and proofs.proof_hits(st.view(m), [0], m, "pr_merged", 5, "example/repo#5", set(), False) == {0: True}, m)
+report = f"{BUILD}: report it"
+out = update._update("a6", next=f"{new}\n{report}", sender=BUILD)
+m = rd(6)["metadata"]
+check("repoint: a later write of the list keeps the moved proof and adds no second step", m.get("step_proof") == {st.key(new): pr5} and opens(6) == [new, report] and "proof dropped" not in out, (out, m))
+
+# a script route's own step on an item whose other lines move
+clear()
+sync = {"action": "open", "marker": "chore:box", "project": "projects/delta", "subject": "Restart the box", "description": ["The box is stuck"], "mover": OWNER, "then": SIDE, "step": "restart the box"}
+s, d = client_api._client_post("a", "item-sync", sync)
+g = d.get("item", "")
+mine, extra = f"{OWNER}: restart the box", f"{SIDE}: check the box after"
+if g:
+    it = rd(g); gm = it["metadata"]
+    gm["steps"] = st.stored([*st.view(gm, keeper=gm["owner"]), {"text": extra, "status": "open"}]); gm["next"] += "\n" + extra
+    next((T / "store").glob(f"?/{re.findall(r'[0-9]+', g)[-1]}.json")).write_text(json.dumps(it))
+s2, d2 = move(SIDE, BUILD)
+m = rd(g)["metadata"] if g else {}
+moved = f"{BUILD}: check the box after"
+check("repoint: a script route's own step stays recorded as its own beside the moved line", s == 200 and s2 == 200 and d2["written"] == 1 and m.get("item_sync_step") == "restart the box" and m.get("item_sync_sent") == "restart the box"
+      and opens(g) == [mine, moved] and who(g, "then") == BUILD, (d, d2, m))
+s, d = client_api._client_post("a", "item-sync", {**sync, "then": BUILD})
+check("repoint: the route's repeat open adds no second step", s == 200 and d["action"] == "refreshed" and opens(g) == [mine, moved], (d, rd(g)["metadata"]))
+s, d = client_api._client_post("a", "item-sync", {**sync, "then": BUILD, "step": "restart the box twice"})
+check("repoint: the route's next step replaces its own and leaves the moved line once", s == 200 and sorted(opens(g)) == sorted([moved, f"{OWNER}: restart the box twice"]), (d, rd(g)["metadata"]))
+
+# an issue-numbered item (its shown id is not its stored one) and a push that fails: the real sender records it
+clear()
+(T / "store/g").mkdir(exist_ok=True)
+(T / "store/g/7.json").write_text(json.dumps({"id": "7", "subject": "[home] item 7", "description": "- A thing\n- It lives here\n- Done when done", "status": "open", "updated": now0, "metadata": {"owner": MAIN, "project": "projects/delta", "mover": SIDE}}))
+(T / "push_fails.py").write_text("print('failed: no live pane')\n")
+threads = []
+real_push, telling.PUSH = telling.PUSH, [sys.executable, str(T / "push_fails.py")]
+telling.tell_woken = lambda *a, **k: threads.append((a, send(*a, **k)))
+s, d = move(SIDE, BUILD)
+for _a, th in threads:
+    if th: th.join(60)
+telling.PUSH, telling.tell_woken = real_push, lambda *a, **k: told.append((a, k))
+u = rd(7)["metadata"].get("undelivered") or []
+shown = _gh.shown("g7")
+check("repoint: a notice that cannot be delivered is recorded on an item whose shown id is not its stored one", s == 200 and shown != "g7" and d["told"] == [shown] and len(threads) == 1 and shown in threads[0][0][2]
+      and [(x.get("tag"), x.get("to")) for x in u] == [("repoint", BUILD)], (d, threads, u))
+
+# a save that fails part way: what had moved is still told
+clear()
+put(8, mover=SIDE, owner=MAIN); put(9, mover=SIDE, owner=MAIN)
+real_save, saved = writes.save, []
+def one_save(gid, *a, **k):
+    if saved: raise OSError("no space left")
+    saved.append(gid); return real_save(gid, *a, **k)
+writes.save = one_save
+e = refused(lambda: move(SIDE, BUILD))
+writes.save = real_save
+check("repoint: a save that fails still sends the notice for the items already moved", isinstance(e, OSError) and len(saved) == 1 and len(told) == 1 and told[0][0][:2] == (saved[0], sr._store_ref(BUILD)), (e, saved, told))
+
+# the new session is a front agent of another project: contact only where an update would take it
+clear()
+put(10, contact=SIDE, owner=MAIN); put(11, contact=SIDE, owner=CHIEF); put(12, contact=SOLO, owner=SOLOB, project="projects/golf")
+move(SIDE, CHIEF); move(SOLO, CHIEF)
+check("repoint to another project's front agent: the contact falls to the -main agent, unless that session created the item or is the configured front of a project with none",
+      (who(10), who(11), who(12)) == (MAIN, CHIEF, CHIEF), (who(10), who(11), who(12)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

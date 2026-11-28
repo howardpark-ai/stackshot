@@ -1,7 +1,8 @@
 """repoint.py: hand what open items hold under one session's name to another, before that session is retired (`client.py repoint FROM TO [--apply]`). A dry run unless asked to apply.
 
 What moves on an open item: `mover`, `then` and a post-wake mover; the session's place in `needs` and `observers`; the open steps whose `next` line opens with its name (the line is then TO's, as is its
-checklist step); `contact` (TO when it is a front agent, else the project's -main agent as the pages list it without FROM, else none); `tell_him` (only to a front agent, else left and reported). The
+checklist step and the step's proof); `contact` (TO where an update would take it as the item's contact, gates.gate_contact: a front agent of the item's project, the item's creator while that is a
+front agent, or the configured front for a project that lists none; else the project's -main agent as the pages list it without FROM, else none); `tell_him` (only to a front agent, else left and reported). The
 item's creator, its history and closed items are not changed. The instance's settings and the project record's marks that name FROM are listed, never edited.
 
 A service module: it reads the store, the registry and the config, writes through the write path (`service/writes.py`) as filing writes of the server's own, and sends one notice to a new holder that
@@ -27,6 +28,8 @@ from stackshot.model import steps as _st
 from stackshot.projects import keeper as _kp
 from stackshot.projects import project_registry as _pr
 from stackshot.service import contacts as _contacts
+from stackshot.service import gates as _gates
+from stackshot.service import proofs as _proofs
 from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
@@ -47,6 +50,15 @@ def _listed(meta: dict[str, Any], key: str, is_old, new: str) -> list[str] | Non
         if not any(x.casefold() == y.casefold() or _contacts._contact_same(x, y) for y in out):
             out.append(x)
     return out
+
+
+def _takes_contact(meta: dict[str, Any], ref: str) -> bool:
+    """Would an update take `ref` as the contact of this item (gates.gate_contact, the item's creator kept)?"""
+    try:
+        _gates.gate_contact(ref, str(meta.get("project") or ""), (str(meta.get("owner") or ""),))
+        return True
+    except ToolError:
+        return False
 
 
 def _move(meta: dict[str, Any], frm: str, ref: str, label: str, front: bool) -> tuple[list[str], list[str]]:
@@ -81,6 +93,7 @@ def _move(meta: dict[str, Any], frm: str, ref: str, label: str, front: bool) -> 
         if name and is_old(name):
             new = line.replace(name, label, 1)
             reworded[_nl.norm(line)] = new
+            _proofs.step_proof_move(meta, line, new)
             rows[i] = (new, ref if is_old(writer) else writer)
     if reworded:
         _nl.set_rows(meta, rows)
@@ -90,7 +103,7 @@ def _move(meta: dict[str, Any], frm: str, ref: str, label: str, front: bool) -> 
     contact = str(meta.get("contact") or "").strip()
     if contact and is_old(contact):
         new = ref
-        if not front:
+        if not _takes_contact(meta, ref):
             main = _contacts._main_agent_without(str(meta.get("project") or ""), frm)
             new = _sr._store_ref(main) if main and not is_old(main) else ""
         if new:
@@ -150,34 +163,37 @@ def repoint(frm: str, to: str, apply: bool = False) -> dict[str, Any]:
     ref, label = _sr._store_ref(to), _sr._session_label(to)
     front = _telling.front_sender(to)
     rows: list[dict[str, Any]] = []
-    holds: list[str] = []
+    holds: list[str] = []      # the store ids of the items the new holder is told of
+    told: list[str] = []
     written = created = 0
-    for gid, _p in _item_files():
-        with _writes.ITEM_LOCK:
-            try:
-                it = _svcstore._load(gid)
-            except Exception:  # noqa: BLE001
-                continue
-            if it.get("status") != "open":
-                continue
-            meta = copy.deepcopy(it.get("metadata")) if isinstance(it.get("metadata"), dict) else {}
-            creator = str(meta.get("owner") or "")
-            created += bool(creator) and _contacts._contact_same(creator, frm)
-            changed, left = _move(meta, frm, ref, label, front)
-            if not changed and not left:
-                continue
-            row = {"item": _gh.shown(gid), "project": str(meta.get("project") or ""), "changed": changed, "left": left}
-            if apply and changed:
-                it["metadata"] = meta
-                _writes.save(gid, it, note=f"{_sr._session_label(frm)} is leaving: {', '.join(changed)} moved to {label}", author=(_mig.AUTHOR, _mig.AUTHOR), mirror=False)
-                row["written"] = True
-                written += 1
-                if HOLDS.intersection(changed):
-                    holds.append(row["item"])
-        rows.append(row)
-    told = holds if holds and not front else []
-    if told:
-        more = f" and {len(told) - NOTICE_IDS} more" if len(told) > NOTICE_IDS else ""
-        _telling.tell_woken(",".join(told), ref, f"[stackshot] {_sr._session_label(frm)} is leaving, and these open items name you in its place: {', '.join(told[:NOTICE_IDS])}{more}. "
-                            "Read each with get and take its next step.", tag="repoint")
+    try:
+        for gid, _p in _item_files():
+            with _writes.ITEM_LOCK:
+                try:
+                    it = _svcstore._load(gid)
+                except Exception:  # noqa: BLE001
+                    continue
+                if it.get("status") != "open":
+                    continue
+                meta = copy.deepcopy(it.get("metadata")) if isinstance(it.get("metadata"), dict) else {}
+                creator = str(meta.get("owner") or "")
+                created += bool(creator) and _contacts._contact_same(creator, frm)
+                changed, left = _move(meta, frm, ref, label, front)
+                if not changed and not left:
+                    continue
+                row = {"item": _gh.shown(gid), "project": str(meta.get("project") or ""), "changed": changed, "left": left}
+                if apply and changed:
+                    it["metadata"] = meta
+                    _writes.save(gid, it, note=f"{_sr._session_label(frm)} is leaving: {', '.join(changed)} moved to {label}", author=(_mig.AUTHOR, _mig.AUTHOR), mirror=False)
+                    row["written"] = True
+                    written += 1
+                    if HOLDS.intersection(changed):
+                        holds.append(gid)
+            rows.append(row)
+    finally:      # what has moved is told, also when a later save fails
+        if holds and not front:
+            told = [_gh.shown(g) for g in holds]
+            more = f" and {len(told) - NOTICE_IDS} more" if len(told) > NOTICE_IDS else ""
+            _telling.tell_woken(",".join(holds), ref, f"[stackshot] {_sr._session_label(frm)} is leaving, and these open items name you in its place: {', '.join(told[:NOTICE_IDS])}{more}. "
+                                "Read each with get and take its next step.", tag="repoint")
     return {"dry_run": not apply, "from": _sr._session_label(frm), "to": label, "to_front": front, "items": rows, "written": written, "created": created, "settings": _settings(_sr._session_label(frm)), "told": told}
