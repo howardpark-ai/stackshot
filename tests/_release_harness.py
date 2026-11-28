@@ -29,11 +29,48 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:800]}" if got is not None else ""))
 
+# The world of workflow runs the gh stub and the salamander stub share (text put into both): RT_ORPHAN_RUNS = a JSON list of runs {"id", "age" (seconds queued when the scenario starts; it grows with the fake clock),
+# "status" (default queued), "jobs" (default none), "wf" (the workflow's name, default tests), "event" (pull_request | merge_group, default pull_request), "branch" (a merge_group run's head branch), "sha" (the head it
+# belongs to, default the PR's head), "view_status" and "view_age" (what `gh run view` says when it differs from the list: the run moved on meanwhile), "view_jobs": "absent" | "null" | "object" (what `gh run view`
+# gives for the job list when it is not a list), "new": true (created when the PR was reopened, "after" seconds later; "age" is not read)}. Once the PR was reopened (orphan_replaced holds the
+# second it was), RT_ORPHAN_AFTER is the list when it is set; when it is not, GitHub does what it does: the same runs (a replaced run stays listed, queued, as GitHub keeps it) and one new run of each workflow
+# (and branch) among them, created at that second, in progress with a job. orphan_list(done=True): those new runs completed (the poller's view once they finished). Every run's creation second is in "_t".
+ORPHAN_PY = r'''
+HEAD0 = "abc1234def5678abc1234def5678abc1234def56"
+def tclock():   # the clock the release reads (the date stub's): the start plus every sleep and every look's cost
+    import time
+    base = int(open(f"{d}/clock-base").read()) if os.path.exists(f"{d}/clock-base") else int(time.time()); add = 0.0
+    for f in ("sleep.log", "clock-extra"):
+        for l in (open(f"{d}/{f}").read().splitlines() if os.path.exists(f"{d}/{f}") else []):
+            try: add += float(l.split()[0])
+            except (ValueError, IndexError): pass
+    return int(base + add)
+def iso(t):
+    import datetime; return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def orphan_base(): return int(open(f"{d}/clock-base").read()) if os.path.exists(f"{d}/clock-base") else int(__import__("time").time())
+def orphan_list(done=False):
+    runs = json.loads(os.environ.get("RT_ORPHAN_RUNS") or "[]"); at = None
+    if os.path.exists(f"{d}/orphan_replaced"):
+        at = int(open(f"{d}/orphan_replaced").read().strip() or orphan_base())
+        if os.environ.get("RT_ORPHAN_AFTER"): runs = json.loads(os.environ["RT_ORPHAN_AFTER"])
+        else:
+            keys = list(dict.fromkeys((r.get("wf", "tests"), r.get("event", "pull_request"), r.get("branch", ""), r.get("sha", "")) for r in runs))
+            runs = [*runs, *({"id": 9001 + i, "wf": w, "event": e, "branch": b, **({"sha": s} if s else {}), "new": True, "status": "in_progress", "jobs": [{"name": "suites", "status": "in_progress"}]} for i, (w, e, b, s) in enumerate(keys))]
+    out = []
+    for r in runs:
+        r = {**r, "_t": (orphan_base() if at is None else at) + int(r.get("after", 0)) if r.get("new") else orphan_base() - int(r.get("age", 0))}
+        if done and r.get("new") and r.get("status", "queued") != "queued": r["status"] = "completed"
+        out.append(r)
+    return out
+'''
+
 GH_SH = r'''#!/bin/bash
 [ -z "${RT_ENVDUMP:-}" ] || env > "$RT_ENVDUMP"   # a check reads the environment this stub was started in
 # the waits ask `pr checks` once a cycle: answered here, in shell, so a measured run (coverage and strace -f in every Python start) does not pay a Python process for it; everything else goes to gh.py
 if [ "${1:-} ${2:-}" = "pr checks" ]; then
     echo "$*" >> "$RT_DIR/gh.log"
+    # as GitHub does: while the newest tests run of the head is queued with no jobs (an orphan) it has no check runs, so there is no suites row, only the other checks (passing); such a read is not counted in RT_CHECKS
+    if [ -n "${RT_ORPHAN_RUNS:-}" ] && python3 "$RT_DIR/bin/gh.py" --orphan-blocks; then echo '[{"name": "lint", "state": "SUCCESS", "bucket": "pass", "link": "https://ci.example/lint"}]'; exit 0; fi
     cn=1; [ ! -e "$RT_DIR/checkreads" ] || cn=$(( $(< "$RT_DIR/checkreads") + 1 )); echo "$cn" > "$RT_DIR/checkreads"
     if [ "${RT_MARK_AT_CHECKS:-}" = "$cn" ]; then   # a group release hands this PR to the salamander merge queue while this release waits for its checks: its marker appears at that read
         mkdir -p "$RT_DIR/releases/mq-on"; echo "2026-11-04T00:00:00Z handed to the salamander merge queue by the group release led by PR #26" > "$RT_DIR/releases/mq-on/pr-$3"
@@ -60,8 +97,50 @@ exec python3 "$RT_DIR/bin/gh.py" "$@"
 GH = r'''#!/usr/bin/env python3
 import json, os, sys
 d = os.environ["RT_DIR"]; a = sys.argv[1:]
-open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
 def env(k, v=""): return os.environ.get(k, v)
+@ORPHAN_PY@
+if a[:1] == ["--orphan-blocks"]:   # the shell part's question, not a gh call: is the newest tests run of the PR's head queued with no jobs (no check runs, so no suites row)? exit 0 when it is
+    mine = [r for r in orphan_list() if r.get("event", "pull_request") == "pull_request" and r.get("wf", "tests") == "tests" and r.get("sha", env("RT_HEAD", HEAD0)) == env("RT_HEAD", HEAD0)]
+    top = max(mine, key=lambda r: (r["_t"], r["id"]), default=None)
+    sys.exit(0 if top and top.get("status", "queued") == "queued" and not top.get("jobs") else 1)
+open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
+def kill_release():   # SIGTERM to the release's own shell: the parent, or the shell past a command substitution's subshell (a fork of it: the same program and command line); only a process of this scenario (RT_DIR in its environment)
+    import signal, time
+    if env("RT_KILLTEE"):   # a stop of the whole unit ends the log's tee too, first: the scenario's own copy of tee (bin/tee, put there for RT_KILLTEE), found by its executable; ended before the shell is signalled
+        own = os.path.realpath(f"{d}/bin/tee")
+        for t in [x for x in os.listdir("/proc") if x.isdigit()]:
+            try:
+                if os.readlink(f"/proc/{t}/exe") != own: continue
+                os.kill(int(t), signal.SIGTERM); open(f"{d}/tee_killed", "a").write(t + "\n")
+            except OSError: continue
+            for _ in range(200):   # until it is gone (a zombie, or reaped)
+                try:
+                    if open(f"/proc/{t}/stat").read().rsplit(")", 1)[1].split()[0] == "Z": break
+                except OSError: break
+                time.sleep(0.02)
+    def same(p): return os.readlink(f"/proc/{p}/exe"), open(f"/proc/{p}/cmdline", "rb").read()
+    def up(p): return int(open(f"/proc/{p}/stat").read().rsplit(")", 1)[1].split()[1])
+    p = os.getppid()
+    while up(p) > 1 and same(up(p)) == same(p): p = up(p)
+    if f"RT_DIR={d}".encode() in open(f"/proc/{p}/environ", "rb").read().split(b"\0") and b"release.sh" in open(f"/proc/{p}/cmdline", "rb").read(): os.kill(p, signal.SIGTERM)
+if a[:2] == ["pr", "view"] and a[a.index("--json") + 1] == "state,headRefOid":   # orphan_look: the PR now, one answer per read of this kind, the last repeated: RT_PRNOW, comma-separated, of OPEN (default) | CLOSED (closed
+    # by someone else) | MERGED | moved (OPEN on another head) | fail (the read errors) | lag (OPEN on the head, whatever happened: GitHub has not shown a close yet) | handed (OPEN on the head, and the PR is found handed
+    # to the salamander merge queue meanwhile: its marker is written) | kill (the release ends, SIGTERM to its shell, during this read; then answered as OPEN is). The PR is CLOSED from a close call to a reopen call
+    # whatever RT_PRNOW says (but fail and lag): the file pr_closed (a scenario can start with it). Every such read is in orphan_calls
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    pn = int(open(f"{d}/prnow_reads").read()) + 1 if os.path.exists(f"{d}/prnow_reads") else 1
+    open(f"{d}/prnow_reads", "w").write(str(pn)); pseq = env("RT_PRNOW", "OPEN").split(","); pv = pseq[min(pn, len(pseq)) - 1]
+    if pv == "fail": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if pv == "kill":
+        import time; kill_release(); time.sleep(0.3); pv = "OPEN"
+    head = env("RT_HEAD", HEAD0)
+    if pv == "lag": pv = "OPEN"
+    elif os.path.exists(f"{d}/pr_closed"): pv = "CLOSED"
+    elif pv == "moved": pv, head = "OPEN", "f00d" * 10
+    elif pv == "handed":
+        pv = "OPEN"; os.makedirs(f"{d}/releases/mq-on", exist_ok=True)
+        open(f"{d}/releases/mq-on/pr-23", "w").write("2026-11-04T00:00:00Z handed to the salamander merge queue by the group release led by PR #26\n")
+    print(json.dumps({"state": pv, "headRefOid": head})); sys.exit(0)
 if a[:2] == ["pr", "view"]:
     fields = a[a.index("--json") + 1]
     if (env("RT_PRSTATE") or env("RT_PRSTATE_AFTER")) and fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # the salamander merge queue, mode on: a group release reads each PR's state first: RT_PRSTATE = "<pr>=<OPEN|MERGED|CLOSED>[@<oid>][#<head oid>],..." (a PR not listed is OPEN; MERGED with only #<head> is a fast-forward merge GitHub names no merge commit for);
@@ -80,10 +159,10 @@ if a[:2] == ["pr", "view"]:
         mn = int(open(f"{d}/mviews").read()) + 1 if os.path.exists(f"{d}/mviews") else 1   # one value per read, the last repeated: RT_MERGEABLE (comma-separated)
         open(f"{d}/mviews", "w").write(str(mn)); mseq = env("RT_MERGEABLE", "MERGEABLE").split(",")
         vst = env("RT_VIEWSTATE", "OPEN").split(",")   # RT_VIEWSTATE: the PR's state per read, the last repeated (OPEN | CLOSED | MERGED)
-        print(json.dumps({"state": vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
+        print(json.dumps({"state": "CLOSED" if os.path.exists(f"{d}/pr_closed") else vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
                           "isCrossRepository": env("RT_CROSS") == "1", "headRefOid": (env("RT_PRHEADS") or env("RT_HEAD", "abc1234def5678abc1234def5678abc1234def56")).split(",")[min(mn, len((env("RT_PRHEADS") or "x").split(","))) - 1]})); sys.exit(0)
-    if fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # a group release's state read with no RT_PRSTATE: every PR is open
-        print(json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
+    if fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # a group release's state read with no RT_PRSTATE: every PR is open (closed between a close and a reopen call: pr_closed)
+        print(json.dumps({"state": "CLOSED" if os.path.exists(f"{d}/pr_closed") else "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
     sys.exit(3)
 if a[:2] == ["pr", "list"]:   # the open PRs based on the merged head branch (retarget_and_delete_branch): RT_STACKED, comma-separated numbers, none by default; RT_LIST=fail: the call errors
     if env("RT_LIST") == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
@@ -97,16 +176,48 @@ if a[:2] == ["pr", "checks"]:
     cseq = env("RT_CHECKS", "pass").split(","); cv = cseq[min(cn, len(cseq)) - 1]
     print(json.dumps([{"name": "lint", "bucket": "pass"}] if cv == "lint" else [{"name": "suites", "bucket": "pending"}, {"name": "tool-text", "bucket": "fail"}] if cv == "toolfail"
                      else [{"name": "suites", "bucket": cv}, {"name": "lint", "bucket": "pass"}])); sys.exit(0)
-def tclock():   # the clock the release reads (the date stub's): the start plus every sleep and every look's cost
-    import time
-    base = int(open(f"{d}/clock-base").read()) if os.path.exists(f"{d}/clock-base") else int(time.time()); add = 0.0
-    for f in ("sleep.log", "clock-extra"):
-        for l in (open(f"{d}/{f}").read().splitlines() if os.path.exists(f"{d}/{f}") else []):
-            try: add += float(l.split()[0])
-            except (ValueError, IndexError): pass
-    return int(base + add)
-def iso(t):
-    import datetime; return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# Orphaned runs (release.sh orphan_scan): the runs are ORPHAN_PY's (above); RT_ORPHAN_ERR=list|view: that call errors; RT_PRCLOSE=fail | RT_REOPEN=fail: that call errors; RT_PRCLOSE=failclosed: the close errors
+# but the PR is closed all the same; killapplied: the close goes through, then the release ends (SIGTERM to its shell) before gh returns, and gh errors; other: someone else closed the PR right before the call (gh then
+# says it is already closed). As the real gh does, a close of a PR that is closed already changes nothing, says so on stderr and exits 0. RT_REOPEN=killfirst: the first reopen call ends the release (SIGTERM to its
+# shell) and errors, later ones work; killfirst2: the same, and the second reopen errors too; killfail: the same, and every later reopen errors. The PR is closed from a close call to a reopen call (the file
+# pr_closed: `gh pr view` says CLOSED; a scenario can start with it). `gh run list --commit` lists only the runs of that head. Every close, reopen and orphan_look read is in orphan_calls, and so is a dequeue call
+# (release.sh makes none: it never takes a PR out of the merge queue). kill_release is above.
+if a[:2] in (["pr", "close"], ["pr", "reopen"]):
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if a[1] == "close" and env("RT_PRCLOSE") == "other": open(f"{d}/pr_closed", "w").write(str(tclock()))
+    if a[1] == "close" and os.path.exists(f"{d}/pr_closed"): print(f"! Pull request example-owner/stackshot#{a[2]} ({env('RT_TITLE', 'a change')}) is already closed", file=sys.stderr); sys.exit(0)
+    if a[1] == "close" and env("RT_PRCLOSE") in ("failclosed", "killapplied"): open(f"{d}/pr_closed", "w").write(str(tclock()))
+    nre, rm_ = open(f"{d}/orphan_calls").read().count("pr reopen"), env("RT_REOPEN")
+    if (a[1] == "reopen" and rm_ in ("killfirst", "killfirst2", "killfail") and nre == 1) or (a[1] == "close" and env("RT_PRCLOSE") == "killapplied"):
+        import time; kill_release(); time.sleep(0.3); print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if (a[1] == "close" and env("RT_PRCLOSE") in ("fail", "failclosed")) or (a[1] == "reopen" and (rm_ in ("fail", "killfail") or rm_ == "killfirst2" and nre == 2)): print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    if a[1] == "close": open(f"{d}/pr_closed", "w").write(str(tclock()))
+    if a[1] == "reopen":
+        open(f"{d}/orphan_replaced", "w").write(str(tclock()))
+        if os.path.exists(f"{d}/pr_closed"): os.remove(f"{d}/pr_closed")
+    sys.exit(0)
+# a run's startedAt is its attempt's: "started" (seconds before the scenario's start) for a rerun attempt, else its creation second
+def started(r): return iso(orphan_base() - int(r["started"])) if "started" in r else iso(r["_t"])
+if a[:2] == ["run", "list"] and "--event" in a and a[a.index("--event") + 1] in ("pull_request", "merge_group"):
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if env("RT_ORPHAN_ERR") == "list": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    ev = a[a.index("--event") + 1]
+    cm = a[a.index("--commit") + 1] if "--commit" in a else None   # --commit <sha>: only the runs of that head
+    print(json.dumps([{"databaseId": r["id"], "status": r.get("status", "queued"), "createdAt": iso(r["_t"]), "startedAt": started(r), "headBranch": r.get("branch", ""), "workflowName": r.get("wf", "tests")} for r in orphan_list()
+                      if r.get("event", "pull_request") == ev and (cm is None or r.get("sha", env("RT_HEAD", HEAD0)) == cm)])); sys.exit(0)
+if a[:2] == ["run", "view"] and "jobs,status,createdAt,startedAt" in a:
+    open(f"{d}/orphan_calls", "a").write(" ".join(a) + "\n")
+    if env("RT_ORPHAN_ERR") == "view": print("gh: HTTP 502", file=sys.stderr); sys.exit(1)
+    r = next((r for r in orphan_list() if str(r["id"]) == a[2]), {"id": a[2], "_t": orphan_base() - 99999})   # a run the list never named reads as an old orphan (a call that should not have been made shows)
+    v = {"status": r.get("view_status", r.get("status", "queued")), "createdAt": iso(orphan_base() - int(r["view_age"]) if "view_age" in r else r["_t"]), "jobs": r.get("jobs", [])}
+    v["startedAt"] = v["createdAt"] if "view_age" in r else started(r)
+    if r.get("view_jobs") == "absent": del v["jobs"]
+    if r.get("view_jobs") == "null": v["jobs"] = None
+    if r.get("view_jobs") == "object": v["jobs"] = {}   # empty, but not a list
+    print(json.dumps(v)); sys.exit(0)
+if a[:1] == ["api"] and a[1:2] == ["graphql"] and "dequeuePullRequest" in " ".join(a):
+    open(f"{d}/orphan_calls", "a").write("dequeue " + " ".join(x for x in a if x.startswith("id=")) + "\n")   # a call release.sh must never make: recorded for the tests, and answered as GitHub would
+    print(json.dumps({"data": {"dequeuePullRequest": {"mergeQueueEntry": {"state": "QUEUED"}}}})); sys.exit(0)
 if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which query it is, by its text:
     q = " ".join(a)   # - the timeline (ghq_reason, RemovedFromMergeQueueEvent): RT_GQ_REASON = the reason (GitHub's values: merged, failed_checks, manual, merge_conflict, branch_protection_failure; any other text is passed through), "none" = no event of this enqueue, "fail" = the read errors; RT_GQ_REASON_AGE = how many seconds before "now" the event is dated
                       #   (default 0: after the enqueue); RT_GQ_STALE = the text of an event dated a day before, listed AFTER the other (an earlier enqueue's removal)
@@ -114,7 +225,8 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
                       # - the read of the repository's queue (ghq_target): RT_MQ = on (default) | off (no mergeQueue: the ruleset is off) | fail | garbage
                       # - the state query (ghq_read): one answer per read, the last repeated: RT_GQ, comma-separated, of
                       #   queued (OPEN, entry QUEUED position 1) | awaiting (OPEN, entry AWAITING_CHECKS position 1, about 12 s after queued) | unmergeable (OPEN, entry UNMERGEABLE: seen on a conflict) | open (OPEN, no entry) | merged (MERGED, the merge commit RT_MERGE_OID) | mergednocommit (MERGED, no merge commit yet)
-                      #   | closed | fail (the read errors) | garbage (not JSON). RT_PARK_GQ = n: the n-th read waits until the test touches `unpark` (the test looks at --status meanwhile; `parked` says it waits)
+                      #   | closed | fail (the read errors) | garbage (not JSON). RT_PARK_GQ = n: the n-th read waits until the test touches `unpark` (the test looks at --status meanwhile; `parked` says it waits).
+                      #   An entry carries enqueuedAt: the second of the last enqueue the queue accepted, else RT_GQ_SINCE seconds before the start (an entry an earlier release made), else none
     if "timelineItems" in q:
         open(f"{d}/gq_reason_reads", "a").write("x")
         r = env("RT_GQ_REASON", "")
@@ -147,6 +259,7 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
                    "ref": "Pull request Cannot update this protected ref."}
         if env("RT_ENQUEUE") in ENQ_ERR:   # gh api graphql prints the error body on stdout and "gh: <message>" on stderr, and exits 1
             m = ENQ_ERR[env("RT_ENQUEUE")]; print(json.dumps({"data": {"enqueuePullRequest": None}, "errors": [{"message": m}]})); print("gh: " + m, file=sys.stderr); sys.exit(1)
+        open(f"{d}/enqueued_at", "w").write(str(tclock()))   # the entry's enqueuedAt, for the state query
         print(json.dumps({"data": {"enqueuePullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 1}}}})); sys.exit(0)
     if "mergeQueue(" in q:
         open(f"{d}/mq_reads", "a").write("x")
@@ -155,7 +268,15 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
         if mq == "garbage": print("not json"); sys.exit(0)
         pnum = next(x[2:] for x in a if x.startswith("p="))
         print(json.dumps({"data": {"repository": {"mergeQueue": None if mq == "off" else {"id": f"MQ_main_{len(open(d + '/mq_reads').read())}"}, "pullRequest": {"id": f"PRNODE{pnum}"}}}})); sys.exit(0)
-    gn = int(open(f"{d}/gqreads").read()) + 1 if os.path.exists(f"{d}/gqreads") else 1
+    if "mergeQueueEntry" in q and "mergeCommit" not in q:   # the orphan look's read of the PR's merge queue entry alone (orphan_inq), right before a close: one answer per read, the last repeated: RT_PRQUEUE, comma-separated,
+        # of none (default: no entry) | queued (entry QUEUED position 1) | fail (the read errors) | garbage (not JSON). Every such read is in orphan_calls, as "mqentry"
+        open(f"{d}/orphan_calls", "a").write("mqentry\n")
+        qn = int(open(f"{d}/prqueue_reads").read()) + 1 if os.path.exists(f"{d}/prqueue_reads") else 1
+        open(f"{d}/prqueue_reads", "w").write(str(qn)); qseq = env("RT_PRQUEUE", "none").split(","); qv = qseq[min(qn, len(qseq)) - 1]
+        if qv == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
+        if qv == "garbage": print("not json"); sys.exit(0)
+        print(json.dumps({"data": {"repository": {"pullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 1} if qv == "queued" else None}}}})); sys.exit(0)
+    gn =int(open(f"{d}/gqreads").read()) + 1 if os.path.exists(f"{d}/gqreads") else 1
     open(f"{d}/gqreads", "w").write(str(gn)); gseq = env("RT_GQ", "merged").split(","); gv = gseq[min(gn, len(gseq)) - 1]
     open(f"{d}/gq_args", "a").write(" ".join(x for x in a if not x.startswith("query=")) + "\n")
     if env("RT_PARK_GQ") and gn == int(env("RT_PARK_GQ")):
@@ -166,9 +287,12 @@ if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue. Which q
     if gv == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
     if gv == "garbage": print("not json"); sys.exit(0)
     oid = env("RT_MERGE_OID") or "0106c0de0106c0de0106c0de0106c0de0106c0de"
-    pr_ = {"queued": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "QUEUED", "position": 1}},
-           "awaiting": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "AWAITING_CHECKS", "position": 1}},
-           "unmergeable": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "UNMERGEABLE", "position": 1}},
+    # an entry's enqueuedAt: the second of the last enqueue call the queue accepted; before any, RT_GQ_SINCE seconds before the scenario's start (an entry an earlier release made); none when neither
+    since = int(open(f"{d}/enqueued_at").read()) if os.path.exists(f"{d}/enqueued_at") else orphan_base() - int(env("RT_GQ_SINCE")) if env("RT_GQ_SINCE") else None
+    ea = {} if since is None else {"enqueuedAt": iso(since)}
+    pr_ = {"queued": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "QUEUED", "position": 1, **ea}},
+           "awaiting": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "AWAITING_CHECKS", "position": 1, **ea}},
+           "unmergeable": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "UNMERGEABLE", "position": 1, **ea}},
            "open": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": None},
            "merged": {"state": "MERGED", "mergeCommit": {"oid": oid}, "mergeQueueEntry": None},
            "mergednocommit": {"state": "MERGED", "mergeCommit": None, "mergeQueueEntry": None},
@@ -243,7 +367,7 @@ if a[:2] == ["run", "view"]:   # one state per look at a run, the last repeated:
                       "conclusion": {"pass": "success", "late": "success", "lateabsent": "success", "pending": "", "queued": "", "replaced": "cancelled", "cancelled": "cancelled"}.get(v, "failure"),
                       "jobs": [] if v == "replaced" else [{"databaseId": 900 + int(rid), "steps": steps}]})); sys.exit(0)
 sys.exit(3)
-'''
+'''.replace("@ORPHAN_PY@", ORPHAN_PY)
 GIT = r'''#!/bin/sh
 echo "$*" >> "$RT_DIR/git.log"
 if [ -n "${RT_BG:-}" ]; then case "$1" in fetch|merge-base) setsid sh -c 'exec /usr/bin/sleep 9' >/dev/null 2>&1 </dev/null & echo $! >> "$RT_DIR/bgpids" ;; esac; fi   # a child that outlives its command (git gc --auto)
@@ -321,6 +445,8 @@ NOTIFY = ('#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a"; done >> "$RT_DIR/no
           '[ -z "${RT_NOTICE_FAIL:-}" ] || exit 1\n')   # [fleet] notice_cmd's stand-in: logs each argument it gets, NUL-ended, so a newline inside one stays visible; the real command takes exactly one text argument
 # a stand-in for `salamander ci-runs`, the CI-run poller's reader: never the host's. One answer per call, the last repeated: RT_SALAMANDER, comma-separated, of
 # none (exit 3, no file; the default) | stale (4) | unreadable (5) | usage (2) | garbage (exit 0, not JSON) | empty (exit 0, no run of the sha listed) | running | queued | completed | mixed (one completed run of the sha and one running)
+# | superseded (an older run of the same workflow in progress, the newer one completed: the newer one alone counts)
+# | orphan (the runs of ORPHAN_PY, the gh stub's: what GitHub lists, a replaced orphan still queued) | orphandone (the same once the replacement's new runs completed)
 # RT_SALAMANDER_EVENT (push), RT_SALAMANDER_CONCLUSION (success) and RT_SALAMANDER_RUNID (7) shape the run it lists for the sha it was asked about.
 # The default answer (none) comes from a shell stub: the measured run on main (coverage in every Python child, under strace -f) made one Python start per wait
 # cycle of every scenario cost enough to push the suite past its 1800 s limit (main's run 9000001); the Python one below answers only a scenario that sets RT_SALAMANDER.
@@ -397,12 +523,19 @@ codes = {"none": (3, "no file"), "stale": (4, "file is older than --max-age"), "
 if v in codes: print(codes[v][1], file=sys.stderr); sys.exit(codes[v][0])
 if v == "garbage": print("this is not json"); sys.exit(0)
 sha = a[a.index("--sha") + 1] if "--sha" in a else ""
-def run(status, rid=None):
+def run(status, rid=None):   # RT_SALAMANDER_AGE = n: the run was created n seconds before now (its created_at; none when unset)
+    age = os.environ.get("RT_SALAMANDER_AGE")
     return {"id": int(rid or os.environ.get("RT_SALAMANDER_RUNID", "7")), "name": "tests", "head_sha": sha, "head_branch": "main", "event": os.environ.get("RT_SALAMANDER_EVENT", "push"),
-            "status": status, "conclusion": os.environ.get("RT_SALAMANDER_CONCLUSION", "success") if status == "completed" else None, "run_attempt": 1}
-runs = {"empty": [], "running": [run("in_progress")], "queued": [run("queued")], "completed": [run("completed")], "mixed": [run("completed", 3), run("in_progress")]}[v]
+            "status": status, "conclusion": os.environ.get("RT_SALAMANDER_CONCLUSION", "success") if status == "completed" else None, "run_attempt": 1,
+            **({"created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - int(age)))} if age else {})}
+@ORPHAN_PY@
+if v in ("orphan", "orphandone"):   # the gh stub's runs as the poller lists them (job-blind; a replaced orphan stays queued): orphandone = the new runs of the replacement completed, success
+    h0 = os.environ.get("RT_HEAD") or HEAD0
+    runs = [{"id": r["id"], "name": r.get("wf", "tests"), "head_sha": r.get("sha", h0), "head_branch": r.get("branch") or "agent/topic", "event": r.get("event", "pull_request"), "status": r.get("status", "queued"),
+             "conclusion": "success" if r.get("status") == "completed" else None, "created_at": iso(r["_t"]), "run_attempt": 1} for r in orphan_list(done=v == "orphandone") if r.get("sha", h0) == sha]
+else: runs = {"empty": [], "running": [run("in_progress")], "queued": [run("queued")], "completed": [run("completed")], "mixed": [run("completed", 3), run("in_progress")], "superseded": [run("in_progress", 3), run("completed")]}[v]
 print(json.dumps({"repo": "example-owner/stackshot", "updated": int(time.time()) - 5, "updated_iso": "2026-10-29T00:00:00Z", "runs": runs}, separators=(",", ":"))); sys.exit(0)
-'''
+'''.replace("@ORPHAN_PY@", ORPHAN_PY)
 # PATH without a real salamander (box-a has one in ~/.local/bin): for the scenario that has none on PATH at all
 CLEAN_PATH = os.pathsep.join(x for x in os.environ.get("PATH", "").split(os.pathsep) if not os.access(os.path.join(x or ".", "salamander"), os.X_OK))
 DEPLOY = ('#!/bin/sh\ntouch "$RT_DIR/deployed"\necho "${DEPLOY_TO:-}" > "$RT_DIR/deploy_to"\n'   # the commit release.sh pinned the deploy to
@@ -546,6 +679,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     if env.get("sysrun") in ("timeout", "kill") or env.get("warm_sysrun") in ("timeout", "kill"): (d / "bin/timeout").write_text(TIMEOUT_CUT); (d / "bin/timeout").chmod(0o755)
     if units is None and env.get("deploy_ssh"): (d / "bin/systemctl").write_text(SYSTEMCTL); (d / "bin/systemctl").chmod(0o755)   # a release with [release] deploy_ssh restarts the puller here: the stub answers, never the host's systemd (the other scenarios read the real one, as before)
     (d / "bin/ssh").write_text(SSH); (d / "bin/ssh").chmod(0o755)   # what [release] deploy_ssh runs (RT_DEPLOY_SSH)
+    if env.get("killtee"): shutil.copy(shutil.which("tee"), d / "bin/tee")   # RT_KILLTEE: the log's tee is the scenario's own copy of the real one, so the stub that ends it finds it by its executable, never by name
     (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
     real = env.pop("real_config", False)   # the real core/config.py and what it reads (see REAL_CONFIG_FILES), with a TOML file of this scenario's: [release] deploy_ssh = the deploy_ssh value, [hosts] lookup = where-is (a role's host)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise

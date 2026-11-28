@@ -350,6 +350,8 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
     try:
         mod = _item_read._model_of(item)
         shown_as = _shown_waiting_note(item, mod)
+        if mod.state == _model.WAITING and _model.server_end(item.get("metadata") or {}):
+            shown_as += f" (end date {_model.server_end(item.get('metadata') or {})} set by the server; its mover replaces it with the real day)"
         if short:
             return [_model.words(mod, _sr._session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
         extra = [x for x in (_watch.chases_line(item.get("metadata") or {}, _sr._session_label), _watch.woke_line(item.get("metadata") or {}, _sr._session_label)) if x and item.get("status") == "open"]

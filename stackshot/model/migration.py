@@ -421,18 +421,22 @@ EXPECTED_PLUS_DAYS = 2       # …or, for a wait on other items, the latest expe
 
 def default_end(env: Env, it: dict[str, Any], kind: str) -> tuple[str, str]:
     """(the default ask_by day, how it was chosen) for a wait that has no end. An item wait: the latest expected-by among the open items it waits after, plus two days, when that day is still
-    ahead; else, and for a relay or anchor wait, 14 days from the day of the pass. It is a backstop the owner replaces, never a promise."""
+    ahead; else, and for a relay or anchor wait, 14 days from the day of the pass. It is a backstop the owner replaces, never a promise. An expected-by that is no real day (2027-02-31),
+    or one so late that two days past it is no date (9999-12-31), is not read: it never stops the pass."""
     plain = env.today + dt.timedelta(days=DEFAULT_END_DAYS)
     if kind == "item":
         days = []
         for g in env.after_open(it):
             d = day_of(((env.items.get(g) or {}).get("metadata") or {}).get("expected_by"))
-            if d:
-                days.append(dt.date.fromisoformat(d))
+            try:
+                if d:
+                    days.append(dt.date.fromisoformat(d) + dt.timedelta(days=EXPECTED_PLUS_DAYS))
+            except (ValueError, OverflowError):
+                continue
         if days:
-            cand = max(days) + dt.timedelta(days=EXPECTED_PLUS_DAYS)
+            cand = max(days)
             if cand > env.today:
-                return cand.isoformat(), f"the latest expected-by of the items it waits after ({max(days).isoformat()}) plus {EXPECTED_PLUS_DAYS} days"
+                return cand.isoformat(), f"the latest expected-by of the items it waits after ({(cand - dt.timedelta(days=EXPECTED_PLUS_DAYS)).isoformat()}) plus {EXPECTED_PLUS_DAYS} days"
     return plain.isoformat(), f"{DEFAULT_END_DAYS} days from the pass"
 
 

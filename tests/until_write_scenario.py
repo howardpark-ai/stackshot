@@ -490,7 +490,8 @@ check("6 ...and neither pass wakes it", "woke" not in mt(610) and mt(610).get("w
 item(611, needs=[], ask_by=PAST6); item(618, needs=[])
 out6, plain6 = tried6(611, after=["a601"]), tried6(618, after=["a601"])
 watching_svc.watch_pass(); wakes_svc.wake_pass()
-check("6 an after link alone on such an item is judged as on an item with no date (the past ask_by is no end for it)", out6.startswith("REFUSED") and "has no end" in out6 and plain6.startswith("REFUSED") and "has no end" in plain6 and "woke" not in mt(611), (out6[-300:], plain6[-300:], mt(611)))
+check("6 an after link alone on such an item is refused for its missing end as before: the item holds an end field (the past ask_by), so the server makes no default end and nothing wakes it", out6.startswith("REFUSED") and "has no end" in out6 and "woke" not in mt(611) and not mt(611).get("until_server"), (out6[-300:], mt(611)))
+check("6 ...on an item that holds no date the same write takes the server's default end, marked", not plain6.startswith("REFUSED") and mt(618).get("until_server") and W.stored_until(mt(618)) == mt(618).get("until_server"), (plain6[-300:], mt(618)))
 item(612, needs=["external"], ask_by=w(3))
 out6 = tried6(612, wait_kind="relay", wait_event="the vendor's reply")
 check("6 an ask_by still ahead stays the wait's date", (W.stored_until(mt(612)) or mt(612).get("ask_by")) == w(3), (out6[-500:], mt(612)))
@@ -552,7 +553,7 @@ out6 = tried6(721, ask_by=w(3), needs=["external"], wait_event="the vendor's rep
 check("6 an ask_by that makes a relay wait on a clean item is taken as its end and stored as until", not out6.startswith("REFUSED") and not stuck6(721) and mt(721).get("until") == w(3) and not mt(721).get("ask_by"), (out6[-600:], mt(721)))
 item(722, needs=["external"], wait_event="the vendor's reply")
 out6 = tried6(722, until=w(4), wait_event="another reply")
-check("6 an until with no kind on a relay-like item that stored no ask_by is refused as before", out6.startswith("REFUSED") and "has no end" in out6, (out6[-600:], mt(722)))
+check("6 an until with no kind on a relay-like item that stored no ask_by is refused as before (a call that gives its own date gets no server day)", out6.startswith("REFUSED") and "has no end" in out6 and not mt(722).get("until_server"), (out6[-600:], mt(722)))
 _wait_fixes_svc._wait_alias_until = lambda: dt.date(2020, 1, 1)
 try:
     for n6, (label6, kw6) in enumerate(SHAPES6):

@@ -19,7 +19,7 @@ mistake is one fault in the words it has on main. Fixture data (English stand-in
   1  an update with several faults in the words of its fields (subject, description, next): one refusal that counts them on its first line, each fault with its own numbered line in the gates' order, nothing stored,
      the refusal counted in the call log under its first fault; the same call with the faults fixed goes through
   2  one fault: refused as it always was (the subject gate's, the goal gate's, the bare address's and the park's own text, no count and no list)
-  3  a fault in the words beside a fault of the item as the call would store it (a park that names nothing it waits for, a step rewritten with words added): both come back; the check that reads the step refused
+  3  a fault in the words beside a fault of the item as the call would store it (a wait_basis with no date to explain, a step rewritten with words added): both come back; the check that reads the step refused
      beside it is named as not made
   4  a check that reads what another fault leaves out is not made, and the refusal says so (the cap on how far out a wake may be, beside a said with a tag the rule does not know); a said list with two bad entries
      gives each fault its own line, named by its place
@@ -658,14 +658,14 @@ def part_form():
     res, made = upd(2, next=f"falcon-main: read {URL}")
     check("2 a bare address in next alone: the gate's own text", msg(res).startswith("Refused: next has a bare URL") and "problems in this call" not in msg(res), msg(res)[:200])
     res, made = upd(2, hold=True)
-    check("2 a park with nothing it waits for, alone: that refusal as it was, no count", msg(res).startswith("Refused: a park names what it waits for") and "problems in this call" not in msg(res) and unchanged(2, was), msg(res)[:200])
+    check("2 a park with nothing it waits for, alone: not refused, the server stores its default day and the item is waiting", not isinstance(res, ToolError) and rd(2)["metadata"].get("until_server") and rd(2)["metadata"].get("until"), (msg(res)[:200], rd(2)["metadata"]))
 
     # ================================================================ 3. a fault in the words beside a fault of the item as the call would store it
     item(3)
     was = rd(3)
-    res, made = upd(3, description=NOGOAL, hold=True)
+    res, made = upd(3, description=NOGOAL, wait_basis="the vendor ships on 2026-12-01")
     fl, skipped = parts(res)
-    check("3 a description with no goal beside a park that names nothing it waits for: both come back, one refusal", msg(res).startswith(HEAD.format(n=2)) and len(fl) == 2 and fl[0].startswith("the description must open with its goal") and fl[1].startswith("a park names what it waits for"), msg(res)[:300])
+    check("3 a description with no goal beside a wait_basis with no date to explain: both come back, one refusal", msg(res).startswith(HEAD.format(n=2)) and len(fl) == 2 and fl[0].startswith("the description must open with its goal") and "wait_basis" in fl[1], msg(res)[:300])
     check("3 …nothing was stored", unchanged(3, was), rd(3))
     item(4)
     res, made = upd(4, subject="no prefix at all", next="falcon-main: build it (in progress)\nfalcon-main: test it")
@@ -803,7 +803,7 @@ def part_form():
         ("update, a step marked dropped on a closed item", lambda: upd(47, dropped=[1])),
         ("update, a step reworded on a closed item", lambda: upd(47, reword={1: "falcon-main: build it another way"})),
         ("update, a step marked done beside a new next on a closed item", lambda: upd(47, next="falcon-main: build it again", done=[1])),
-        ("update, a wait_basis on a hold with no wake", lambda: upd(40, hold=True, wait_basis=f"the vendor ships {local_day(9)}")),
+        ("update, a wait_basis on a hold with no wake", lambda: upd(40, hold=True, wait_basis="the vendor ships when the part is in")),      # a basis that names no date: one that names a date ahead ends the park on it (close_wait_defaults F5)
         ("update, a hold with a wake on a closed item", lambda: upd(47, hold=True, wake=local_day(5))),
         ("create, a then over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), then=LONG8)),
         ("create, a goal over 300 characters beside a waits list with a valid until", lambda: create(waits=LIST2, until=local_day(5), goal=LONG8)),

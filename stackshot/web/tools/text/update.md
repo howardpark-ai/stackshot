@@ -11,7 +11,19 @@ A wrong `stall:` step is undone with update (mover, next, clear_needs); the whol
 A wait is one stored date, until, with wait_kind beside it when it stands on more than the date. An item with an until
 is waiting; the server clears both when the wait ends. wake and ask_by, and hold beside a date, are retired parameters: a call that passes
 one is refused, and the date goes in until. A wait_kind with no date is never refused: the server takes a date from the
-item's words, else a suggested one, else tomorrow, and says which. Every open item has a mover (the one party whose
+item's words, else a suggested one, else tomorrow, and says which; a park with a wait_kind and no date takes the same
+date, marked as set by the server. A wait this write would leave with no end day (an after link, a wait stored earlier,
+needs=external, a park, or a wait on a time with no date) is not refused either: the server stores its default backstop
+day, 14 days from today, marks it as set by the server and
+says so in the reply; a park sent with no date and a wait_basis that names a date ahead ends on that date instead (a
+basis that names none is refused as before). Its mover
+replaces that day with the real one (until). None of this while
+the item waits on {{OWNER}} in any form, as it stands or as the write leaves it (needs=decision or his name, an ask,
+options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open), nor when the
+item already holds an end in any field (an old ask_by included, past or ahead), nor beside a date of your own or "none"
+for one, nor in a write that clears or drops a wait or its end: the wait is judged as before, so one with no end is
+refused, and an end the item holds is never replaced. A list of waits still needs its until.
+The dates you give yourself keep the cap rules. Every open item has a mover (the one party whose
 move it is now: a session, {{OWNER}}, an outside party, or the item it waits `after`). An open item waits on its real
 dates only (until, due): no expected time is derived for any item, and a parked item waits until its date or its
 blocker closes, with no stale mark. A date a session sets runs at most {{CAP_DAYS}} days from the item's last move: a
@@ -130,7 +142,10 @@ if it has not ended is until, YYYY-MM-DD, tomorrow at the earliest: until="<day,
 
 ## param UNTIL
 The one date a wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a relay or event
-wait takes the day alone, YYYY-MM-DD: the day it comes back to someone). Alone it is a wait; a wait on your own item
+wait takes the day alone, YYYY-MM-DD: the day it comes back to someone. Left out, a wait_kind passed in the call takes the
+next day or the day the item's words give; a wait with no end and no wait_kind in the call (on an item, an anchor, a relay
+or event, a park) takes the server's backstop day, 14 days from today, and the reply says so; never while the item waits on
+{{OWNER}}). Alone it is a wait; a wait on your own item
 also needs wait_reason (at least {{WAIT_GUARD_REASON_MIN}} characters), a date more than {{CAP_DAYS}} days out needs a
 wait_basis, and a park (wait_kind="time") within the cap needs his recorded words. An item with an until is waiting
 (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's
@@ -255,8 +270,11 @@ Park his call instead, from a decision item or a doing item: needs=["<session>"]
 with its date YYYY-MM-DD>" and mover={{OWNER}}; the ask and options stay on the item, and at the date they come back to him: a decision item returns with its ask and options, a doing item with its ask if it had one. Without wait_kind an
 item with him as mover and a date is refused as having nothing for him to do. A park of {{CAP_DAYS}} days or less needs his recorded words (said=[Acked-by …], or his answer on the item); a longer one needs a wait_basis. {{OWNER}} parks on his word. A park always names what it
 waits for: {{OWNER}}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a
-pane recycle (recycle=true), or the end of a window the work itself needs; an unconditional or indefinite park is
-refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
+pane recycle (recycle=true), or the end of a window the work itself needs; a park with a date and none of these is
+refused. A park with no date is not refused: the server stores a backstop day 14 days out (with a wait_basis that names a
+date ahead, that date; with a wait_kind, that kind's date as above), marked as set by the server and said in the reply, and its
+mover replaces it with the real day; never while the item waits on {{OWNER}} in any form (the wait text above), so a park
+of his call always gives its date. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release or its
 queue, a run or subagent of yours): do not park it: its mover's park is refused while its subagent runs on it. A
 session parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window,
 a trial week, a timer it started): until=<when the window ends>, wait_kind="time", wait_basis="<what the window collects>

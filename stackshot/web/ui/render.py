@@ -2823,7 +2823,7 @@ class Board:
             reason = wbasis or (wwords.get("quote") or "")
             wtext = _ip.wait_what(w_, shown=shown, party=str(m.get("party") or ""), words=reason, mode=_ip.list_mode_words(mod))
             wlab = _ip.wait_end_label(w_) if (w_.until or w_.backstop) else _t("wait.end.until")
-            wend = (w_.until or w_.backstop or _ip.clean(m.get("wake"))) if _ip.wait_shows_end(w_) else ""      # a wait the fields end by a date (a relay's ask-by, an event's backstop), else the wake the item carries; none for a wait on the close of an item
+            wend = (w_.until or w_.backstop or _ip.clean(m.get("wake"))) if (_ip.wait_shows_end(w_) or _model.server_end(m)) else ""      # (the day the server stored when the call gave none is shown even on a wait on the close of an item) a wait the fields end by a date (a relay's ask-by, an event's backstop), else the wake the item carries; none for a wait on the close of an item
         post = w_.mover if (waiting and w_) else ""
         # ---- the History, split: what changed, and what people said
         evs, more = self.item_log(r)
@@ -2910,7 +2910,7 @@ class Board:
             ask_html = (ask_html[:-len('</div>')] + f'<b class="osub">{_t("home.options")}</b>' + ol + '</div>') if ask_html else f'<div class="iask"><b>{_t("home.options")}</b>{ol}</div>'
         cform = "" if his else self.answer_html(r, answer, comment_only=True)     # an item he does not move: the comment box takes the answer box's slot, open
         # ---- the wait and its chases
-        wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else None if not _ip.wait_shows_end(w_) else (_t("wait.label.end"), _t("item.no_end_date"))), post, who_html) if waiting and w_ else ""
+        wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else None if not (_ip.wait_shows_end(w_) or _model.server_end(m)) else (_t("wait.label.end"), _t("item.no_end_date"))), post, who_html) if waiting and w_ else ""
         # ---- the sidebar: mover, owner and creator first, then project, then, priority, wake, anchors, the GitHub issue (and the For you control)
         tk = proj_top(r) or pk                        # the project it shows is the top-level one; the link stays the page the item is filed on (pk), as the gbrain page link below does
         if pk in self.proj: prj = f'<a href="{e(under("/" + pk))}">{e(self.proj_label(tk))}</a>'
@@ -2987,6 +2987,7 @@ class Board:
         """The wait line and the chases of a waiting item: what it waits on in full (an anchor's link and event, the items it waits after and whether each is
         open, the party a relay waits on, a time's basis or his words), who watches, until when, who takes it after, and every chase logged on it."""
         e = esc; m = r["metadata"]; w = mod.wait; rows = []
+        by_server = bool(end) and bool(_model.server_end(m))      # the end is the day the server stored when the call gave none
         if w.kind == "list" and mod.waits:      # a wait on a list: each line with its tick, then the one backstop day (no chases: a list is never chased)
             rows = [(_t("wait.waits_on"), self.wait_list_html(r, mod, page=True)), (_t("wait.label.backstop"), e(self.wait_day(w.backstop)) + " " + _xp.explain("wait-backstop", _t("wait.list.help_backstop"), _t("wait.label.backstop"))), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')]
             rows += [(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else []
@@ -3000,7 +3001,7 @@ class Board:
         elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">{_t("wait.relay_note", who=e(_model.owner_display()))}</span>'
         else:
             what = e(wtext) if wtext and wtext != _t("wait.a_date") else _t("wait.a_date")
-        rows += [(_t("wait.waits_on"), what), (_t("wait.watched_by"), e(_ip.watched_by(w.kind)))] + ([(e(end[0]), e(end[1]))] if end else []) + [(_t("wait.picks_up"), f'<b>{who_html(post)}</b>')] + ([(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
+        rows += [(_t("wait.waits_on"), what), (_t("wait.watched_by"), e(_ip.watched_by(w.kind)))] + ([(e(end[0]), e(end[1]) + (f' <span class="dim">({e(_t("wait.end_by_server"))})</span>' if by_server else ""))] if end else []) + [(_t("wait.picks_up"), f'<b>{who_html(post)}</b>')] + ([(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
         wwords = _wt.words_of(m)
         if wwords.get("quote"):
             rows.append((_t("wait.his_words"), f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))

@@ -185,8 +185,9 @@ def _structural(item: dict[str, Any], row: dict[str, Any], item_anchors: list[di
 
 
 def _wake_words(meta: dict[str, Any]) -> str:
+    from stackshot.model import model as _model  # noqa: PLC0415
     from stackshot.waits import waiting as _wt  # noqa: PLC0415
-    return f"{'until' if _wt.stored_until(meta) else 'wake'} {_wt.wake_value(meta)}" if _wt.wake_value(meta) else "no wake date"
+    return (f"{'until' if _wt.stored_until(meta) else 'wake'} {_wt.wake_value(meta)}" + (f" {_model.SERVER_SET}" if _model.server_end(meta) else "")) if _wt.wake_value(meta) else "no wake date"
 
 
 def check_item(item: dict[str, Any], gid: str, items: dict[str, dict[str, Any]], anchors: dict[str, Any], now: float) -> list[tuple[str, str]]:

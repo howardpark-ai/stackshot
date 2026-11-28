@@ -291,7 +291,7 @@ The undo also works on its own, and which way it goes is read from the config on
 
 **With the config reverted** it goes in this order:
 
-1. it asks the checkout's code to load the config (`python -m stackshot.core.config check`). When the code cannot, it changes nothing, prints the command that shows why, and prints the same run with `--saved`;
+1. it asks the checkout's code to load the config (`python -m stackshot.core.config check`). When the code cannot, it changes nothing, prints the command that shows why, and prints the same run with `--saved` (where no `--snapshot` was given and there is no saved copy that such a run would take, with `--snapshot DIR` for you to fill in);
 2. it disables the splitter, which runs on for the moment;
 3. it removes the drop-ins of an earlier way back (that file only; other drop-ins of those units stay) and runs `./install.sh units`. When either fails, nothing is restarted and the drop-ins are put back;
 4. it stops the splitter; if the splitter still runs, nothing is restarted and the drop-ins are put back;

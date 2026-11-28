@@ -711,6 +711,7 @@ CATALOG: dict[str, str] = {
     "wait.label.ask_by": "Ask by",
     "wait.label.backstop": "Backstop",
     "wait.label.end": "End",
+    "wait.end_by_server": "end date set by the server; its mover replaces it with the real day",
 
     # ------------------------------------------------------------------ item page: the wait block
     "wait.item_none": "an item (none recorded)",
