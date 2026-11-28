@@ -55,6 +55,7 @@ from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _nee
 from stackshot.projects import pages as _pages
 from stackshot.service import anchor_offers as _anchor_offers
 from stackshot.service import checks as _checks
+from stackshot.service import cue_note as _cue_note
 from stackshot.service import gates as _gates
 from stackshot.service import handoff as _handoff
 from stackshot.service import proofs as _proofs
@@ -1896,6 +1897,11 @@ def update_unlocked(
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
         print(f"update: {gid} stale-wait notes not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         stale_wait = ""
+    try:
+        cue_note = _cue_note.note(gid, item_was, item)      # a relay or cue wait lifted: the mover's other open items on a relay wait or the same cue wording are named (read-only)
+    except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
+        print(f"update: {gid} cue note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        cue_note = ""
     dropped_note = ""
     if description.strip():
         try:
@@ -1923,7 +1929,7 @@ def update_unlocked(
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid, step=step_written,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + cue_note + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + owing + h.nag(debtor))
 
 

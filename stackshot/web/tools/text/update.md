@@ -50,6 +50,8 @@ what he runs goes in a next line that starts `{{OWNER}}:`; a step that asks him 
 output gives this one> says what it takes from it); a park is until=<date> with wait_kind="time" and either his recorded
 words for it (cap_ok) or a wait_basis (the end of a window the work needs, or a date past the cap); a wait on someone
 outside is wait_kind="relay" with wait_event=<who>, until=<the day to chase>, mover=<who takes it then> and needs=["external"].
+When a cue arrives (what the outside party relayed, or the event a wait_event names), list every item of the same mover on that cue first, then lift or rewrite each one in the same turn: a write that
+lifts or rewrites a relay or cue wait names, in its reply, the mover's other open items on a relay wait or on the same wait_event wording (at most 10, with a count of the rest), and lifts none of them itself.
 Work in hand needs next and its mover and carries no expected time (the item shows how long it has run); expected_by
 and expected_reason, which older calls pass, are accepted and not kept (the reply says so). Work in hand is not a
 wait: a wait (a date, a timer, someone else's step or release) is parked the turn it starts, with
