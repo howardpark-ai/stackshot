@@ -26,6 +26,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model import ask_leaves as _askl
 from stackshot.model import decision_gates as _dg
 from stackshot.model import holders as _holders
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
 from stackshot.model.bullet_text import _clip_line
@@ -296,9 +297,11 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
         if not now_ask or clear_ask:
             return ""
         who = sender.strip()      # a write with no sender is nobody's own word: it takes no ask off his move and gets no reminder
+        shared = _mgates.many()
+        asked = _mgates.asked_member(meta) if shared else OWNER      # whom the ask is asked of: only their notes may answer it
         if ask.strip():
-            notes = _askl.notes_since(meta, float(pre.get("look") or 0))
-            return _askl.check_line(OWNER, _askl.notes_line(notes, _clip_line, _ask_when)) if notes else ""
+            notes = _askl.notes_since(meta, float(pre.get("look") or 0), asked)
+            return _askl.check_line(asked, _askl.notes_line(notes, _clip_line, _ask_when)) if notes else ""
         authors = _ask_authors(item)
         mine = bool(who) and any(_handoff.ho_same(who, a) for a in authors)
         if _cfg.ask_leaves_on():
@@ -311,7 +314,8 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
             since = float(_askl.rec_of(meta).get("at") or pre.get("look") or 0)
             at = _askl.rec_of(meta).get("at")      # an ask with no record has no time to compare a drop with: nothing is said of its dependencies
             dropped = _askl.dropped_line(_askl.dropped_deps(now_ask, _ask_lookup, float(at)), _ask_when) if mine and at else ""
-            return _askl.reminder(_gh.shown(gid), OWNER, _askl.notes_line(_askl.notes_since(meta, since), _clip_line, _ask_when), dropped)
+            return _askl.reminder(_gh.shown(gid), asked, _askl.notes_line(_askl.notes_since(meta, since, asked), _clip_line, _ask_when), dropped,
+                                  **({"notes_head": f"{asked}'s notes since the ask"} if shared else {}))
     except Exception as e:  # noqa: BLE001  — the update is saved and published; the ask's lines are a stderr line when they fail
         print(f"ask: {gid} tail not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return ""

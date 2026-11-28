@@ -21,6 +21,7 @@ from stackshot.core import retired_inputs as _retired
 from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model_guards as _mg
 from stackshot.model import rebullet as _rebullet
 from stackshot.model import said as _said
@@ -98,7 +99,7 @@ def _owner_quote_on(item: dict[str, Any], said_l: list[dict[str, Any]], within_d
     ans_hits: list[tuple[str, str, str]] = []
     for a in answers if isinstance(answers, list) else []:
         try:
-            if isinstance(a, dict) and a.get("via") != "mail" and (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= clock - 0.5:      # a "mail" answer is the server settling a send step on a mail he sent: no word of his
+            if isinstance(a, dict) and a.get("via") != "mail" and _mgates.owners(a) and (a.get("text") or a.get("choice")) and float(a.get("ts") or 0) >= clock - 0.5:      # a "mail" answer is the server settling a send step on a mail he sent: no word of his; nor is another member's record the owner's word
                 via = "the board" if a.get("via") == "board" else "GitHub"
                 ans_hits.append(("a board answer", " ".join(str(a.get("text") or a.get("choice_line") or "").split()), f"{OWNER}'s {'answer' if a.get('kind') == 'decision' else 'note on his step' if a.get('kind') == 'step-reply' else 'comment'} on {via}"))
         except (TypeError, ValueError):
@@ -182,6 +183,8 @@ def _cap_words_entry(gid: str, spec: dict[str, Any], item: dict[str, Any]) -> tu
             continue
     if hit is None:
         raise ToolError(f"Refused: {_gh.shown(gid)} holds no answer or comment of his with {'ts ' + str(ts) if ts is not None else 'comment_id ' + str(cid)}; only entries in its metadata.answers count")
+    if not _mgates.owners(hit):
+        raise ToolError(f"Refused: that entry is {_members.recorded_by(hit)}'s, not {OWNER}'s own words")
     text = _wt.answer_words(hit)
     if hit.get("kind") not in ("decision", "comment") or hit.get("via") not in ("board", "github") or not text:
         raise ToolError(f"Refused: that entry is not {OWNER}'s own words with text (kind decision or comment, via board or github)")

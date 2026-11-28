@@ -31,6 +31,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import agentbox as _ab
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.core.instance import OWNER
 from stackshot.fleet.sessions_registry import _role_name, _session_label
 from stackshot.github import ghsync as _gh
@@ -667,7 +668,9 @@ def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
         verb = "answered" if rec.get("kind") == "decision" else "asked a question on" if rec.get("question") else "commented on"
         words = _save_hooks().answers_mod()._answer_words(rec, 200)
         where = "on GitHub" if rec.get("via") == "github" else "on the board"
-        return f"\n(note: {_model.owner_display(item.get('metadata'))} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since his answer, so what you hold of it may be out of date: read it again before you rely on it)"
+        shared = _mgates.many()
+        by = _members.recorded_by(rec) if shared else _model.owner_display(item.get("metadata"))      # several members: whose it is, which need not be the item's member
+        return f"\n(note: {by} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since {'that' if shared else 'his answer'}, so what you hold of it may be out of date: read it again before you rely on it)"
     except Exception as e:  # noqa: BLE001  — the write goes on; a note that fails is a stderr line
         print(f"update: {gid} answer note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""

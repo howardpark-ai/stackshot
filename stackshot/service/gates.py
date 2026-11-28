@@ -44,6 +44,7 @@ from stackshot.model import faults as _faults
 from stackshot.model import field_gates as _fg
 from stackshot.model.ids import _norm_id
 from stackshot.model import holders as _holders
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import migration as _mig
 from stackshot.model import model_guards as _mg
@@ -1044,7 +1045,8 @@ def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, s
 
 def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], ask_was: Any, gid: str, description: str | None = None) -> None:
     """One ask per decision: refuse a write that puts `decision` back into needs within an hour of the owner's last answer on the item
-    (a board answer or a comment of his: metadata.answers), unless the ask line changes in the same write. A decision already in needs is not put back.
+    (a board answer or a comment of his: metadata.answers), unless the ask line changes in the same write. A decision already in needs is not put back. With several members the answer that counts is
+    the one of the member this write asks (member_gates.asked_member): another member's comment keeps no ask from being put.
     A record the server marked as a question (model/note_read.py) is no call of his. Answered on the item (the description as this write leaves it, `description`, is another one than he asked under), it
     does not count. Not answered, and newer than anything he decided or commented, it refuses the put-back in words that say to answer it there. A question that stores no ask (a comment) was asked about the
     one the item holds, else the latest ask an earlier record of his stores, answered question or not."""
@@ -1053,13 +1055,14 @@ def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: l
     back = not was_on_call and "decision" in _needs_kinds(meta)
     if not back:
         return
+    asked = _mgates.asked_member(meta) if _mgates.many() else OWNER      # whom this write asks: only their answer is one to the decision
     written = item.get("description") if description is None else description
     last, prev = 0.0, str(ask_was or "")
     asked_at, asked_prev = 0.0, ""      # his newest question that the item has not answered
     said: list[tuple[float, dict[str, Any]]] = []
     for a in h.answers_of(item):
         try:
-            if a.get("text") or a.get("choice"):
+            if _mgates.said_by(a, asked) and (a.get("text") or a.get("choice")):
                 said.append((float(a.get("ts") or 0), a))
         except (TypeError, ValueError):
             continue
@@ -1081,13 +1084,14 @@ def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: l
     new = str(meta.get("ask") or "")
     if new and " ".join(new.split()) != " ".join(prev.split()):
         return
+    his, he = ("their", "they are") if _mgates.many() else ("his", "he is")      # beside a member's name, never "his"
     ago = f"{max(int(age // 60), 0)} min ago ({h.when_words(dt.datetime.fromtimestamp(last, h.zone()))})"
     if unanswered:
-        raise ToolError(f"Refused: {OWNER} asked a question on {_gh.shown(gid)} {ago} that the item does not answer yet (its description is the one the question was asked under), and this write puts the decision "
+        raise ToolError(f"Refused: {asked} asked a question on {_gh.shown(gid)} {ago} that the item does not answer yet (its description is the one the question was asked under), and this write puts the decision "
                         "back with the same ask line. Answer the question there first: rewrite the description with the answer, saying it answers the question (description=…), in this write or an earlier one. "
                         "The same ask line is then accepted at once")
-    raise ToolError(f"Refused: {OWNER} answered {_gh.shown(gid)} {ago}, and this write puts it back on his call "
-                    f"with the same ask line: one ask per decision, and he is not asked again within {int(_DECISION_AGAIN_S // 60)} minutes of his answer. Act on his answer (write the next step), or, "
+    raise ToolError(f"Refused: {asked} answered {_gh.shown(gid)} {ago}, and this write puts it back on {his} call "
+                    f"with the same ask line: one ask per decision, and {he} not asked again within {int(_DECISION_AGAIN_S // 60)} minutes of {his} answer. Act on {his} answer (write the next step), or, "
                     "if a new question is open, pass the new ask line in this same write (ask=…): a question that has changed is a new ask")
 
 

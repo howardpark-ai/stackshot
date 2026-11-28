@@ -292,7 +292,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     m = meta(2)
     check("…then member-b's Done ends the step and hands the item to its then", code(r) == "done" and "then=alpha-build" in r.headers["location"] and m.get("state") != "your-step" and m.get("mover") == "alpha-build" and "step" not in m, (code(r), m))
     check("…each line ticked by its own member", {(t.split(":")[0], by) for t, by in done(2)} == {("member-a", "member-a"), ("member-b", "member-b")} and not [x for x in lines(2, _steps.OPEN) if x.startswith("member-")], (done(2), lines(2, _steps.OPEN)))
-    check("…and the session is told it was member-b", any(t.startswith("[stackshot] member-b did his step") for t, _ in said(2)), said(2))
+    check("…and the session is told it was member-b", any(t.startswith("[stackshot] member-b did their step") for t, _ in said(2)), said(2))
 
     # ---- 3. Done by another member first
     before = rd(3)["state_updated"]
@@ -305,7 +305,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…the record names the step member-b did", m["answers"][-1]["by"] == "member-b" and m["answers"][-1]["step"].startswith("countersign BRAVOSEVEN"), m["answers"])
     check("…the sessions are told it stays with member-a", any(re.search(r"member-b did their step on .*: countersign BRAVOSEVEN.*\. The item stays with member-a", t) for t, _ in said(3)), said(3))
     got = answer_line(3)
-    check("…and so does the answer line after a Done that left the step", got[:2] == ["decision", "Done"] and got[2].startswith("member-b, on the step “countersign BRAVOSEVEN")
+    check("…and so does the answer line after a Done that left the step, as no decision of the one asked", got[:2] == ["comment", "Done"] and got[2].startswith("member-b, on the step “countersign BRAVOSEVEN")
           and got[2].endswith("” (after this answer the item was still on a step, with member-a)"), got)
     A, B = home(ADA), home(BEA)
     check("…member-a still has it with their Done; member-b reads it as member-a's, with member-a's line", 3 in ids(A, "your-move") and 'value="done"' in row(A, 3) and 3 in ids(B, "waiting-list") and 3 not in ids(B, "your-move") and "<form" not in row(B, 3) and "ALPHASEVEN" in row(B, 3), (ids(B, "your-move"), row(B, 3)))
@@ -321,7 +321,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     r = post(3, ADA, act="done")
     m = meta(3)
     check("…then member-a's Done ends the step and hands the item over", code(r) == "done" and m.get("state") != "your-step" and m.get("mover") == "alpha-build", (code(r), m))
-    check("…and the answer line of a finished step is the plain one", answer_line(3)[:3] == ["decision", "Done", ""], answer_line(3))
+    check("…and the answer line of a finished step is the plain one: who answered, and nothing of a step", answer_line(3)[:3] == ["decision", "Done", ""] and answer_line(3)[4:] == ["member-a"], answer_line(3))
 
     # ---- 4. notes
     told.clear()
@@ -344,14 +344,13 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("…the answer line carries their words after who and which step", answer_line(7)[2].startswith("member-b, on the step “countersign BRAVOSEVEN") and answer_line(7)[2].endswith("with member-a): ran it"), answer_line(7))
     plain = lambda rec: answer_handover._answer_line({"metadata": {"state": "your-step", "step": A_STEP, "answers": [{"ts": now, "via": "board", **rec}]}}).split("\t")[2]
     check("a comment's answer line and one of an answer that names no step are the plain ones",
-          plain({"kind": "comment", "step": A_STEP, "text": "a word"}) == "a word" and plain({"kind": "decision", "choice": "Ship it"}) == "", (plain({"kind": "comment", "step": A_STEP, "text": "a word"}), plain({"kind": "decision", "choice": "Ship it"})))
+          plain({"kind": "comment", "step": A_STEP, "text": "a word"}) == "member-a: a word" and plain({"kind": "decision", "choice": "Ship it", "by": "member-b"}) == "", (plain({"kind": "comment", "step": A_STEP, "text": "a word"}), plain({"kind": "decision", "choice": "Ship it"})))
     check("a note of member-b's that says done ticks their step alone", code(r) == "partdone" and done(7) and all(by == "member-b" for _, by in done(7)) and f"member-a: {A_STEP}" in lines(7, _steps.OPEN) and meta(7).get("mover") == "member-a", (code(r), done(7)))
 
     # ---- 5. who may not finish a step
+    was = rd(8)
     r = post(8, BEA, act="done")
-    m = meta(8)
-    check("a Done that arrives from a member with no part, on a step only one member has had, ends it for that member, under the sender's name",
-          code(r) == "done" and m.get("state") != "your-step" and m.get("mover") == "alpha-build" and m["answers"][-1]["by"] == "member-b" and done(8) == [(f"member-a: {A_STEP}", "member-b")], (code(r), done(8), m))
+    check("a Done that arrives from a member with no part, on a step only one member has had, writes nothing", code(r) == "nostep" and rd(8) == was, (code(r), done(8), meta(8)))
     r = post(23, BEA, act="done")
     check("a Done of member-b's own step beside a part that is the step field alone ticks theirs and leaves the step", code(r) == "partdone" and meta(23).get("state") == "your-step", (code(r), meta(23)))
     r = post(23, BEA, act="done")
@@ -361,11 +360,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     check("a ticked line of one member and a step field asked of another are two parts: the first member's Done writes nothing", code(r) == "nostep" and rd(24) == was, (code(r), meta(24)))
     was = rd(9)
     r = post(9, BEA, act="done")
-    check("a Done beside another member's question writes nothing: the question stands", code(r) == "nostep" and rd(9) == was and "decision" in meta(9)["needs"], (code(r), meta(9)))
+    check("a Done beside another member's question writes nothing: the question stands", code(r) == "askwaits" and rd(9) == was and "decision" in meta(9)["needs"], (code(r), meta(9)))
     was = rd(33)
     r = post(33, ADA, act="done")
     check("a Done of the member asked, from a page drawn before the question was added, writes nothing on a two-member step: nobody else is handed the question",
-          code(r) == "nostep" and rd(33) == was and meta(33)["mover"] == "member-a", (code(r), meta(33)))
+          code(r) == "askwaits" and rd(33) == was and meta(33)["mover"] == "member-a", (code(r), meta(33)))
     r = post(33, ADA, act="note", text="ran it")
     m = meta(33)
     check("…and their note is kept as a comment, the step and the question as they were", code(r) == "comment" and m["answers"][-1]["kind"] == "comment" and m["answers"][-1]["text"] == "ran it"
@@ -528,7 +527,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD, raise_server_exceptions=F
     fresh(64, step="sign WHY64")
     r = post(64, ADA, act="done")
     upd(64, step="sign WHY64 once more", mover="member-a")
-    check("an answer that ended its step reads plain when a later step is set", code(r) == "done" and meta(64).get("state") == "your-step" and answer_line(64)[2] == "", answer_line(64))
+    check("an answer that ended its step reads plain when a later step is set", code(r) == "done" and meta(64).get("state") == "your-step" and answer_line(64)[2] == "" and answer_line(64)[4:] == ["member-a"], answer_line(64))
 
     pair(67)
     post(67, BEA, act="done")

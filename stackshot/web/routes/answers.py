@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import Any
 
 from starlette.requests import Request
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, RedirectRespons
 from stackshot.core import members as _members
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model.ids import _GID, _ITEM_KEY, _item_gid
 from stackshot.service import foryou as _fy
@@ -99,20 +101,30 @@ async def item_answer(request: Request):
 _ANSWER_TOKENS_MAX = 200
 
 
+def _asks_them(gid: str, member: str) -> bool:
+    """Does the item `gid` ask `member` (member_gates.may_answer)? False for an item that cannot be read: its row keeps the link to the item page."""
+    try:
+        return _mgates.may_answer(_load(gid).get("metadata") or {}, member)
+    except Exception as e:  # noqa: BLE001
+        print(f"answer tokens: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return False
+
+
 async def answer_tokens(request: Request):
     """The tokens of the answer forms on the home page's Your move rows: {gid: token} for `?ids=g7,g8` (store ids, comma-separated), the same token the item
     page puts in its own form (_answer_token), so the answer goes to the one route above with the one set of gates. The board is a static page for every viewer and carries no token; its
     script asks here and shows a row's form only for the ids it gets. Behind the board's sign-in like the item page; {} for a request that is not signed in (a viewer let in by
-    [auth] ui_open, or with auth off, has no token anywhere, as on the item page); an id that names no item is left out."""
+    [auth] ui_open, or with auth off, has no token anywhere, as on the item page); an id that names no item is left out, and so, on a board of several members, is an item that does not ask the signed-in one."""
     g = _ui_guard(request)
     if g is not None:
         return g
     email = _signin._ui_email(request)
     out: dict[str, str] = {}
     if email:
+        member = _members.signed_in(email).name if _mgates.many() else ""      # several members: a row's form only for what is asked of this one
         for raw in str(request.query_params.get("ids") or "").split(",")[:_ANSWER_TOKENS_MAX]:
             gid = raw.strip()
-            if _GID.match(gid) and "#" not in gid and gid not in out and _path(gid).exists():
+            if _GID.match(gid) and "#" not in gid and gid not in out and _path(gid).exists() and (not member or _asks_them(gid, member)):
                 out[gid] = _answer_token(email, gid)
     return JSONResponse(out, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 

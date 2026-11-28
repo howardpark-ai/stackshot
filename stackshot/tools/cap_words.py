@@ -41,6 +41,8 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parents[2]
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core import members as _members  # noqa: E402
+from stackshot.model import member_gates as _mgates  # noqa: E402
 from stackshot.waits import waiting as _wt  # noqa: E402
 
 A_ITEMS: tuple[int, ...] = ()      # the items --a-item names (the owner's own park)
@@ -68,7 +70,7 @@ def attributed(a: Any) -> bool:
     """An entry the store attributes to the owner, by the same test the server applies when it records it (owner_words._record_cap_words): written by the
     board's answer form (via board) or by the reader of his hand-written GitHub comments (via github, with the comment's id and url), kind decision or
     comment, with text. No session's tool writes metadata.answers."""
-    if not isinstance(a, dict) or a.get("kind") not in ("decision", "comment") or a.get("via") not in ("board", "github"):
+    if not isinstance(a, dict) or a.get("kind") not in ("decision", "comment") or a.get("via") not in ("board", "github") or not _mgates.owners(a):
         return False
     if not str(a.get("text") or "").strip():
         return False
@@ -127,7 +129,7 @@ def plan_a(n: int, use: str, now: float) -> dict[str, Any]:
         L.append("  state history (store git): " + ("UNREADABLE: the history exists but could not be read, so no answer pairs unless given since the move that set the wake" if prior is _wt.UNREADABLE
                  else f"the state last changed at {local_time(prior)}, before the move that set the wake {m.get('wake')}" if prior is not None else "no earlier state change can be shown (24-hour lead rule)"))
     for a in entries:
-        mark = ("HIS" if attributed(a) else "not his") + (", reads as a park" if attributed(a) and _wt.park_words(a.get("text")) else "")
+        mark = ("HIS" if attributed(a) else "not his" if _mgates.owners(a) else f"{_members.recorded_by(a)}'s, not his") + (", reads as a park" if attributed(a) and _wt.park_words(a.get("text")) else "")
         if attributed(a) and _wt.park_words(a.get("text")):
             pairing[id(a)] = _wt.entry_pairs(item, a.get("ts"), now, prior)
             ok, why = pairing[id(a)]

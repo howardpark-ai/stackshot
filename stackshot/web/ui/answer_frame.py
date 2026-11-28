@@ -6,7 +6,7 @@ the stylesheet are the board's own (ui/render.py); this module adds the page aro
     sending      (the script's own, never drawn by the server) a send is under way
     answered     the recorded answer, nothing to press
     changed      the question is no longer the one this frame drew: a board link
-    closed       nothing to pick and no answer to show: a line and a board link (on his move, never an answer from before the frame was drawn, and none on a first load; a frame first drawn closed
+    closed       asked of another member, nothing to pick and no answer to show: a line and a board link (on his move, never an answer from before the frame was drawn, and none on a first load; a frame first drawn closed
                  reads no older answer later either)
     signed_out   no board session: a board link and no text of the item
 
@@ -17,7 +17,7 @@ import json
 from typing import Any
 
 from stackshot.core import config as _cfg, members as _members
-from stackshot.model import ask_leaves as _askl, option_labels as _ol
+from stackshot.model import ask_leaves as _askl, member_gates as _mgates, option_labels as _ol
 from stackshot.web import home as _home
 from stackshot.web.i18n import t as _t
 from stackshot.web.ui import render as _r
@@ -38,12 +38,12 @@ def last_answer(r: dict[str, Any]) -> dict[str, Any] | None:
     return next((a for a in reversed(_r.answers_of(r)) if a.get("kind") == "decision" and not a.get("step") and a.get("via") != "mail"), None)
 
 
-def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float | None) -> tuple[str, Any]:
+def state_of(board: Any, r: dict[str, Any], token: str, was: str, since: float | None, member: str = "") -> tuple[str, Any]:
     """The frame's state of the item for a signed-in member, with what it draws: ("open", (question html, form html)), ("answered", the answer record), ("changed", None) or ("closed", None).
     `was` is the reference (model/ask_ref.py) of the question this frame first drew ("" when it has drawn none) and `since` when it first drew that question, or, before it has drawn one, when
     a frame first drawn closed was drawn (epoch seconds): a refresh reads the state against them. `since` is None on a first load or a reload, and on the refresh of a frame first drawn
-    answered that has drawn no question."""
-    mine = _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE      # on his move, by the same rule as the home page's list (a closed item is in none)
+    answered that has drawn no question. `member` is the signed-in member of a board of several members: a question asked of another is not open to them."""
+    mine = _home.list_of(board.mod_of(r)) == _home.YOUR_MOVE and (not member or _mgates.may_answer(r.get("metadata") or {}, member))      # on his move, by the same rule as the home page's list (a closed item is in none)
     if mine:
         ask = board.home_ask(r, token)
         if ask and (_r.open_options(r) or _r.yesno_options(r)):      # with cards to pick from
@@ -104,7 +104,8 @@ def closed_body(href: str) -> str:
 def _notices() -> dict[str, list[str]]:
     """The notice of each code the answer path can say (the home page's wording where a code has one: the frame has no "below" either): {code: [class, text]}.
     A recorded answer says only that: the board's own line also says the item left his queue, which is not so while a step of his stays on it."""
-    return {code: [v[0], _t("frame.sent" if code == "decision" else v[-1])] for code, v in _r.Board._SENT_KEYS.items()}
+    codes = {**_r.Board._SENT_KEYS, **(_r.Board._SENT_SHARED if _mgates.many() else {})}
+    return {code: [v[0], _t("frame.sent" if code == "decision" else v[-1])] for code, v in codes.items()}
 
 
 def page(body: str, *, key: str, state: str, href: str, origins: list[str], lang: str, theme: str, drawn: float, ref: str = "", channel: str = "") -> str:

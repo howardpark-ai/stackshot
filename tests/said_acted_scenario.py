@@ -126,9 +126,9 @@ big.unlink()
 # ---- an acted entry is never his words or his decision
 ACT_TS = said.entry_ts(queued(13, 12))
 acted_rec = {"tag": "Done-by", "kind": "acted", "quote": "refund of 12 dollars", "session": SESS, "msg": uid(13), "ts": ACT_TS, "checked": True, "by": "home-agent"}
-check("owner_words_by (N4's words) does not read an acted entry", NR.owner_words_by({"said": [acted_rec]}, ACT_TS + 60) == "")
+check("owner_words_by (N4's words) does not read an acted entry", NR.owner_words_by({"said": [acted_rec]}, ACT_TS + 60, "Oliver") == "")
 check("…even one stored with a words tag beside kind acted: entries_of reads it as Done-by, kind acted",
-      said.entries_of({"said": [{**acted_rec, "tag": "Acked-by"}]})[0]["tag"] == "Done-by" and NR.owner_words_by({"said": [{**acted_rec, "tag": "Acked-by"}]}, ACT_TS + 60) == "")
+      said.entries_of({"said": [{**acted_rec, "tag": "Acked-by"}]})[0]["tag"] == "Done-by" and NR.owner_words_by({"said": [{**acted_rec, "tag": "Acked-by"}]}, ACT_TS + 60, "Oliver") == "")
 check("the server's decision words (a wake past the cap) are not satisfied by an acted entry", _owner_words._owner_words_on({"metadata": {}}, [{**acted_rec, "ts": time.time() - 60}], 30.0) == "")
 check("the server's close words are not satisfied by an acted entry", said._owner_words({"metadata": {"said": [acted_rec]}}) == "")
 

@@ -37,6 +37,7 @@ from stackshot.model import step_commands as _sc   # the step of a your-step ite
 from stackshot.model import step_howto as _howto   # the description's how-to bullets, drawn under his open step (step_howto.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
+from stackshot.model import member_gates as _mgates   # on a board of several members, whom an item asks: only they get its answer form (member_gates.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.waits import watchers as _wat   # the waits' watchers: the chases logged on a wait
@@ -2669,7 +2670,13 @@ class Board:
                   "nomover": ("warn", "sent.nomover"),
                   "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
     _SENT = {k: (v[0], *[_i18n.EN[x] for x in v[1:]]) for k, v in _SENT_KEYS.items()}      # the English view of the table above (what the tests read)
-    _SENT_SHARED = {"partdone": ("ok", "sent.partdone")}      # codes only a board of several members answers with, as above: left out of the home page's notices while the board has one member
+    _SENT_SHARED = {"partdone": ("ok", "sent.partdone"),      # codes only a board of several members answers with, as above: left out of the home page's notices while the board has one member
+                    "notyours": ("warn", "sent.notyours", "sent.notyours_home"),
+                    "askwaits": ("warn", "sent.askwaits", "sent.askwaits_home")}
+    @staticmethod
+    def words_key() -> str:
+        """The heading over the words behind a wake (waiting.words_of): `His words`; with several members one that claims nobody's, since the source beside the words names whose they are."""
+        return "wait.words_behind" if _mgates.many() else "wait.his_words"
     def sent_keys(self):
         """The ?sent= codes this board knows: _SENT_KEYS, and with several members the ones only such a board answers with."""
         return {**self._SENT_KEYS, **(self._SENT_SHARED if len(_members.members()) > 1 else {})}
@@ -2690,7 +2697,7 @@ class Board:
         lists them gets them, and one who lists options gets only those). Otherwise a text box with one Send, a comment. A plain form
         POST that the page's script (_ANSWER_JS) sends as a fetch, so the answer replaces the page in history; the form itself
         holds no script and works without it (the cards are radio inputs; Send is then always on). A picked card also sends what the note holds, as a note to the choice.
-        comment_only (an item he does not move, whose box takes the answer box's slot on the item model's page): the same form with the comment button alone."""
+        comment_only (an item he does not move, whose box takes the answer box's slot on the item model's page, and on a board of several members the box of a member the item does not ask): the same form with the comment button alone."""
         if not answer or r.get("status") == "completed": return ""
         e = esc
         if comment_only:
@@ -2915,7 +2922,8 @@ class Board:
             sb_html = f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
         others_draft = bool(member and _ip.step_block(r)) and member != _steps.member_for(m.get("step"), m)      # the draft of a step asked of another member is theirs to post
         draft_html = "" if sb_html or others_draft else self.draft_alone_html(r)      # a draft on an item that is not in the Your step block (stored before the step, or a step that is not his) is still on the page, under the state line
-        form = sb_html or (self.answer_html(r, answer) if his else "")
+        others = bool(member) and not _mgates.may_answer(m, member)      # the item asks another member: a note box, which answers nothing
+        form = sb_html or (self.answer_html(r, answer, comment_only=others) if his else "")
         if his and ol and "data-cards" not in form:   # no answer box with cards is drawn (signed out, or no token): the options are still the page's, as a list in the Ask block
             ask_html = (ask_html[:-len('</div>')] + f'<b class="osub">{_t("home.options")}</b>' + ol + '</div>') if ask_html else f'<div class="iask"><b>{_t("home.options")}</b>{ol}</div>'
         cform = "" if his else self.answer_html(r, answer, comment_only=True)     # an item he does not move: the comment box takes the answer box's slot, open
@@ -3014,7 +3022,7 @@ class Board:
         rows += [(_t("wait.waits_on"), what), (_t("wait.watched_by"), e(_ip.watched_by(w.kind)))] + ([(e(end[0]), e(end[1]) + (f' <span class="dim">({e(_t("wait.end_by_server"))})</span>' if by_server else ""))] if end else []) + [(_t("wait.picks_up"), f'<b>{who_html(post)}</b>')] + ([(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
         wwords = _wt.words_of(m)
         if wwords.get("quote"):
-            rows.append((_t("wait.his_words"), f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
+            rows.append((_t(self.words_key()), f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
         ch = _ip.chase_rows(m)
         if ch:
             def one(c):
@@ -3052,7 +3060,7 @@ class Board:
                 + grp((_t("more.due"), due_b), (_t("more.confirmed"), conf))
                 + (f'<dl class="sgrp">{wk}</dl>' if (wk := self.work_html(r)) else "")
                 + (f'<dl class="sgrp">{waits}</dl>' if waits else "")
-                + grp((_t("wait.waits_on"), wbasis), (_t("wait.his_words"), wwhy)))
+                + grp((_t("wait.waits_on"), wbasis), (_t(self.words_key()), wwhy)))
         return f'<details class="fold imore" data-fold="item.more"><summary><h3>{_t("item.more_details")}</h3></summary>{body}</details>' if body else ""
     def project_items(self, k):
         """The project page's Items section → (open count without the verifying ones, completed count, HTML, verifying count): the open items of the row and its sub-pages (the items sessions_html counts:
@@ -3827,14 +3835,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The home row's draft where no step block holds it (an ask's row, or a row with no step form): right under the detail, collapsed (draft_html)."""
         return self.draft_html(r, self.draft_label((r["metadata"] or {}).get("step"), open_ask(r)), home=True)
     def asks_other(self, r, member):
-        """True when the item's open ask is another member's (steps.member_for its Decide part): drawn for `member` on a board of several members, the question is not theirs to answer. False with no member."""
-        return bool(member and open_ask(r)) and member != _steps.member_for(_os.decide_of(open_ask(r)), r["metadata"])
+        """True when the item's open ask is another member's (member_gates.asked_member: the `<name>:` or `<name> to ...` opener of its Decide part, an alias too): drawn for `member` on a board of several members, the question is not theirs to answer. False with no member."""
+        return bool(member and open_ask(r)) and member != _mgates.asked_member(r["metadata"])
     def home_step(self, r, member=""):
         """(the step as the row shows it, its form) for a your-step item of the owner's with no ask: the step itself, then an optional note box with TWO buttons: Done (the main one: the step is finished, the item goes to its
         then-mover as after any Done, and a note written in the box goes along to it) and Send note (the step stays open, the note goes to the then-mover as his step-reply; greyed until the box has text), drawn hidden for the page
         script to show with a token, as the decision rows' forms are. The step is drawn as the item page's Your step block draws it (your_step_html): his open steps, numbered, each command with its Copy box. None for any other item.
-        Drawn for `member` on a board of several members: only for a member with a part in the step (steps.takes_part)."""
-        if open_ask(r) or not _ip.step_block(r) or (member and not _steps.takes_part(r["metadata"], member)): return None
+        Drawn for `member` on a board of several members: only for a member with a part in the step (steps.takes_part), and none while a question asked of another member stands beside it (member_gates.held_for)."""
+        if open_ask(r) or not _ip.step_block(r) or (member and (not _steps.takes_part(r["metadata"], member) or _mgates.held_for(r["metadata"]) not in ("", member))): return None
         form = (f'<form class="hanswer hstep" data-step method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
                 + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{esc(_t("home.step_note_aria"))}" placeholder="{esc(_t("home.step_note"))}"></textarea>', f'astep-{esc(r["gid"])}') +
                 f'<div class="abtns"><button type="submit" class="b main" name="act" value="done" disabled>{esc(_t("home.step_done"))}</button>'
@@ -3847,6 +3855,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         only when it gets one, so the static page carries no token; until then (and for a viewer who is not signed in) the row links the item page."""
         q = self.ask_question(r)
         if q is None: return None
+        return self.md_line(q, r["gid"]) + mockup_link(r, q), self.cards_form(r, token)       # the mockup a design decision is about, beside the question
+    def cards_form(self, r, token=""):
+        """The answer form of a row for an open decision (home_ask), and for a member's own question that stores options and no ask (home_row)."""
         stored = open_options(r)
         opts = _card_order(stored or yesno_options(r), _named_only(r))      # with no stored options, Yes and No
         cards = _cards_html(opts, _named_only(r)) if opts else ""
@@ -3855,7 +3866,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value="{esc(token)}"><input type="hidden" name="back" value="">{_ref_field(r)}{cards}'
                 + _abox(f'<textarea id="atext-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{hint}" placeholder="{hint}"></textarea>', f'atext-{esc(r["gid"])}') +
                 f'<div class="abtns{"-send" if cards else ""}">{send}</div><p class="isent warn aerr" role="alert" hidden></p></form>')
-        return self.md_line(q, r["gid"]) + mockup_link(r, q), form       # the mockup a design decision is about, beside the question
+        return form
     def ask_question(self, r):
         """The question of an open decision as a row words it (home_ask), None when the item carries none."""
         ask = open_ask(r)      # "" unless the item is open and needs a decision
@@ -3985,9 +3996,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         The card's left edge takes the list's color (Your move, On agent, Queued for release, Waiting).
         flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line. That page is drawn for no member:
         on a board of several members a step two members have had a part in (steps.several_hold) is not drawn there and has no form; the row links the item page, where each member has their own.
-        On a member's Home (self.viewer) a Waiting row may be another member's move (home.list_of): "<member> picks it up · on <member>'s move", the age in the slot, the question or the next step, and
-        nothing to answer or copy; and a row of a session that acts as a member ends its who line with "acts for <member>". A Your move row there draws the viewer's part alone: their next step (next_of), the
-        answer form only for a question asked of them, the step and its form only when they have a part in it (home_step), and the draft only on an item whose member they are."""
+        On a member's Home (self.viewer) a Waiting row may be another member's move (home.list_of): "<member> picks it up · on <member>'s move", or "waiting on <member>'s pick" when the row waits for a
+        question asked of a member who is not its mover; the age in the slot, the question or the next step, and nothing to answer or copy; and a row of a session that acts as a member ends its who line with "acts for <member>". A Your move row there draws the viewer's part alone: their next step (next_of), the
+        answer form only for a question asked of them (one stored as options with no ask draws its cards under their part of the step, else their next step, in place of the step's form), the step and its form only when they
+        have a part in it (home_step), and the draft only on an item whose member they are."""
         e = esc; m = r["metadata"]; gid = r["gid"]
         ts = _home.since(r, mod, same_ref)
         t0 = datetime.datetime.fromtimestamp(ts, self.now.tzinfo) if ts else None
@@ -4007,7 +4019,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             person = self.acts_for(mod.mover) if self.viewer else ""
             if person: who.append(f'<span class="dim">{_t("home.acts_for", name=e(person))}</span>')
         elif theirs:
-            who.append(_t("home.theirs", who=self.home_mover(mod.mover), name=e(_model.norm_who(mod.mover))))
+            pick = _mgates.pick_of(m)
+            if pick and not _model.names_member(mod.mover, pick): who.append(_t("home.waits_pick", name=e(pick)))      # the row waits for that member's pick, not for the mover
+            else: who.append(_t("home.theirs", who=self.home_mover(mod.mover), name=e(_model.norm_who(mod.mover))))
         elif which == _home.WAITING:
             who.append(self.wait_who(r, mod))
         if flags:
@@ -4020,7 +4034,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             notes.append(f'<div class="hnote">{_t("home.woke", what=e(wk["what"]), who=self.home_mover(str(wk.get("to") or mod.mover)))}</div>')
         mine = self.viewer if which == _home.YOUR_MOVE else ""      # a member's own row: their part of the item, never another member's
         ask = self.home_ask(r) if which == _home.YOUR_MOVE and not self.asks_other(r, mine) else None
-        stp = self.home_step(r, mine) if (which == _home.YOUR_MOVE and not ask) else None
+        pick = self.cards_form(r) if mine and not ask and _mgates.pick_of(m) == mine and open_options(r) else ""      # their question with options and no ask: the cards, in place of any step form
+        stp = self.home_step(r, mine) if (which == _home.YOUR_MOVE and not ask and not pick) else None
         own_draft = not mine or mine == _model.item_person(m).name
         dr = self.home_draft_html(r) if (which == _home.YOUR_MOVE and not stp and own_draft) else ""      # a step's draft is drawn inside its step, under the step's text (home_step); an ask's, or a row with no step form, right under the detail
         whose = mine or (_model.norm_who(mod.mover) if theirs else "")
@@ -4032,6 +4047,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             detail = f'<span class="hnext hq">{self.md_line(q, gid)}{mockup_link(r, q)}</span>' if q is not None else f'<span class="hnext">{nxt}</span>'
         elif which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
+        elif pick:
+            part = self.your_step_html(r, home=True, member=mine)      # their part of the step, which holds the item's draft
+            detail, actions = f'<span class="hnext">{part or nxt}</span>{"" if part else dr}', pick
         elif stp and flags and _steps.several_hold(m):      # a project page is no member's: it cannot draw, or finish, one member's part
             detail = f'<span class="hnext"><a href="{e(item_href(r))}">{e(_t("home.shared_step"))}</a></span>'
         elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its Done and Send note buttons

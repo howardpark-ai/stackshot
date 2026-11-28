@@ -20,6 +20,7 @@ from fastmcp.exceptions import ToolError
 from stackshot.core import members as _members
 from stackshot.core.instance import NAME, OWNER
 from stackshot.model import holders as _holders
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
@@ -47,21 +48,29 @@ def _answer_line(item: dict[str, Any]) -> str:
     metadata.answers is oldest first (as in the get tool); the line does not know which question it answers, so a caller files a new item
     for each question. On a board of several members, the text of an answer to a step that another member had a part in opens with who
     answered, which step, and whose step the item stayed on after it: one member's Done need not end the step (_share_step). That is read from
-    the answer's record (`left_with`), so it stays true of the answer when a later step is set."""
+    the answer's record (`left_with`), so it stays true of the answer when a later step is set. A comment's text opens with who wrote it too (`<name>: <text>`, the name alone when there is no text). A decision's text stays the words typed, so a reader of the parked question's answer takes them as before; who decided is a fifth field, after the time, on such a board.
+    There a decision that settles nothing for the one asked (member_gates.partial: another member's Done or note on a shared step) never takes the place of one, and when the line has to show it (the item
+    holds no decision that counts) its kind is comment."""
     ans = _hooks().answers_of(item)
     if not ans:
         return ""
-    a = next((x for x in reversed(ans) if x.get("kind") != "comment"), ans[-1])
+    a = next((x for x in reversed(ans) if x.get("kind") != "comment" and not _mgates.partial(x)), ans[-1])
     one = lambda v: " / ".join(" ".join(ln.split()) for ln in str(v or "").splitlines() if ln.strip())
     try:
         when = dt.datetime.fromtimestamp(float(a["ts"]), _hooks().zone()).isoformat(timespec="seconds")
     except (KeyError, TypeError, ValueError, OverflowError, OSError):
         when = ""
     text, step, held = one(a.get("text")), one(a.get("step")), one(a.get("left_with"))
+    comment = a.get("kind") == "comment" or _mgates.partial(a)
     if held:
         part = f"{_members.recorded_by(a)}, on the step “{step}” (after this answer the item was still on a step, with {held})"
         text = f"{part}: {text}" if text else part
-    return f"{'comment' if a.get('kind') == 'comment' else 'decision'}\t{one(a.get('choice'))}\t{text}\t{when}"
+    by = ""
+    if _mgates.many() and not held:
+        by = _members.recorded_by(a)
+        if comment:      # a comment is never read as an answer, so its words may open with the name
+            text, by = (f"{by}: {text}" if text else by), ""
+    return f"{'comment' if comment else 'decision'}\t{one(a.get('choice'))}\t{text}\t{when}" + (f"\t{by}" if by else "")
 
 
 def _client_answer(key: str) -> tuple[int, str, str]:
@@ -209,7 +218,8 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
     member (steps.member_for) stays theirs, and the answer's record names the step `member` finished. A step asked of `member` passes on: the member of the next open step is the mover, that step is the
     item's `step`, and the item stays in your-step; the server's step is made for them by the save (owner_steps.ensure) and the draft goes with the step it belonged to."""
     asked = _steps.member_for(meta.get("step"), meta)
-    if member != asked:      # the record names their own step, whatever the answer says about it
+    if member != asked:      # the record names their own step, whatever the answer says about it, and whose the item's step was
+        rec["asked"] = asked
         cl, _at, whose = _steps.member_rows(meta)
         own = next(x for x, who in zip(cl, whose) if x["status"] == _steps.OPEN and who == member)
         rec["step"] = _steps.strip_owner(_steps.first_line(own["text"]))
@@ -232,7 +242,7 @@ def _share_step(meta: dict[str, Any], rec: dict[str, Any], member: str, done: bo
 def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "", by: str = "", mark: dict[str, Any] | None = None, files: list[dict[str, Any]] | None = None) -> str:
     """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
     is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
-    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click). `by` is the person who wrote it (the first person when none is named): it is kept on the comment and is the save's author. `files` (service/memo_files.records) go with the comment and move from pending to the item once it is saved.
+    send of the same thing by the same person is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click). `by` is the person who wrote it (the first person when none is named): it is kept on the comment and is the save's author. `files` (service/memo_files.records) go with the comment and move from pending to the item once it is saved.
     → `code`, the notice the page shows (it says the note was kept). `mark`: what the caller read of the words and keeps on the record (a question's mark). The caller holds the item and answer locks."""
     now = time.time()
     meta = dict(item.get("metadata") or {})
@@ -242,10 +252,10 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
             return float(a.get("ts") or 0)
         except (TypeError, ValueError):      # a hand-edited record
             return 0.0
-    for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
-        if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
-            return code
     who = by or OWNER
+    for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
+        if isinstance(a, dict) and _mgates.said_by(a, who) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
+            return code
     rec: dict[str, Any] = _members.stamp({"ts": now, "kind": "comment", **(mark or {}), "text": text, "via": "board"}, who)      # `by` only when it is not the first person's (a record with none reads as the first person's)
     if files:
         rec["files"] = files

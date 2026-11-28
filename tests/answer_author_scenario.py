@@ -63,10 +63,10 @@ def item(i, status="open", **meta):
                                                      "metadata": {"owner": OWNER_S, "project": "projects/alpha", "next": "the next step", **meta}}))
 
 
-item(1, needs=["decision", "home-agent"], ask=ASK, options=OPTS)           # a decision, picked by the second person
+item(1, needs=["decision", "home-agent"], ask=ASK, options=OPTS, mover="Pat")      # a decision asked of the second person, picked by them
 item(2, needs=["decision"], ask=ASK, options=OPTS)                         # the same, picked by the first person
-item(3, state="your-step", step=STEP, needs=["home-agent"])                # a Done by the second person
-item(4, needs=["home-agent"], next="home-agent: confirm the runs are gone")      # a step the server makes for him, ticked by a note
+item(3, state="your-step", step=STEP, needs=["home-agent"], mover="Pat")   # a Done by the second person on their step
+item(4, needs=["home-agent"], next="home-agent: confirm the runs are gone")      # a step the server makes for the second person, ticked by their note
 item(5, status="completed", outcome="done", reason="it worked")           # a note on a closed item
 item(6, needs=["home-agent"])                                              # a pick on a question that changed, with a note
 item(7, needs=["home-agent"])                                              # a comment
@@ -157,10 +157,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("a Done by the second person: the answer has `by`, the checklist line it checked is done by him, the author is him, the item went on to its then-mover",
           r3.headers["location"].startswith("/items/a3?sent=donenote") and [(a["kind"], a["choice"], a.get("by")) for a in a3["metadata"]["answers"]] == [("decision", "Done", "Pat")]
           and done_by(3) == [("done", "Pat")] and a3["written_by"] == "Pat" and "step" not in a3["metadata"], (r3.headers.get("location"), a3["metadata"], done_by(3)))
-    _wt_update.stackshot_update("a4", sender="home-agent", step=STEP4, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do echo $id; done`")
-    check("setup: the server made his step on item 4 (owner_step)", rd(4)["metadata"].get("owner_step") == f"Oliver: {STEP4}", rd(4)["metadata"].get("owner_step"))
+    _wt_update.stackshot_update("a4", sender="home-agent", step=STEP4, mover="Pat", next="home-agent: confirm the runs are gone\nPat: `for id in 1 2; do echo $id; done`")
+    check("setup: the server made his step on item 4 (owner_step)", rd(4)["metadata"].get("owner_step") == f"Pat: {STEP4}", rd(4)["metadata"].get("owner_step"))
     r4 = pat(4, {"act": "note", "text": "tried it, it says forbidden"}); a4 = rd(4)
-    mine = [(x["status"], x["by"]) for x in steps_of(4) if x["text"].startswith(f"Oliver: {STEP4}")]
+    mine = [(x["status"], x["by"]) for x in steps_of(4) if x["text"].startswith(f"Pat: {STEP4}")]
     check("a note on his step by the second person: the answer has `by` (kind step-reply), the server's step is ticked by him, the author is him",
           r4.headers["location"].startswith("/items/a4?sent=stepreply") and [(a["kind"], a.get("by")) for a in a4["metadata"]["answers"]] == [("step-reply", "Pat")] and mine == [("done", "Pat")]
           and a4["written_by"] == "Pat", (r4.headers.get("location"), a4["metadata"].get("answers"), mine))

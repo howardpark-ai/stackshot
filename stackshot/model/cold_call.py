@@ -26,6 +26,7 @@ from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.waits import waiting as _wt
+from stackshot.model import member_gates as _mgates
 from stackshot.model.bullet_text import bullets   # a close's description as `- ` bullets, clipped by how it reads; shared with the question route
 
 ACTIONS = ("hand_to", "close", "ask_owner")
@@ -238,7 +239,7 @@ def build_backfill_message(shown: str, item: dict[str, Any], gh: dict[str, Any],
     """The back-fill call's message: the closed item as JSON (subject, goal, description, reason, next, the owner's answers on it, who closed it), GitHub's close facts (`gh`: state, state_reason,
     closed_at, closed_by; {} when the item has no issue or it could not be read) and the last comments on the issue (`comments`, oldest first)."""
     m = item.get("metadata") or {}
-    answers = [_clip(a.get("text") or a.get("choice") or "", 240) for a in (m.get("answers") or []) if isinstance(a, dict)]
+    answers = [_clip(a.get("text") or a.get("choice") or "", 240) for a in (m.get("answers") or []) if isinstance(a, dict) and _mgates.owners(a)]
     obj = {
         "item": shown, "subject": _clip(item.get("subject"), 200), "goal": _clip(m.get("goal"), 300), "description": _clip(item.get("description"), 1500),
         "reason_recorded": _clip(m.get("reason"), 300), "superseded_by_recorded": _clip(m.get("superseded_by"), 40), "next_when_closed": _clip(m.get("next"), 500),

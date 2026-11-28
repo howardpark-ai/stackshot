@@ -20,6 +20,7 @@ from stackshot.model.ids import _ITEM_KEY, _item_gid
 from stackshot.web import i18n as _i18n
 from stackshot.web.answers import _answer_token
 from stackshot.web.auth import signin as _signin
+from stackshot.web.board_home import viewer as _viewer
 from stackshot.web.routes.board_pages import site_file
 from stackshot.web.ui import under
 
@@ -57,7 +58,7 @@ def _draw(raw: str, email: str, lang: str, theme: str, origins: list[str], was: 
         if r is None:
             home = under("/")
             return frame.page(frame.closed_body(home), state="closed", href=home, **common), 404
-        state, what = frame.state_of(board, r, _answer_token(email, gid), was, _since(since))
+        state, what = frame.state_of(board, r, _answer_token(email, gid), was, _since(since), member=_viewer())
         return frame.page(frame.item_body(board, r, state, what), state=state, href=render.id_href(gid), ref=render.question_ref(r) if state == "open" else "", channel=gid, **common), 200
 
 

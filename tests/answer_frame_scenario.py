@@ -79,7 +79,7 @@ item("a", 12, answers=[{**OLD, "via": "mail"}, {"ts": now - 60, "kind": "comment
 ask_(13, answers=[OLD], until="2099-01-01")      # an ask stored after the last answer, not on his move
 item("a", 14, answers=[OLD], ask_left={"at": now - 100, "why": "t"})                       # an ask the server took off his move after the last answer
 item("a", 15, status="completed", outcome="done", reason="r", answers=[{**OLD, "choice": f"B · {EVIL}", "letter": "B", "choice_line": f"cl {EVIL}", "text": f"note {EVIL}\nsecond line", "ask": f"Decide: q {EVIL} · Recommend: yes"}])
-ask_(16)                                                                     # answered through the frame by the second member
+ask_(16, mover="Pat <b>")                                                    # asked of the second member, who answers it through the frame
 ask_(17)
 item("a", 18, status="completed", outcome="done", reason="r", needs=["decision"], ask=ASK, options=OPTS)      # closed with its question still stored
 item("g", 5, needs=["decision"], ask=ASK, options=OPTS)                      # an item addressed by its number
@@ -270,7 +270,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     uiprefs.set_lang(EMAIL, "en")
     _cfg.CFG["ui"].pop("locale_dir"); i18n._WARNED.clear(); i18n._LOADED.clear()
     msgs = json.loads(p.at["data-msgs"])
-    check("the notices are the board's own, the home page's wording where it has one", set(msgs) == set(ui_render.Board._SENT_KEYS) and msgs["stale"] == ["warn", i18n.EN["sent.stale_home"]] and msgs["comment"] == ["ok", i18n.EN["sent.comment"]], msgs)
+    check("the notices are the board's own, the home page's wording where it has one", set(msgs) == set(ui_render.Board._SENT_KEYS) | set(ui_render.Board._SENT_SHARED) and msgs["stale"] == ["warn", i18n.EN["sent.stale_home"]] and msgs["comment"] == ["ok", i18n.EN["sent.comment"]], msgs)
     check("…but a recorded answer says only that, and no notice says the item left his queue", msgs["decision"] == ["ok", i18n.EN["frame.sent"]] and not any("queue" in t for _, t in msgs.values()), msgs)
 
     # ---- 6. no board session
@@ -278,7 +278,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     real_board, real_gid = ui_render.Board, _ids._item_gid
     from stackshot.web.routes import answer_frame as rt_frame
     class NoRead:
-        _SENT_KEYS = real_board._SENT_KEYS; _css = staticmethod(real_board._css)
+        _SENT_KEYS = real_board._SENT_KEYS; _SENT_SHARED = real_board._SENT_SHARED; _css = staticmethod(real_board._css)
         def __init__(self, *a): _bad_reads.append(a); raise AssertionError("a signed-out frame read the store")
     real_route_gid = rt_frame._item_gid
     ui_render.Board = NoRead; rt_frame._item_gid = lambda raw: _bad_reads.append(raw) or ""

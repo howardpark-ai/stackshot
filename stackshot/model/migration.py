@@ -36,6 +36,7 @@ from stackshot.anchors import anchor_scope as _ascope
 from stackshot.model import cold_call as _cold
 from stackshot.core import config as _cfg
 from stackshot.router import routing as _routing
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.fleet import sessions_registry as _sr
@@ -336,7 +337,7 @@ def park_quote(item: dict[str, Any], now: float) -> dict[str, Any] | None:
     m = item.get("metadata") or {}
     best = None
     for a in m.get("answers") or []:
-        if not isinstance(a, dict) or a.get("kind") not in ("decision", "comment") or a.get("via") not in ("board", "github"):
+        if not isinstance(a, dict) or a.get("kind") not in ("decision", "comment") or a.get("via") not in ("board", "github") or not _mgates.owners(a):
             continue
         text = _wt.answer_words(a)
         if not text or (a.get("via") == "github" and (a.get("comment_id") is None or not clean(a.get("url")))):
@@ -799,7 +800,7 @@ _DONE_LINE = re.compile(r"\bdone when\b[^.\n]*[.\n]?", re.I)
 def record_text(it: dict[str, Any]) -> str:
     """What the closed item's own record says about its end: the reason it stored, its last next line, his answers on it, and its description without the done-line."""
     m = it.get("metadata") or {}
-    answers = [clean(a.get("text") or a.get("choice")) for a in (m.get("answers") or []) if isinstance(a, dict)]
+    answers = [clean(a.get("text") or a.get("choice")) for a in (m.get("answers") or []) if isinstance(a, dict) and _mgates.owners(a)]
     return _DONE_LINE.sub(" ", " \n".join([clean(m.get("reason")), clean(m.get("next")), *answers, str(it.get("description") or "")]))
 
 
