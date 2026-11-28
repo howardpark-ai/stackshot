@@ -336,8 +336,16 @@ def _audit_main(env: Any, project: str) -> str:
         return ""
 
 
+def _is_front(env: Any, name: str, project: str) -> bool:
+    """Is `name` a front agent of `project` for `env`? An environment with no such reader counts as front, as the text read before."""
+    try:
+        return bool(env.is_front(name, project))
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def mover_no_session_front(env: Any, project: str, mover: str) -> str:
-    """The project's front agent (its -main agent, from its page) that an item whose mover is no session is set to, "" when it cannot be named or is the mover itself."""
+    """The agent (its -main agent, from its page; the lead of a project with a background agent and no front) that an item whose mover is no session is set to, "" when it cannot be named or is the mover itself."""
     try:
         main = str(env.main_named(project) or "").strip()
     except Exception:  # noqa: BLE001  (an environment that cannot name it: the finding asks for a live session instead)
@@ -569,8 +577,9 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         if check_mover_no_session(mover, names):
             proj = str(meta.get("project") or "")
             front = mover_no_session_front(env, proj, mover)
+            kind_of = "front agent" if front and _is_front(env, front, proj) else "lead"      # a project with no front agent names its background lead: not a front agent
             add(gid, meta, mover, "mover-no-session", mover_no_session_detail(mover, last), to=front or _audit_main(env, proj),
-                fix=f"set the mover to {front}, the project's front agent" if front else "name a live session as the mover (the project's front agent cannot be named)")
+                fix=f"set the mover to {front}, the project's {kind_of}" if front else "name a live session as the mover (the project's front agent cannot be named)")
         for kind, detail in _br.check_item(it, gid, items, anchors, now):
             if kind in FILING_KINDS:
                 add(gid, meta, mover, "board checks", f"{kind}: {detail}")

@@ -52,7 +52,9 @@ ALPHA_AGENTS = {"work-osprey-main": "Oliver's point of contact", "work-osprey-x"
     # a project with no agents at all: only its keeper
     "projects/delta": page("Delta", "work-delta"),
     # a page with no agent of its own, served by its hub's -main agent
-    "projects/epsilon": page("Epsilon", "work-epsilon", hub="projects/gamma")}}))
+    "projects/epsilon": page("Epsilon", "work-epsilon", hub="projects/gamma"),
+    # a project with a background agent that is no builder (its mandate has no build word) and no front agent
+    "projects/theta": page("Theta", "work-theta", agents={"work-theta-docs": "writes the chapters"}, back_agents={"work-theta-docs": "writes the chapters"})}}))
 FM = "---\ntitle: Alpha\ntype: project\n---\n"
 def alpha_page(vendor="- Vendor: the call is open, waiting on the quote."):
     return (FM + "# Alpha\n\n## Current state\n\n" + vendor + "\n- Docs: the draft is with Dana.\n- Docs: the draft is with Dana, second reading.\n\n"
@@ -292,6 +294,24 @@ route_case("a page that names a front agent", "projects/alpha/ops", "work-osprey
 route_case("a page whose agent is not a live session: the -main agent", "projects/alpha/old", "work-osprey-main", True)
 route_case("a page with no agent: the -main agent", "projects/alpha", "work-osprey-main", True)
 route_case("a page with no agent of its own: its hub's -main agent", "projects/epsilon", "work-gamma-main", True, moves="work-epsilon")
+# a project whose page lists only a background agent that is no builder: that agent keeps the page, and the ruling says so (it said "the builder"); a project with a front agent is as before; a retired lead falls to the -main agent
+p, _io, _l = route_case("a project with a background agent and no front: its lead keeps the page", "projects/theta", "work-theta-docs", False, moves="work-theta")
+_n = next((x for x in routing.read("projects/theta") if x["id"] == re.search(r"notice ([0-9a-f]{6})", p[0][1]).group(1)), {})
+check("…the ruling names the project's background agent, not a builder", "the project's background agent" in str(_n.get("reason")) and "builder" not in str(_n.get("reason")), _n)
+route_case("a project with a front agent keeps the -main agent, builder or not", "projects/alpha", "work-osprey-main", True)
+from stackshot.anchors import anchors as _anc
+_real_sr = _anc.session_roles
+_anc.session_roles = lambda *a, **k: {n: ({**r, "retired": True} if n == "work-theta-docs" else r) for n, r in _real_sr(*a, **k).items()}
+try:
+    _main_t = pdebt_svc._hooks().main_agent("projects/theta")
+    reset(); rcfg(page_debt=True, page_debt_shadow=False)
+    owe("projects/theta", A, "a1", "changed (description)", moves="work-theta"); pdebt_svc._pilot_fallback_tick(); time.sleep(0.4)
+    io = FakeIO(**{"projects/theta": alpha_page()}); fake("good", CANNOT); n0 = len(pushes())
+    out = pdebt_svc.page_debt_pass(now=DAY(9, 46), io=io); time.sleep(0.4); last = dlog()[-1]
+    check("a retired lead is skipped: no lead, and the debt goes where it went before the change (here nobody: no -main agent exists), never to the retired agent",
+          _anc.background_lead("projects/theta") == "" and last["to"] == _main_t != "work-theta-docs" and not any(m[0] == "work-theta-docs" for m in pushes()[n0:]), (_anc.background_lead("projects/theta"), _main_t, last, pushes()[n0:]))
+finally:
+    _anc.session_roles = _real_sr
 # no agent on the page, none on a hub, and no general -main agent on any page: nobody can take the debts; they stay moved for the next audit run's call, and no keeper is told
 reset(); rcfg(page_debt=True, page_debt_shadow=False)
 owe("projects/delta", A, "a1", "changed (description)", moves="work-delta"); pdebt_svc._pilot_fallback_tick(); time.sleep(0.4)

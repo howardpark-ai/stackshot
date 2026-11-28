@@ -1190,6 +1190,36 @@ try:
           benv.main_of("projects/theta") == "theta-docs" and benv.main_named("projects/theta") == "theta-docs" and benv.chase_of("projects/theta") == ("theta-docs", False)
           and benv.main_of("projects/delta") == "delta-main" and benv.chase_of("projects/delta")[1] is True,
           (benv.main_of("projects/theta"), benv.main_named("projects/theta"), benv.chase_of("projects/theta"), benv.chase_of("projects/delta")))
+    # a message marked [for <owner>] asks something only the owner can take: it never goes to a background lead, but to the general front/main agent (the pick before the lead existed)
+    gen = benv.owner_main_of("projects/theta")
+    check("owner_main_of: a background-only project's marked recipient is the general -main agent, not its lead; main_of (the chores) is the lead", gen and gen != "theta-docs" and benv.main_of("projects/theta") == "theta-docs", (gen, benv.main_of("projects/theta")))
+    check("recipient(): the owner's own tell on a background-only project goes to the general -main agent, marked (it went to the lead, marked); with no project it is the same",
+          AR.recipient("Oliver", "projects/theta", benv, "Oliver") == (gen, True) and AR.recipient("Oliver", "projects/theta", benv, "-") == (gen, True) and AR.recipient("Oliver", "projects/delta", benv, "Oliver") == ("delta-main", True), (AR.recipient("Oliver", "projects/theta", benv, "Oliver"), gen))
+    def fnd(**kw): return {"id": f"board#{fid(90)}", "project": "projects/theta", "owner": "home-agent", "mover": "home-agent", "category": "stale", "detail": "past its wake", "fix": "move the wake", "tries": 3, **kw}
+    def deliver_to(failing):
+        def d(to, text, fyi=False):
+            sent.append((to, text, fyi)); return (False, "[500] boom") if to == failing else (True, "[200] ok")
+        return d
+    sent.clear(); lv2 = env(sessions=lambda: ({"theta-docs", "delta-main"}, set()), registry=lambda: BREG, deliver=deliver_to(""))
+    lv2.fallback = None; lv2.builder = None; lv2.front_only_of = None
+    AR.deliver_findings(lv2, [fnd(escalate=2)], "Board audit 2099-03-03")
+    check("level 2 of a finding on a background-only project: the general -main agent hears of it, marked for the owner, not the lead", [(to, t.splitlines()[0]) for to, t, fy in sent] == [(gen, "[for Oliver]")], sent)
+    sent.clear(); lv1 = env(sessions=lambda: ({"theta-docs", "delta-main"}, set()), registry=lambda: BREG, deliver=deliver_to(""))
+    lv1.fallback = None; lv1.builder = None; lv1.front_only_of = None
+    AR.deliver_findings(lv1, [fnd(escalate=1)], "Board audit 2099-03-03")
+    check("the chase (level 1) still goes to the lead, unmarked", [(to, t.startswith("[for")) for to, t, fy in sent] == [("theta-docs", False)], sent)
+    check("chase_to: a lead that is the mover is not told to chase itself: the page key, unmarked; another mover's chase goes to the lead, unmarked", AR.chase_to(benv, "projects/theta", "theta-docs") == ("projects/theta", False) and AR.chase_to(benv, "projects/theta", "home-agent") == ("theta-docs", False), (AR.chase_to(benv, "projects/theta", "theta-docs"), AR.chase_to(benv, "projects/theta", "home-agent")))
+    sent.clear(); fb_env = env(sessions=lambda: ({"theta-docs", "delta-main"}, set()), registry=lambda: BREG, deliver=deliver_to("home-agent"))
+    fb_env.fallback = None; fb_env.builder = None; fb_env.front_only_of = None
+    AR.deliver_findings(fb_env, [fnd()], "Board audit 2099-03-03")
+    check("a mover that cannot be reached: the fallback goes to the general -main agent, marked for the owner, not to the background lead", [(to, t.startswith("[for Oliver]")) for to, t, fy in sent if to != "home-agent"] == [(gen, True)], sent)
+    # a retired lead is skipped (the role map says so, as recipient() and quiet_target read it): chores go where they went before the lead existed
+    ROLES["theta-docs"] = {"role": "background", "retired": True}
+    try:
+        check("a retired lead: main_of, main_named and the chase fall to the pick before the lead existed (main_named "" here: no -main agent on any page), never the retired agent",
+              benv.main_of("projects/theta") == gen and benv.main_named("projects/theta") != "theta-docs" and benv.chase_of("projects/theta")[0] != "theta-docs", (benv.main_of("projects/theta"), benv.main_named("projects/theta"), benv.chase_of("projects/theta")))
+    finally:
+        ROLES.pop("theta-docs", None)
 finally:
     _anc.registry = _real_registry
     ROLES.pop("falcon-main", None)

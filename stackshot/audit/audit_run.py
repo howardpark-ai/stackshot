@@ -255,12 +255,27 @@ class Env:
         except Exception:  # noqa: BLE001
             return True
 
-    def main_of(self, project: str) -> str:
+    def _lead(self, project: str) -> str:
+        """The lead of a project with a background agent and no front (anchors.background_lead), a retired one skipped as the role map has it; "" for any other project, and for an environment that names the -main agent itself (`fallback`): its answer stands as given."""
+        if self.fallback:
+            return ""
+        from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+        return _anc.background_lead(project, self.registry() if self.registry else None, retired=lambda n: bool((self.role_map().get(n) or {}).get("retired")))
+
+    def owner_main_of(self, project: str) -> str:
+        """The -main agent a message marked `[for <owner>]` goes to (anchors.fallback_main: its page's, its hub's, else the scope's general one), [audit] main when none: a front agent, never a background lead."""
         try:
             if self.fallback:
                 return self.fallback(project) or _cfg.audit_main()
             from stackshot.anchors import anchors as _anc  # noqa: PLC0415
-            return _anc.chore_main(project) or _cfg.audit_main()
+            return _anc.fallback_main(project) or _cfg.audit_main()
+        except Exception:  # noqa: BLE001
+            return _cfg.audit_main()
+
+    def main_of(self, project: str) -> str:
+        """Where a chore that asks nothing of the owner goes: the project's background lead (anchors.background_lead), else `owner_main_of`."""
+        try:
+            return self._lead(project) or self.owner_main_of(project)
         except Exception:  # noqa: BLE001
             return _cfg.audit_main()
 
@@ -284,33 +299,32 @@ class Env:
         return _anc.front_only(project, self.registry() if self.registry else None)
 
     def main_named(self, project: str) -> str:
-        """The project's -main agent (its page's, its hub's, else the scope's general one), "" when none can be named; `main_of` falls to [audit] main instead, which is no agent of the project."""
+        """The project's chore agent: its background lead, else its -main agent (its page's, its hub's, else the scope's general one), "" when none can be named; `main_of` falls to [audit] main instead, which is no agent of the project."""
         try:
+            lead = self._lead(project)
+            if lead:
+                return lead
             if self.fallback:
                 return str(self.fallback(project) or "").strip()
             from stackshot.anchors import anchors as _anc  # noqa: PLC0415
-            return str(_anc.chore_main(project, self.registry() if self.registry else None) or "").strip()
+            return str(_anc.fallback_main(project, self.registry() if self.registry else None) or "").strip()
         except Exception:  # noqa: BLE001
             return ""
 
-    def is_background_lead(self, project: str, name: str) -> bool:
-        """Is `name` the lead of a project with a background agent and no front (anchors.background_lead)? Not for an environment that names the -main agent itself (`fallback`): its answer stands as given."""
-        if self.fallback:
-            return False
-        from stackshot.anchors import anchors as _anc  # noqa: PLC0415
-        return bool(name) and _anc.background_lead(project, self.registry() if self.registry else None) == name
-
     def chase_of(self, project: str) -> tuple[str, bool]:
         """(who is told a finding its mover did not answer, and the unmoved digest; whether that session is a front agent, so the message is marked `[for <owner>]`). A front-only project (anchors.front_only: no
-        builder) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
+        builder) has no builder to chase: its background lead (unmarked) when it has one, else its -main agent (marked). Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
         named (said once on stderr), a project with no key, and a project whose registry cannot be read."""
         proj = str(project or "").strip()
         if proj:
             try:
                 if self.is_front_only(proj):
+                    lead = self._lead(proj)
+                    if lead:
+                        return lead, False
                     main = self.main_named(proj)
                     if main:
-                        return main, not self.is_background_lead(proj, main)
+                        return main, True
                     if proj not in self._told:
                         self._told.add(proj)
                         print(f"audit run: {proj} is front-only but names no -main agent; its unmoved findings go to {_cfg.audit_builder()}", file=sys.stderr, flush=True)
@@ -762,13 +776,13 @@ def recipient(who: str, project: str, env: Env, mover: str = "") -> tuple[str, b
     w = str(who or "").strip()
     if _model.is_owner(w):
         if person_moves(w, mover):
-            return env.main_of(project), True
+            return env.owner_main_of(project), True
         w = _mover_name(mover)
     r = env.role_map().get(w) or {}
     if not _no_session(w) and not r.get("retired") and r.get("role") not in FRONT_ROLES:
         return w, False
     if not str(project or "").strip():
-        return env.main_of(project), True
+        return env.owner_main_of(project), True
     return page_key(project), False
 
 
@@ -1163,7 +1177,7 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str, items: d
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
         proj = str(f.get("project") or "")
         to0, front0 = recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")
-        main = env.main_of(proj)
+        main = env.owner_main_of(proj)
         if front0 or not to0 or to0 == page_key(proj) or not main or _norm_name(to0) == _norm_name(main) or _norm_name(env.chase_of(proj)[0]) == _norm_name(main):
             f["lvl"] = 2
             reached_fs.append(f)       # its first recipient was not a builder (a front agent's or a retired mover's finding went to the builder at level 1, by design, and ends there), or -main is the builder: nobody is left to tell, the finding goes quiet
@@ -1224,7 +1238,7 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str, items: d
                     direct.setdefault(page_key(proj), []).append(ln)
                     where.append(("page", page_key(proj)))
                     continue
-                m = env.main_of(proj)
+                m = env.owner_main_of(proj)      # marked for the owner: a front agent, never a background lead
                 if m and m != to:
                     fb.setdefault(m, []).append(ln)
                     where.append(("main", m))

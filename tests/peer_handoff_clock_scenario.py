@@ -195,7 +195,7 @@ check("1 …and nothing goes down the ladder before the next take minutes", tick
 done = tick(d1b + 11 * MIN, 1); drain()
 mp = main_recovery_pushes("a1")
 check("1 after another take minutes the last rung asks the project's -main agent, once, with no owner mark, naming the item and the quiet new mover", done == ["a1"] and len(mp) == 1 and mp[0][1].startswith("[stackshot] a1 ") and f"[for {OWN}]" not in mp[0][1]
-      and "home-peer2" in mp[0][1] and bool(ho(1).get("recovery_at")) and ho(1).get("recovery_by") == "the project's -main agent", (done, mp, ho(1)))
+      and "home-peer2" in mp[0][1] and bool(ho(1).get("recovery_at")) and ho(1).get("recovery_by") == "the project's lead", (done, mp, ho(1)))
 check("1 …and says what was tried (the notice and one reminder), not a fresh session's call and the sender, and does not call the -main agent the hander", "What the ladder tried: the hand-off notice went to home-peer2 and, with no work started after 10 min, one reminder." in mp[0][1]
       and "fresh session" not in mp[0][1] and "yourself" not in mp[0][1], mp)
 check("1 …the item stays with its mover, the hander has been told nothing at any step, and the fleet's builder neither", mt(1).get("mover") == "home-peer2" and not pushes_to("home-peer") and not pushes_to("home-fleet"), (mt(1), pushes()))
