@@ -870,6 +870,7 @@ def update_unlocked(
         elif (got_agent := fc.call(_gates.gate_needs_session, agent, proj_for, own_for, _model.norm_who(meta.get("then")), sender.strip(), _gates.lazy_said(said, sender.strip()))) is not None:
             _needs_store(meta, _canon_needs([*kinds, got_agent], _anc.names()))
     reword, step = _server_step_reworded(item_was, reword, step)      # a reword of the line the server keeps from step= is the new step text, as the same call would give it
+    step_written = step      # the step text this call wrote, for the note on a step with no link (the name `step` is reused below for the owner's notice)
     step_lines: list[str] = []
     step_long = ""         # the step as the writer sent it, when it is split below
     split_note = ""        # why a long step was left as written (the refusal of it says so)
@@ -1912,7 +1913,7 @@ def update_unlocked(
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never parked: the park is dropped"
                  + (f"; its date {_wt.wake_value(meta)} stays" if _wt.wake_value(meta) else "") + ")")
-    return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
+    return (f"updated {_gh.shown(gid)}.\n" + h.fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + h.form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid, step=step_written,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + dropped_note + goal_note + wait_note + machine_note + offer_note + (_doing_wait_note(meta, next_judged, busy=busy_note) if item.get("status") == "open" else "") + (_wait_tells(sender, [wait_basis, wait_event, wait_reason], [next_judged], bool(not backstop and (hold or wake or until_wait or after_set or wait_kind.strip() or str(wait_basis or "").strip() or waits))) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((h.wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (h.wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + answered_note + named + told + owing + h.nag(debtor))

@@ -184,7 +184,27 @@ def _report_note(next_: str) -> str:
             "put results, hashes and test counts on the project page (Current state or a timeline line)")
 
 
-def _form_notes(description: str = "", next_: str = "", parked: bool = False, meta: dict[str, Any] | None = None, gid: str = "", cmd: bool = False, ext: bool = False) -> str:
+# A step written for the owner reads alone: "open the mockup" with "the link above" or "an earlier message" in place of the link leaves him no page to open. The note fires when the
+# text has an open/check/test verb and a point-back phrase and no link; narrow on purpose (a nudge, never a refusal). Other languages add their words in [keywords.server] open_cues and back_refs.
+_OPEN_EN = r"\b(?:open|check|try|test|look at|visit|review)\b"
+_BACK_EN = (r"\b(?:link|url|mockup|mock-up|page|preview|demo|prototype)s?\b(?: \w+){0,2} (?:above|earlier|(?:i|we) (?:sent|posted|shared))\b"
+            r"|\b(?:above|earlier|previous) (?:link|url|mockup|mock-up|page|message)s?\b|\b(?:an|the) earlier (?:message|step|item)\b")
+_HAS_LINK = re.compile(r"https?://|\]\(")
+
+
+def _linkless_open_note(step: str = "", next_: str = "") -> str:
+    """The note when a step for the owner (the step text, or a line of next that opens with `<owner>:`) asks him to open, check or test something by pointing back at a link
+    ("the link above", "an earlier message") and the step itself holds no link ([words](url) or a bare https URL); "" otherwise."""
+    verb = _cfg.kw_rx("server.open", lambda a: _OPEN_EN + _cfg.kw_pipe(a), (("server", "open_cues"),), re.I)
+    back = _cfg.kw_rx("server.back", lambda a: _BACK_EN + _cfg.kw_pipe(a), (("server", "back_refs"),), re.I)
+    texts = [str(step or "")] + [ln for ln in str(next_ or "").splitlines() if re.sub(r"^\s*(?:[-*\u2022]\s+)?", "", ln).lower().startswith(f"{OWNER.lower()}:")]
+    if not any(t.strip() and not _HAS_LINK.search(t) and verb.search(t) and back.search(t) for t in texts):
+        return ""
+    return (f"this step asks {OWNER} to open or check something but holds no link, and it points back at a link elsewhere (above, an earlier message): a step is read alone, "
+            "so put the link in the step itself, as [words](url)")
+
+
+def _form_notes(description: str = "", next_: str = "", parked: bool = False, meta: dict[str, Any] | None = None, gid: str = "", cmd: bool = False, ext: bool = False, step: str = "") -> str:
     """The board's form rules a reply can check, which left the rulebook. Each speaks only
     when broken, as a note and never a refusal: a URL not on words, an owner's hold without a wake, a hold on an item that waits
     on someone outside (unless its thread is anchored to it), an item put on someone outside with no anchor scoped to it.
@@ -207,6 +227,8 @@ def _form_notes(description: str = "", next_: str = "", parked: bool = False, me
     if cmd and meta is not None and (why := _command_note(meta)):
         out.append(why)
     if why := _report_note(next_):
+        out.append(why)
+    if why := _linkless_open_note(step, next_):
         out.append(why)
     return "".join(f"\n(note: {x}.)" for x in out)
 

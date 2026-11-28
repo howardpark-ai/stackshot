@@ -85,7 +85,7 @@ KEYWORDS = {
         "ignore_phrases": '["画面共有"]',
     },
     "keywords.waiting": {"park_words": '["保留", "延期", "後で", "来月"]'},
-    "keywords.server": {"command_cues": '["実行", "貼り付け"]'},
+    "keywords.server": {"command_cues": '["実行", "貼り付け"]', "open_cues": '["開いて", "確認して"]', "back_refs": '["上のリンク", "先に送った"]'},
 }
 # the settings a flag of apply() adds: section -> {key: toml value}
 FLAG_SETTINGS = {

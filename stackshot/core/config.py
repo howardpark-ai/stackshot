@@ -1103,6 +1103,8 @@ KEYWORDS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "server": {
         "command_cues": ("words", "other-language words that say an item waits on the owner running or pasting a command"),
+        "open_cues": ("words", "other-language words that ask the person a step is for to open, check or test something (a step for him that asks it with no link in it draws a note)"),
+        "back_refs": ("words", "other-language words that point back at a link elsewhere (the link above, a message sent earlier): with an open cue and no link in the step, a note says to put the link in the step"),
     },
 }
 
