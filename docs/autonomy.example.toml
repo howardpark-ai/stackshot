@@ -1,0 +1,24 @@
+# An autonomy profile (paths.autonomy): one table per member of [[members]]. Levels, least to most careful:
+#   auto       acts without asking
+#   when-told  acts when the person's words, or a relayed call carrying them, say so
+#   ask-first  proposes it as a board step with options and a recommendation, and waits for the pick
+#   hand-on    does not act and does not ask: passes it to the person who must take it, as that person's step
+# A missing person, kind or level word reads hand-on. The kinds are fixed in stackshot/core/autonomy.py.
+# This is the owner's default table of the design; copy it to the data repo's autonomy.toml and change the words.
+version = 1
+
+[person.owner]
+release = "auto"                  # no design choice, migration, new notice or cost; told in one line
+release-migrating = "ask-first"   # a database migration is not undone by a revert
+design-choice = "ask-first"       # a choice the person has not made is theirs
+new-notice = "ask-first"          # anything new the person receives changes what they see
+spend = "ask-first"               # a new cost or a raised cap
+message-person = "hand-on"        # a text to another person goes out under their name; the agent drafts it
+email = "ask-first"               # a Gmail draft to the person as a decision, sent on their Send
+connector-write = "when-told"     # calendar, Notion, Slack writes only when asked
+merge = "auto"                    # a pull request on green checks where the agent holds the maintainer role
+delete = "ask-first"              # anything the session did not create
+retire = "ask-first"              # proposed, queued on the person's word
+revive = "auto"                   # only sessions found unable to work, with a recorded reason; else when-told
+fleet-op = "when-told"            # recycle, update, reboot, rename, lane
+public-repo = "hand-on"           # creating a public repository is the person's step

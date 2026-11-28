@@ -383,7 +383,7 @@ CHARS_PER_TOKEN = 4                      # the usual estimate: a token is about 
 DAY_HOURS = 24
 WEEK_DAYS = 7
 NEEDS_FIX = "needs a fix (no hint yet)"
-READS = ("get", "brief", "sessions", "anchors", "rules")          # the tools that only read: an error of one is a read error (route and bump_versions write)
+READS = ("get", "brief", "sessions", "anchors", "rules", "autonomy")          # the tools that only read: an error of one is a read error (route and bump_versions write)
 READ_PREFIX = "read: "          # a read that errors is counted under its text with this before it
 READ_HINT = "an error of a read, not a rule of the board: check the item id, project or name before reading, and read the list first when unsure."
 
