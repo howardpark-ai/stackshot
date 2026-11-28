@@ -548,6 +548,8 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     (d / "bin/ssh").write_text(SSH); (d / "bin/ssh").chmod(0o755)   # what [release] deploy_ssh runs (RT_DEPLOY_SSH)
     (d / "bin/warmcmd").write_text(WARMCMD); (d / "bin/warmcmd").chmod(0o755)   # what [release] suitemap_warm_cmd names (RT_WARM)
     real = env.pop("real_config", False)   # the real core/config.py and what it reads (see REAL_CONFIG_FILES), with a TOML file of this scenario's: [release] deploy_ssh = the deploy_ssh value, [hosts] lookup = where-is (a role's host)
+    no_agentbox = env.pop("no_agentbox", False)   # real_config only: core/agentbox.py is not in the checkout, so `from stackshot.core import agentbox` fails
+    remote_hold = env.pop("remote_hold", False)   # the lock on the far side (remote/releases/deploy.lock, the state folder a login there sees) is held by this process, as another deploy's would be, until the run ends
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
         (box / pkg).mkdir(parents=True, exist_ok=True); (box / pkg / "__init__.py").write_text("")
@@ -556,10 +558,13 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
         p.write_text(body); x and p.chmod(0o755)
     if real:
         for rel in REAL_CONFIG_FILES: shutil.copy(os.path.join(STACK, rel), box / rel)
+        if no_agentbox: (box / "stackshot/core/agentbox.py").unlink()
         (d / "stackshot.toml").write_text(f'[paths]\nstate = "{d}"\n[release]\ndeploy_ssh = "{env.get("deploy_ssh", "")}"\n[hosts]\nlookup = "{d}/bin/where-is {{role}}"\n')
         (d / "bin/where-is").write_text(f'#!/bin/sh\ncase "$1" in box) echo {socket.gethostname()} ;; far) echo deploy-host ;; *) exit 1 ;; esac\n'); (d / "bin/where-is").chmod(0o755)
     e = {**ENV0, **({"STACKSHOT_CONFIG": str(d / "stackshot.toml")} if real else {}), "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
-    held = None; timer = None
+    held = None; timer = None; rheld = None
+    if remote_hold:
+        (d / "remote/releases").mkdir(parents=True, exist_ok=True); rheld = open(d / "remote/releases/deploy.lock", "w"); fcntl.flock(rheld, fcntl.LOCK_EX)
     if hold is not None:
         (d / "releases").mkdir(exist_ok=True); held = open(d / "releases/deploy.lock", "w"); fcntl.flock(held, fcntl.LOCK_EX)
         if hold == "until-waiting":   # never a fixed time: a slow start (a measured run under strace) would reach the lock after it was let go
@@ -628,6 +633,7 @@ def _scenario(name, args=(), front=False, hold=None, extra=None, grab=False, sec
     if timer: timer.join()
     if side_thread: side_thread.join()
     if held: held.close()
+    if rheld: rheld.close()
     rd = lambda f: (d / f).read_text() if (d / f).exists() else ""
     POLLS.append((name, len(rd("sleep.log").split())))
     return {"rc": r.returncode, "out": r.stdout + r.stderr, "gh": rd("gh.log"), "sal": rd("salamander.log").splitlines(), "sleeps": rd("sleep.log").split(),

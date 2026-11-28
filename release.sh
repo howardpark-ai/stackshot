@@ -125,7 +125,7 @@
 #                                 The wait looks at main's runs every POLL_MAIN s (60) and the reads are shared between the releases on the box for GH_TTL s (45), so six releases waiting on one run cost what one does. The deploy lock is let go for that
 #                                 wait and taken again for the deploy, so a release waiting on main never holds another one's deploy (a lock still held after 15 min then fails "deploy lock": merged, not deployed). Then ./deploy.sh pinned to the commit main's
 #                                 tests passed on (DEPLOY_TO: the newest commit that contains M whose run passed, never a tip with no passing run);
-#                                 4c-ssh. WHERE deploy.sh RUNS (deploy_run): [release] deploy_ssh unset (the default) = in this checkout, as above. Set to a host (the server runs on another box than release.sh): the deploy, and the rollback, run
+#                                 4c-ssh. WHERE deploy.sh RUNS (deploy_run): [release] deploy_ssh unset (the default), or a value naming this box (its own name, short name or a loopback name; a user@ part that is not the user running release.sh keeps the ssh path) = in this checkout, as above. Set to a host (the server runs on another box than release.sh): the deploy, and the rollback, run
 #                                 `ssh -o BatchMode=yes -o ConnectTimeout=15 <host> 'cd ~/stackshot && DEPLOY_TO=<sha> ./deploy.sh'` instead (a rollback inside `flock <that host's deploy lock> env DEPLOY_ROLLBACK=1 ...`, since deploy.sh wants the lock held where it runs),
 #                                 its output in the log and its exit status the deploy's (an ssh that fails is a failed deploy). Then this checkout, which the gate, the live check and the rollback read as the live one, follows (follow_local): git merge --ff-only to the
 #                                 deployed commit (git reset --keep for a rollback), and stackshot-puller.service is restarted when the move touched the puller's files; stackshot.service and the other units are never started here. A checkout with local
@@ -225,7 +225,7 @@ sleep() { command sleep "$@" 6>&- 7>&- 8>&- 9>&-; }
 REPO="$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
 LOGDIR="$(python3 stackshot/core/config.py state releases)"; mkdir -p "$LOGDIR"
 REPORT_TO="$(python3 -c 'from stackshot.core import config; print(config.release_report_to())' 2>/dev/null)"; REPORT_TO="${REPORT_TO:-projects/example}"   # [release] report_to: where tell() sends the report of a release; the stand-in page when unset (or when this config.py predates the key)
-DEPLOY_SSH="$(python3 -c 'from stackshot.core import config; print((getattr(config, "release_deploy_ssh", lambda: "")() or "").strip())' 2>/dev/null)" || DEPLOY_SSH=""   # [release] deploy_ssh: the host deploy.sh runs on, over ssh; "" (the default, a config.py without the key or one that does not run, and a value naming this box, which config.release_deploy_ssh() reads as "") = deploy here
+DEPLOY_SSH="$(python3 -c 'from stackshot.core import config; print((getattr(config, "release_deploy_ssh", lambda: "")() or "").strip())' 2>/dev/null)" || DEPLOY_SSH=""   # [release] deploy_ssh: the host deploy.sh runs on, over ssh; "" (the default, a config.py without the key or one that does not run, and a value naming this box, which config.release_deploy_ssh() reads as "" unless its user@ part is another user) = deploy here
 WAIT_CHECKS="${RELEASE_WAIT_CHECKS:-3000}"   # seconds a PR's checks may stay pending (50 min); the knob lets the tests prove the give-up on a short cap, one scenario pins this default
 MERGEABLE_WAIT="${RELEASE_WAIT_MERGEABLE:-180}"   # seconds GitHub may say mergeable UNKNOWN (it recomputes after main moves) before the release gives up; read every 10 s
 LOCK_FILE="${DEPLOY_LOCK_FILE:-$LOGDIR/deploy.lock}"      # next to the other release state; DEPLOY_LOCK_FILE / DEPLOY_LOCK_WAIT let the tests point elsewhere
@@ -820,7 +820,7 @@ deploy_run() {
     fi
     [[ "$DEPLOY_SSH" =~ ^[A-Za-z0-9_][A-Za-z0-9._@:-]*$ ]] || { echo "deploy refused: [release] deploy_ssh = \"$DEPLOY_SSH\" is not an ssh host name"; return 1; }
     [[ "$sha" =~ ^[0-9a-f]{40,64}$ ]] || { echo "deploy refused: $sha is not a full commit id"; return 1; }
-    if [ -n "$rb" ]; then cmd='cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && exec flock "$L" env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO='"$sha"' ./deploy.sh'
+    if [ -n "$rb" ]; then cmd='cd ~/stackshot && L="$(python3 stackshot/core/config.py state releases)/deploy.lock" && mkdir -p "$(dirname "$L")" && exec 9>"$L" && { flock -w '"$LOCK_WAIT"' 9 || { echo "rollback not run: another deploy held the deploy lock $L on this box for more than '"$LOCK_WAIT"' s" >&2; exit 1; }; } && env DEPLOY_LOCK_FILE="$L" DEPLOY_ROLLBACK=1 DEPLOY_TO='"$sha"' ./deploy.sh'
     else cmd='cd ~/stackshot && DEPLOY_TO='"$sha"' ./deploy.sh'; fi
     echo "deploying on $DEPLOY_SSH over ssh ([release] deploy_ssh)"
     ssh -o BatchMode=yes -o ConnectTimeout=15 "$DEPLOY_SSH" "$cmd" </dev/null || rc=$?
@@ -2376,7 +2376,7 @@ case "${1:-}" in
     hold) shift; hold_cmd "$@"; exit $? ;;   # THE HOLD (above take_lock)
     --copy-record)   # [release] deploy_ssh: copy the last-good record to the server box now (4c-record; a release does it on its own: this is for a copy that failed with no release coming)
         [ $# -eq 1 ] || { echo "usage: release.sh --copy-record" >&2; exit 2; }
-        [ -n "$DEPLOY_SSH" ] || { echo "nothing to copy: [release] deploy_ssh is unset, so the server reads this box's record"; exit 0; }
+        [ -n "$DEPLOY_SSH" ] || { echo "nothing to copy: [release] deploy_ssh names no other box (unset, or this box), so the server reads this box's record"; exit 0; }
         [ -s "$LAST_GOOD" ] || { echo "nothing to copy: no last-good record in $LAST_GOOD"; exit 0; }
         SYNC_TOLD=1; record_sync; exit $? ;;   # by hand: the output is the report, no message
     ''|-h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2 ;;   # the header comment, up to the first line of code
