@@ -886,7 +886,7 @@ def update_unlocked(
                 meta["wake"] = str(meta["wake"])[:10]
     model_set, model_drop = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                                   "ask_by": ask_by, "post_wake_mover": post_wake_mover},
-                                    {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait}, default=({}, set()))   # a bad value is refused before anything is written
+                                    {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait}, item_was.get("metadata") or {}, default=({}, set()))   # a bad value is refused before anything is written
     wait_args_bad = fc.count > n_wait_args      # the wait's own arguments (the waits list, wait_kind, ask_by, the mover) are refused: the park's reason, which reads what they would have stored, is not judged
     model_drop |= list_drop
     list_set = list_plan is not None and list_plan.kind == "list"
@@ -1035,7 +1035,7 @@ def update_unlocked(
     elif outcome or reason or superseded_by or outcome_text:
         fc.add(f"Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool)"
                + (f"; {gid} is already completed: to correct its close, reopen it (status=open with a next) and close it again"
-                  if was == "completed" else ""))
+                  if was == "completed" else '; to close it now, send the same call with status="completed"'))
     if reopening and not next.strip():
         fc.add(f"Refused: reopening {gid} needs a new next: the step that comes now")
     if draft_set and (status or item.get("status")) == "completed":
@@ -1584,6 +1584,8 @@ def update_unlocked(
                 cl_w = list(cl_w)
                 spec_w = {**work_spec, "state": "done"} if work_tick >= 0 else work_spec
                 cl_w[ti_w] = _work.apply(cl_w[ti_w], spec_w, time.time())
+                if work_spec.get("waiting") and not work_spec["remove"] and spec_w["state"] == "assigned":      # told only where the line is recorded so
+                    _calls.fixed("work-waiting", "a status line has no waiting state, so it was stored as assigned (not in progress); if the item itself waits, say on what with until=<date>, after=[<item>] or wait_kind")
                 meta["steps"] = _steps.stored(cl_w)
                 work_note += "".join("\n" + w for w in _work.changes({"steps": (item_was.get("metadata") or {}).get("steps")}, meta)) or f"\n(work: \"{work_spec.get('text') or 'the status'}\" unchanged, already so)"
                 if work_made:

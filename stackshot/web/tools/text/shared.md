@@ -61,7 +61,7 @@ when Y"), a statement ("X is live"), a "should" or "must" sentence, a question (
 settings"); at most {{SUBJECT_MAX}} characters, the scope prefix counted; a longer one is cut at a word (the reply says so): the
 rest goes in the description bullets. An update that leaves subject out or sets the stored one is never refused for its length. description: the item's background as `- ` bullets of live state, one fact each: at most {{DESC_MAX_LINES}}
 lines, and every line, `- ` included, at most {{DESC_LINE_MAX}} characters (a link counts by its text); a longer bullet is
-split for you at a sentence end or a space (the reply says so); prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
+split for you at a sentence end or a space (the reply says so) while the description stays within that many lines; prose, a bullet that cannot be split (one unbroken token) and more lines are refused. The first bullet
 opens `Goal:` (`goal:` or a bold label is put right) with the finished outcome that work reaches, in a sentence; a symptom,
 cause or trigger goes in a later bullet that opens `Problem:`. Then what the item is and where it lives (his words as
 a bullet such as `- {{OWNER}}: …`; parallel bullets go under one parent bullet, indented two spaces); never steps or
@@ -95,8 +95,8 @@ next or ask is refused, in a description it becomes a link to itself; write `[wo
 (the list is described below). due: YYYY-MM-DD {{TIMEZONE}}, set only from a real deadline ({{OWNER}}'s word, an
 outside date, or a date a dependency fixes), otherwise left empty: a made-up date reads to {{OWNER}} as their own
 deadline (to expect something back by a date, use until). ask: the line a needs=decision item carries, written so
-{{OWNER}} can decide from it alone and refreshed whenever the question moves, one line of at most 240 characters with
-all four parts in this order, joined by " · ": "Decide: <what to decide> · Recommend: <your recommendation> · Stakes:
+{{OWNER}} can decide from it alone and refreshed whenever the question moves, one line of at most 240 characters (a
+link's address counts too) with all four parts in this order, each opening with its label and a colon, joined by " · ": "Decide: <what to decide> · Recommend: <your recommendation> · Stakes:
 <what happens either way> · By: <a date in words such as Mon Jun 8th 2099, or no date>"; example: ask="Decide: whether
 to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099",
 options=[{"label": "Approve", "line": "Approve the schema", "recommended": true}, {"label": "Decline", "line": "Wait a
@@ -278,7 +278,8 @@ The item's background as `- ` bullets, at most {{DESC_MAX_LINES}} lines, every l
 {{DESC_LINE_MAX}} characters, live state only (never steps or commands): description="- Goal: the export finishes in
 under a minute\n- Problem: the nightly run takes 9 minutes". The first bullet opens `Goal:`, a
 symptom or cause goes in a later `Problem:` bullet, {{OWNER}}'s words go in a bullet such as `- {{OWNER}}: …`, and
-parallel bullets go under one parent bullet, indented two spaces.
+parallel bullets go under one parent bullet, indented two spaces. A longer bullet is split onto further lines, which
+count toward the {{DESC_MAX_LINES}}.
 
 ## param OPTIONS
 The alternatives of a decision, one per line: options=[{"label": "Approve", "line": "Approve the schema",

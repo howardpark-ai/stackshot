@@ -36,7 +36,7 @@ PARTS = ("refusal_report", "catch_report")
 
 # ================================================================ part refusal_report: the count of refused board writes, and the small corrections the server makes instead of refusing
 def part_refusal_report():
-    import asyncio, contextlib, datetime as dt, io, json, logging, os, pathlib, re, subprocess, sys, time, types
+    import ast, asyncio, contextlib, datetime as dt, io, json, logging, os, pathlib, re, subprocess, sys, time, types
     import _scratch, _instance
     sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools"))
     tmp = _scratch.mkdtemp(prefix="refusalrep-"); T = pathlib.Path(tmp)
@@ -135,6 +135,59 @@ def part_refusal_report():
         f"Refused: demo-main is a user-facing agent of projects/demo, and mover=demo-main from another session hands it an item it gets no notice of": "a front agent named as mover",
         "Refused: a name is not a background agent of any project, nor this project's keeper; needs names one of those": "a front agent named as mover",
         'Refused: the step "demo-main: ask" opens with demo-main, a user-facing agent of projects/demo: it gets no work notice': "a front agent named as mover",
+        # refusals that name wait_basis as another way to park are not a fault of a basis
+        f"Refused: {BID(7)} waits on a time (until 2099-03-02) with no reason: a time wait carries the owner's words or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\").": "a time wait with no recorded words or basis",
+        f"Refused: {BID(7)} would have its clock pushed out (until 2099-03-02 to 2099-03-09) with its reason and its open steps exactly as they were. Park it (wait_basis=<what the date is>).": "a date moved later with nothing else changed",
+        f"Refused: {BID(7)} has had its clock pushed out 2 times in a row on a change of what its wait stands on alone (wait_basis), and this would be the 3rd": "a date moved later with nothing else changed",
+        "Refused: a wait runs at most 7 days from the item's last move ([waiting] cap_days), and this wake is 20 days out. A longer one needs words or wait_basis.": "a date past the wait cap",
+        "Refused: next line 'x: wait for the build' reads as a wait (wait word) on an alive item. Set the wait (wait_basis=...) or write the action.": "a line of next that reads as a wait on a live item",
+        "Refused: wait_basis is one line of 12 to 300 characters": "a wait_basis the rule does not take",
+        "Refused: a park names what it waits for; an unconditional or indefinite park is refused. Give it a date (until=YYYY-MM-DD with wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\")": "a park with nothing it waits for",
+        "Refused: clear_wait_basis drops the basis; it does not go with a new wait_basis": "a wait_basis the rule does not take",
+        f"Refused: {BID(7)} waits on a fleet event but its input is missing: wait_event=<the event>. If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event and until go together).": "a wait with an input missing",
+        "Refused: hold is not a parameter any more: a park is until": "a retired input",
+        f"Refused: closing {BID(7)} needs outcome, reason; accepted form: complete(item_id=\"{BID(7)}\")": "a close with a part missing",
+        "Refused: the reason is 130 characters and the limit is 120.": "a close reason over its limit",
+        "Refused: work: state 'blocked' is not one of defined, assigned, in progress, done": "a status state the work line does not have",
+        "Refused: clear_wait drops wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover; it does not go with a new wait_kind": "clear_wait sent beside a new wait",
+        "Refused: a park that waits on a notice from the anchor scoped to it still carries a backstop date, at most 7 days out": "an anchor park with no backstop date",
+        "Refused: wait_anchor https://example.com/pull/3 is not on projects/demo's anchors list, so nothing watches it": "a wait_anchor that is not on the anchors list",
+        "Refused: wait_kind is one of time | anchor | item | relay | event (got 'external')": "a wait_kind that is none of the kinds",
+        'Refused: outcome, outcome_text, reason and superseded_by go with a close (status=completed on an open item, or the complete tool); to close it now, send the same call with status="completed"': "close fields on a write that is no close",
+        "Refused: status must be open | completed": "a status that is not open or completed",
+        f"Refused: {BID(7)} is not closed and nothing is ticked. To close it now, mark that step in the closing call itself": "a close with a step still open",
+        'Refused: work: a status line is a few words, at most 40 characters (52 given: "PR…")': "a status line over its limit",
+        f"Refused: the status of a step on {BID(7)} is written by its mover (worker-a) or a session named in its needs (none named); worker-b is neither.": "a status line from a session the item does not name",
+        "Refused: step at most 300 characters on one line (400 now); it is a summary": "a step over its limit",
+        f"Refused: {BID(7)}: the step asks the owner to post, send or paste a text (\"Send\"), so put the text in draft=<the text>": "a step to post a text with no draft",
+        "Refused: ask has a bare URL (https://example.com/mockup/3) and the page may not draw it as a link.": "a bare URL in a description, next or ask",
+        "Refused: description has a bare URL (https://example.com/pull/3) and the page may not draw it as a link.": "a bare URL in a description, next or ask",
+        "Refused: this item would be left with the owner as its mover but nothing for him to do: no ask": "the user left as mover with nothing to do",
+        "Refused: this needs=decision item links a mockup (https://example.com/mockup/3) in its description but not in its ask.": "an ask that approves a design or plan with no link in the ask",
+        # a wait with no end date, whatever it waits on
+        f"Refused: {BID(7)}'s wait on an anchor event has no end: set until=YYYY-MM-DD, the day it comes back to someone when nothing has arrived (a backstop date does the same).": "a wait with no end date",
+        "Refused: this item's wait on a fleet event has no end: set until=YYYY-MM-DD, the day it comes back to someone when nothing has arrived (a backstop date does the same).": "a wait with no end date",
+        "Refused: this item's wait on news only Alex relays has no end: set until=YYYY-MM-DD, the day it comes back to someone when nothing has arrived.": "a wait with no end date",
+        # the contact refusal names a front agent as what it takes: the opposite of the mover refusals that name one
+        "Refused: contact=team-back is not a front agent of projects/demo, and the project lists none of its own (its -main agent is demo-main: leave contact out and it is the contact).": "a contact that is not a front agent",
+        "Refused: contact=team-back is not a front agent (a user-facing agent) of projects/demo. A contact is the front agent the item's person talks to about it; projects/demo's are: demo-main.": "a contact that is not a front agent",
+        # an ask of several decisions
+        "Refused: this ask has a Decide part split by \u201c;\u201d, so it asks several decisions. One decision per item": "an ask with a second question in its Decide part",
+        "Refused: this ask (lifted from next's first line) has a Recommend part split by \u201c\u00b7\u201d, so it asks several decisions. One decision per item": "an ask with a second question in its Decide part",
+        "Refused: this ask has more than one Decide or Recommend part, so it asks several decisions. One decision per item": "an ask with a second question in its Decide part",
+        "Refused: this ask asks several decisions in one (\u201cand also\u201d). One decision per item": "an ask with a second question in its Decide part",
+        "Refused: ask_by is YYYY-MM-DD, a real date (got '2099-03-02T10:00')": "an ask_by that is no date",
+        "Refused: anchors belong to the project, not the item \u2014 use anchors(project=<its project>, add=[url\u2026])": "anchors passed on an item write",
+        f"Refused: a front agent does not watch handed-off work itself (no wake or poll it sets): the result lands through stackshot. {BID(7)} is moved by worker-a, so your date is refused": "a front agent's date on handed-off work",
+        "Refused: options must be a list: [{label, line, recommended}]": "options that are no list",
+        'Refused: subject uses "kill": Alex reads this, so say what happened in everyday words (stop), and write the line again.': "an alarming word in text the user reads",
+        f"Refused: {BID(7)} has mover=worker-a on an item whose state is your-call, which is Alex's move. An item that is Alex's makes him the mover: leave mover out": "another mover on an item that is the user's",
+        # the guards' own list of several faults is counted under its first too, not under a later one the list of patterns names sooner
+        'Refused: 2 problems. (1) next uses "kill": Alex reads this, so say what happened in everyday words (stop), and write the line again. (2) this item waits on news the user relays but its input is missing: wait_event=<the event>.': "an alarming word in text the user reads",
+        # a refusal that names several faults is counted under its first, as raised (line breaks) and as the log keeps it (folded to one line)
+        "Refused: 2 problems in this call; fix all of them and send the call once more.\n(1) the reason is 130 characters and the limit is 120.\n(2) status must be open | completed": "a close reason over its limit",
+        "Refused: 2 problems in this call; fix all of them and send the call once more. (1) status must be open | completed Not checked yet, because they read what the faults above leave: the close": "a status that is not open or completed",
+        " ".join(("Refused: 3 problems in this call; fix all of them and send the call once more.\n(1) wait_kind is one of time | anchor | item | relay | event (got 'soon')\n(2) the reason is 130 characters. " + "z " * 400).split())[:CL.WHY_MAX]: "a wait_kind that is none of the kinds",
     }
     for why, want in kinds.items():
         check(f"1 kind_of: {want}", CL.kind_of(why) == want, CL.kind_of(why))
@@ -1073,6 +1126,31 @@ def part_refusal_report():
     check("10 daily: a kind refused three times or more in the day repeats (a kind refused twice does not), each with its hint or 'needs a fix'",
           [(k, n) for k, n, _ in rep] == [(CL.kind_of(NS), 4), (RR.READ_PREFIX + CL.kind_of(GONE), 3), (CL.kind_of("Refused: some rare thing 5"), 3)] and rep[0][2] == RR.HINTS[CL.kind_of(NS)] and rep[1][2] == RR.READ_HINT and rep[2][2] == RR.NEEDS_FIX, rep)
     check("10 daily: every hint is one plain line, and no hint is for a kind the log can no longer name", all(h and "\n" not in h and h == h.strip() for h in RR.HINTS.values()) and all(k in {n for _, n in CL._KINDS} or k.startswith("message: ") for k in RR.HINTS), [k for k in RR.HINTS if k not in {n for _, n in CL._KINDS}])
+    names = {n for _, n in CL._KINDS}
+    check("10 daily: every kind the log names has a hint, or a line saying why none fits, and never both", names <= set(RR.HINTS) | set(RR.NO_HINT) and not set(RR.HINTS) & set(RR.NO_HINT),
+          (sorted(names - set(RR.HINTS) - set(RR.NO_HINT)), sorted(set(RR.HINTS) & set(RR.NO_HINT))))
+    check("10 daily: every such line is one plain line that opens saying no hint fits, for a kind the log can name", all(v.startswith("no hint fits: ") and "\n" not in v and v == v.strip() for v in RR.NO_HINT.values())
+          and all(k in names or k.startswith("message: ") for k in RR.NO_HINT), RR.NO_HINT)
+    # every slug the message tool refuses with is read from its source, so a new one with no line fails here
+    tree = ast.parse(pathlib.Path(STACK, "stackshot/service/messaging.py").read_text(encoding="utf-8"))
+    raised = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "Refused"]
+    slugs = {n.args[0].value for n in raised if n.args and isinstance(n.args[0], ast.Constant)}
+    check("10 daily: every refusal the message tool builds names its kind as a literal, so all of them can be read here", len(raised) >= 20 and all(n.args and isinstance(n.args[0], ast.Constant) for n in raised), [n.lineno for n in raised])
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        if cls.name == "Refused":
+            slugs |= {a.value.value for a in cls.body if isinstance(a, ast.Assign) and getattr(a.targets[0], "id", "") == "kind"}
+        elif any(getattr(b, "id", "") == "Refused" for b in cls.bases):
+            slugs |= {n.args[0].value for n in ast.walk(cls) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "__init__" and n.args and isinstance(n.args[0], ast.Constant)}
+    msg_keys = {"message: " + s for s in slugs}
+    check("10 daily: the slugs read include the class's own default and the subclass's", {"unclassified", "retired-recipient", "no-session"} <= slugs, sorted(slugs))
+    by_slug = RR.daily_tally([{"t": 1, "tool": "message", "ok": False, "kind": s} for s in sorted(slugs) for _ in range(3)], [])
+    shown = {k: h for k, _, h in RR.repeating(by_slug)}
+    check("10 daily: every message refusal kind has a hint, or a line saying why none fits", set(shown) == msg_keys and msg_keys <= set(RR.HINTS) | set(RR.NO_HINT) and RR.NEEDS_FIX not in shown.values(),
+          sorted(msg_keys - set(RR.HINTS) - set(RR.NO_HINT)))
+    check("10 daily: no line is kept for a message kind the tool does not refuse with", {k for k in [*RR.HINTS, *RR.NO_HINT] if k.startswith("message: ")} <= msg_keys | {"message: " + RR.NO_KIND},
+          sorted({k for k in [*RR.HINTS, *RR.NO_HINT] if k.startswith("message: ")} - msg_keys))
+    unnamed = RR.daily_tally([{"t": 1, "tool": "message", "ok": False}] * 3, [])
+    check("10 daily: a repeating kind that has no hint for a reason shows the reason and asks for no fix", [h for _, _, h in RR.repeating(unnamed)] == [RR.NO_HINT["message: " + RR.NO_KIND]], RR.repeating(unnamed))
     txt = RR.build_daily(NOW, d24, d7)
     sample = txt
     check("10 daily: the text names both spans, the estimate and the repeating kinds with their hints",
