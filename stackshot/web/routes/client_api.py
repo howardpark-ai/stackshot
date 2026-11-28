@@ -35,6 +35,7 @@ from stackshot.service import agent_names as _agent_names
 from stackshot.service import agent_state as _agent_state_svc
 from stackshot.service import background_want as _background_want
 from stackshot.service import caller_pass as _caller_pass
+from stackshot.service import canvas as _canvas_svc
 from stackshot.service import catches as _catches
 from stackshot.service import contacts as _contacts
 from stackshot.service import event_waits as _evwaits
@@ -427,7 +428,9 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return _agent_state_svc.post(machine, body)
     if what == "machines":      # the fleet manager posts its machine list; the last good one is kept in the state folder (client.py post machines)
         return _machines_svc.post(machine, body)
-    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | repoint | event | setup-result | agent-state | machines"}
+    if what == "canvas-import":      # one page of a canvas moved in, off unless [canvas] import is true (service/canvas.py)
+        return _canvas_svc.post(machine, body)
+    return 404, {"error": _NO_SUCH_WRITE + ": message | handover | held | inbox-hold | inbox-release | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | catch | anchor-add | item-open | item-sync | job-failed | job-ok | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | repoint | event | setup-result | agent-state | machines | canvas-import"}
 
 
 _BODY_CUT = "the body ended before it was complete"
@@ -488,7 +491,7 @@ async def client_write(request: Request):
         return JSONResponse({"error": _PASS_ONLY_FORM}, status_code=403, headers={"Cache-Control": "no-store"})
     if not machine:
         return PlainTextResponse("unauthorized: a machine token is required (Authorization: Bearer …)", status_code=401)
-    capped = {_agent_state_svc.VERB: (_agent_state_svc, 400), _machines_svc.VERB: (_machines_svc, 413)}.get(what)     # the writes whose size is capped: a whole fleet's report in one body, refused over the limit before it is parsed
+    capped = {_agent_state_svc.VERB: (_agent_state_svc, 400), _machines_svc.VERB: (_machines_svc, 413), _canvas_svc.VERB: (_canvas_svc, 413)}.get(what)     # the writes whose size is capped (a whole fleet's report or a whole page in one body), refused over the limit before it is parsed
     if capped:
         svc, over_status = capped
         over = svc.too_large(request.headers.get("content-length"))       # a declared length over the cap is refused before a byte is read

@@ -872,6 +872,7 @@ def part_client():
         "drain -> _clients.sessions_on, _clients.seen, _clients.register, _inbox.take",
         "agent-state -> _agent_state_svc.post",
         "machines -> _machines_svc.post",
+        "canvas-import -> _canvas_svc.post",
     ]
     check("client_post: the `what` -> handlers table of the dispatcher is the one it had in server.py (%d branches)" % len(_WHAT_TABLE), _what_table(_rt_client._client_post) == _WHAT_TABLE, _what_table(_rt_client._client_post))
     check("client_post: an unknown `what` is a 404 naming the writes there are, and the dispatcher is no name of server", _rt_client._client_post("home", "no-such-write", {})[0] == 404 and not hasattr(server, "_client_post"), _rt_client._client_post("home", "no-such-write", {}))
