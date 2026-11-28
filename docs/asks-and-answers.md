@@ -36,6 +36,18 @@ item's mover at that time, nobody is told; the server logs it and drops the pend
 existed keeps its "Park until <day>" button, which the server still applies itself (the park and its wake, a YYYY-MM-DD written in the box changes the day; `[idle] park_days` is only its
 fallback). The older `[idle] hours` key is no longer read.
 
+**A question in place of an answer** (`stackshot/model/note_read.py` `is_question`, `service/answer.py` `_question_fields`; `tests/answer_question_scenario.py`). Words typed with no button, off a step (an
+answer in the box, a comment from the board or from GitHub), that are nothing but a question are marked on their record: `kind: comment`, `question: true`, and `description_at`, a digest of the item's
+description as it stood. They are nothing but a question when every sentence ends in a question mark (`?` or its full-width form); a sentence ends at a full stop, an exclamation or question mark or an
+ellipsis before a space, at an East Asian mark or a line end, and, with no space, at an ellipsis before a letter, at a full stop between two lower-case letters and a capital, or at a full stop before a letter outside ASCII. They are not when they open with a yes or a no (the words a Recommend part
+may open with, `[keywords.ask_options] yes_no_words` included), open with an option's name or letter followed by a comma, a colon or a bracket, or hold a semicolon or a dash that joins two parts. Anything
+not read as a question is recorded as it was before: a pick (with any note), and typed words that say something beside what they ask, are his decision. The reading is that mechanical, so a statement and a
+question joined by a comma alone, with no yes or no in front, reads as a question, and a question with a sentence before it reads as a decision. A question typed in place of his call decides nothing: no
+option is taken, his step is not ticked (the server's open step leaves the checklist with the decision need), and the item leaves his queue for its mover as after a decision, the line to it saying that no
+decision is taken. A session that was told of it and does not write within 30 min is escalated as for a decision. The page answers `?sent=comment`. The mover answers on the item and puts the decision back:
+refused while the description is the one he asked under, accepted at once with the same ask line after a rewrite ([item model](item-model.md)). The server does not judge the rewrite's words. No tool
+parameter writes `metadata.answers`, so no session can mark text as his question. A note on his step is not read this way.
+
 On a board of several members a step is answered member by member (`steps.member_rows`, `steps.settle_members`, `answer_handover._share_step`; `tests/member_steps_scenario.py`). A line of `next` that names
 no one and starts with a bullet or a number belongs to the line it was written under: the member that line names, no member when it names anyone else (a session, an outside party), or no one when it stands
 under no named line. That is stored on its step (`of`: the member's name, `-` or empty) by the first save of the open item that holds the line, however many members have had a part in the item, and stays with

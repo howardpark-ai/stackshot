@@ -664,7 +664,7 @@ def _answered_since_note(gid: str, item: dict[str, Any], sender: str) -> str:
         if _telling.touched_or_unknown(gid, who, float(rec["ts"])):
             return ""
         at = _hooks().render_when_words(dt.datetime.fromtimestamp(float(rec["ts"]), _hooks().zone()))
-        verb = "answered" if rec.get("kind") == "decision" else "commented on"
+        verb = "answered" if rec.get("kind") == "decision" else "asked a question on" if rec.get("question") else "commented on"
         words = _save_hooks().answers_mod()._answer_words(rec, 200)
         where = "on GitHub" if rec.get("via") == "github" else "on the board"
         return f"\n(note: {_model.owner_display(item.get('metadata'))} {verb} {_gh.shown(gid)} {where} at {at} {_cfg.tz_abbr()}{': ' + words if words else ''}. You have not written to the item since his answer, so what you hold of it may be out of date: read it again before you rely on it)"
@@ -1697,7 +1697,7 @@ def update_unlocked(
             meta["watch_reason"] = watch_ok[:300]
         elif wake_changed or not meta.get("wake"):
             meta.pop("watch_reason", None)      # a reason belongs to the wake it was given for: another wake without one, or no wake, drops it
-        fc.call(_gates.gate_decision_again, item_was, meta, was_needs, ask_was, gid)
+        fc.call(_gates.gate_decision_again, item_was, meta, was_needs, ask_was, gid, str(item.get("description") or ""))
         if _writes.session_next() and h.model_guards_on() and not (reopening or _writes.reformat()) and item_was.get("status") == "open":
             fc.call_depending("the check that the clock is not renewed without progress", "it reads his words in said, which is refused above", said_bad,
                               _gates.gate_clock_renewal, item_was, meta, gid, steps_old, steps_new, description, said_l, sender, list_end_words)      # no clock renewal without progress: a session's write only
