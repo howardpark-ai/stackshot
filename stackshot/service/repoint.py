@@ -145,6 +145,16 @@ def _settings(name: str) -> list[str]:
     return sorted(found)
 
 
+def _as_listed(name: str, roles: dict[str, Any]) -> str:
+    """`name` as the registry or a project page spells it, when it was typed in another letter case and no session answers to it as typed (an item may hold the session by its stored id or its exact
+    name, which a different case would not match): the one spelling that fits, else `name` as typed."""
+    if _sr.resolve(name):
+        return name
+    fold = name.casefold()
+    hits = {n for n in (*roles, *(str(r.get("name") or "") for r in _sr._sessions_index().values())) if n and n.casefold() == fold}
+    return next(iter(hits)) if len(hits) == 1 else name
+
+
 def repoint(frm: str, to: str, apply: bool = False) -> dict[str, Any]:
     """→ {dry_run, from, to, to_front, items: [{item, project, changed, left, written?}], written, created: n open items `frm` created, settings: [str], told: [item ids the notice names]}.
     Refused (ToolError): a name missing, the person the board is for on either side, both names one session, or a TO no project page lists (or lists as retired). A second run finds nothing left to move."""
@@ -157,6 +167,7 @@ def repoint(frm: str, to: str, apply: bool = False) -> dict[str, Any]:
     if _contacts._contact_same(frm, to):
         raise ToolError(f"{frm} and {to} are one session")
     roles = _anc.session_roles()
+    frm = _as_listed(frm, roles)
     listed = _sr._role_name(roles, to)
     if not listed or roles[listed].get("retired"):
         raise ToolError(f"no project page lists {to} as an agent in use: name one that is listed")

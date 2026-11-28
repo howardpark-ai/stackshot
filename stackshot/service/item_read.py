@@ -78,7 +78,7 @@ def _hub_sessions(project: str) -> tuple[str, str, list[str], list[str], str]:
     background agents of the page, of its pilot root and of its hub, together."""
     reg = _anc.registry()
     hub = _anc.hub_of(project, reg)
-    keys = [k for k in dict.fromkeys([str(project).strip("/"), _anc.pilot_root(project), hub]) if k]
+    keys = _anc.front_pages(project, reg)
     back, front = [], []
     for k in keys:
         e = reg.get(k) or {}

@@ -47,8 +47,7 @@ def fronts(project: str, reg: dict[str, dict[str, Any]] | None = None) -> dict[s
     hub, as item_read._hub_sessions reads them, and the agents only the project record holds (their page line still owed, projects.with_pending). {} when the project names none."""
     from stackshot.projects import projects as _prj
     reg = _prj.with_pending(_anc.registry() if reg is None else reg, made=True)
-    key = str(project or "").strip().strip("/")
-    keys = [k for k in dict.fromkeys([key, _anc.pilot_root(key), _anc.hub_of(key, reg)]) if k]
+    keys = _anc.front_pages(project, reg)
     back: set[str] = set()
     for k in keys:
         back |= {str(x) for x in ((reg.get(k) or {}).get("back_agents") or {})} | set(_anc.surface_agents(reg.get(k) or {}))      # an agent that is not a sala session is no contact an item's person talks to

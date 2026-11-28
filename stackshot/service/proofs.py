@@ -115,10 +115,11 @@ def step_proof_set(meta: dict[str, Any], steps: list[dict[str, Any]], spec: Any)
 
 
 def step_proof_move(meta: dict[str, Any], old: str, new: str) -> None:
-    """A step the server rewords keeps its proof: the one stored under the old words goes under the new ones, so the event that finishes the step still finishes it."""
+    """A step the server rewords keeps its proof: the one stored under the old words goes under the new ones, so the event that finishes the step still finishes it. When a step already stands under the
+    new words (two lines that read alike once reworded), its own proof stays and the old one is not laid over it; a step with none takes the old one."""
     proofs = dict(meta["step_proof"]) if isinstance(meta.get("step_proof"), dict) else {}
     if (pv := proofs.pop(_steps.key(old), None)) is not None:
-        proofs[_steps.key(new)] = pv
+        proofs.setdefault(_steps.key(new), pv)
         meta["step_proof"] = proofs
 
 

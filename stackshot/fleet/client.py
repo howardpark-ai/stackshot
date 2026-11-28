@@ -797,7 +797,8 @@ def repoint(argv: list[str], timeout: float = 180.0) -> int:
         print(REPOINT_USAGE, file=sys.stderr); return 1
     status, d = post("repoint", {"from": names[0], "to": names[1], "apply": apply_}, timeout)
     if status != 200 or not isinstance(d, dict):
-        print(f"stackshot: items not moved [{status}] {d.get('error') if isinstance(d, dict) else d}"[:600]); return 1
+        why = d.get("error") if isinstance(d, dict) else d
+        print((f"stackshot: items not moved [{status}] {why}" if status < 500 else f"stackshot: repoint stopped [{status}] {why}; items it wrote before stopping stay moved, run it again to see what is left")[:600]); return 1
     items = d.get("items") or []
     print(f"stackshot: {'applied' if apply_ else 'dry run (nothing written)'}: {d.get('from')} to {d.get('to')}, {len(items)} open item(s) name it" + (f", {d.get('written', 0)} written" if apply_ else ""))
     for r in items:

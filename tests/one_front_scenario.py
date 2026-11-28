@@ -23,14 +23,19 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
 for d in ("store/a", "fleet/a", "state/cache", "brain/projects", "secrets"): (T / d).mkdir(parents=True)
 CHIEF, SOLO, SOLOB, MAIN, SIDE, BUILD = "team-chief", "home-golf-main", "home-golf-builder", "home-delta-main", "home-delta-desk", "home-delta-builder"
+CLUB = "home-club-main"
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
-(T / "fleet/a/sessions.json").write_text(json.dumps({f"00000000-0000-4000-8000-00000000000{i}": {"name": n, "machine": "a", "url": "", "seen": "x"} for i, n in enumerate((CHIEF, SOLO, SOLOB, MAIN, SIDE, BUILD), 1)}))
+(T / "fleet/a/sessions.json").write_text(json.dumps({f"00000000-0000-4000-8000-00000000000{i}": {"name": n, "machine": "a", "url": "", "seen": "x"} for i, n in enumerate((CHIEF, SOLO, SOLOB, MAIN, SIDE, BUILD, CLUB), 1)}))
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
-def page(key, agents):
-    (T / f"brain/{key}.md").write_text(f"---\ntype: project\ntitle: {key[9:].title()}\nagents:\n{agents}\nstatus: active\n---\n\n# x\n", encoding="utf-8")
+def page(key, agents="", hub=""):
+    (T / f"brain/{key}.md").parent.mkdir(parents=True, exist_ok=True)
+    (T / f"brain/{key}.md").write_text(f"---\ntype: project\ntitle: {key[9:].title()}\n" + (f"agents:\n{agents}\n" if agents else "") + (f"hub: {hub}\n" if hub else "") + "status: active\n---\n\n# x\n", encoding="utf-8")
 page("projects/chief", f"  {CHIEF}: talks to the owner about everything")
 page("projects/golf", f"  {SOLO}: talks to the owner about golf\n  background:\n    {SOLOB}: builds golf")
 page("projects/delta", f"  {MAIN}: talks to the owner\n  {SIDE}: answers at the side desk\n  background:\n    {BUILD}: builds delta")
+page("projects/golf/club", f"  {CLUB}: talks to the owner about the club")          # a sub-page of golf (no front agent) that lists its own
+page("projects/golf/range", hub="projects/delta")                                   # a sub-page whose hub lists fronts
+page("projects/golf/shop")                                                          # a sub-page with neither
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -44,7 +49,7 @@ from stackshot.web.routes import client_api
 from stackshot.projects import pages, project_registry as pr, project_verbs as pv, keeper as kp
 from stackshot.router import page_debt, router
 from stackshot.anchors import anchors
-from stackshot.service import contacts, question, item_open, job_alert, telling, proofs, writes, update
+from stackshot.service import item_read, contacts, question, item_open, job_alert, telling, proofs, writes, update
 from stackshot.model import steps as st
 from stackshot.github import ghsync as _gh
 from stackshot.fleet import client, sessions_registry as sr
@@ -147,6 +152,25 @@ check("a person's inbound message is held for the project's background agent", l
 cfg.CFG.setdefault("router", {})["general_home"] = cfg.CFG["router"]["general_ops"] = MAIN
 check("with a general agent too, the contact is the configured front and notices keep the general one", anchors.contact_main("projects/golf") == CHIEF and contacts._contact_of({"project": "projects/golf", "contact": SOLO}) == CHIEF
       and anchors.contact_main("projects/delta") == MAIN, (anchors.contact_main("projects/golf"), anchors.fallback_main("projects/golf")))
+
+# ---- a sub-page: its own front agent, else its hub's, else the configured one
+pages.cmd_registry(quiet=True)
+check("a sub-page's registry entries are read", all(k in anchors.registry() for k in ("projects/golf/club", "projects/golf/range", "projects/golf/shop")), sorted(anchors.registry()))
+def sub(name, **kw): return mk(subject=f"[home] on {name}", project=f"projects/golf/{name}", **kw)
+r = sub("club"); g = r.split()[1] if r.startswith("created") else ""
+check("a sub-page that lists its own front agent: that agent is the default contact, not the configured one", g and who(g) == CLUB and anchors.contact_main("projects/golf/club") == CLUB and anchors.has_front("projects/golf/club"), (r, anchors.contact_main("projects/golf/club")))
+r = sub("range"); g = r.split()[1] if r.startswith("created") else ""
+check("a sub-page whose hub lists fronts: the hub's -main agent is the default contact", g and who(g) == MAIN and anchors.contact_main("projects/golf/range") == MAIN and anchors.has_front("projects/golf/range"), (r, anchors.contact_main("projects/golf/range")))
+r = sub("shop"); g = r.split()[1] if r.startswith("created") else ""
+check("a sub-page with neither: the configured front is the default contact", g and who(g) == CHIEF and anchors.contact_main("projects/golf/shop") == CHIEF and not anchors.has_front("projects/golf/shop"), (r, anchors.contact_main("projects/golf/shop")))
+r = sub("club", contact=CLUB)
+check("a sub-page's own front agent can be named as its contact", r.startswith("created") and who(r.split()[1]) == CLUB, r)
+r = sub("range", contact=MAIN)
+check("a sub-page's hub front agent can be named as its contact", r.startswith("created") and who(r.split()[1]) == MAIN, r)
+e = refused(lambda: sub("club", contact=CHIEF))
+check("the configured front is not offered to a sub-page that lists its own", e is not None and "not a front agent" in str(e), e)
+check("a sub-page's items are kept by its own front agent, else its hub's, else the configured one", (item_read._front_keepers("projects/golf/club"), item_read._front_keepers("projects/golf/range"), item_read._front_keepers("projects/golf/shop"))
+      == ([CLUB], sorted([MAIN, SIDE], key=lambda n: (not n.endswith("-main"), n)), [CHIEF]), (item_read._front_keepers("projects/golf/club"), item_read._front_keepers("projects/golf/range"), item_read._front_keepers("projects/golf/shop")))
 
 # ---- repoint
 now0 = time.time()
@@ -253,6 +277,35 @@ writes.save = one_save
 e = refused(lambda: move(SIDE, BUILD))
 writes.save = real_save
 check("repoint: a save that fails still sends the notice for the items already moved", isinstance(e, OSError) and len(saved) == 1 and len(told) == 1 and told[0][0][:2] == (saved[0], sr._store_ref(BUILD)), (e, saved, told))
+
+# FROM typed in another letter case moves what the right case moves
+clear()
+put(13, mover=SIDE, needs=["external", SIDE], observers=[SIDE], contact=SIDE, next=f"{SIDE}: draft the note", steps=[{"text": f"{SIDE}: draft the note", "status": "open"}], then=SIDE)
+s, d = move(SIDE.upper(), BUILD); m = rd(13)["metadata"]
+check("repoint: FROM typed in capitals moves every field the lower-case name moves", s == 200 and set(d["items"][0]["changed"]) == {"mover", "then", "needs", "observers", "next", "contact"} and who(13) == MAIN
+      and who(13, "mover") == BUILD and m["next"] == f"{BUILD}: draft the note" and not d["items"][0]["left"], (s, d, m))
+
+# two lines that read alike once reworded keep a proof
+clear()
+a1, a2 = f"{SIDE}: merge the change", f"{BUILD}: merge the change"
+put(14, mover=SIDE, next=f"{a1}\n{a2}", steps=[{"text": a1, "status": "open"}, {"text": a2, "status": "open"}], step_proof={st.key(a1): "pr_merged example/repo#5", st.key(a2): "pr_merged example/repo#6"})
+move(SIDE, BUILD); m = rd(14)["metadata"]
+check("repoint: a step already worded as the new one keeps its own proof, none is dropped", m.get("step_proof") == {st.key(a2): "pr_merged example/repo#6"}, m)
+clear()
+put(15, mover=SIDE, next=f"{a1}\n{a2}", steps=[{"text": a1, "status": "open"}, {"text": a2, "status": "open"}], step_proof={st.key(a1): "pr_merged example/repo#5"})
+move(SIDE, BUILD); m = rd(15)["metadata"]
+check("repoint: the old step's proof goes to the step already worded as the new one when that has none", m.get("step_proof") == {st.key(a2): "pr_merged example/repo#5"}, m)
+
+# a save that fails part way: the command line does not say nothing moved
+real_post = client.post
+client.post = lambda what, body, timeout=0: (500, {"error": "OSError: no space left"})
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf): rc = client.main(["client.py", "repoint", SIDE, BUILD, "--apply"])
+client.post = lambda what, body, timeout=0: (400, {"error": "from and to = two session names"})
+buf2 = io.StringIO()
+with contextlib.redirect_stdout(buf2): rc2 = client.main(["client.py", "repoint", SIDE, BUILD, "--apply"])
+client.post = real_post
+check("repoint on the command line: a failure part way says what stays moved, a refusal says nothing moved", rc == 1 and "stay moved" in buf.getvalue() and "items not moved" not in buf.getvalue() and rc2 == 1 and "items not moved" in buf2.getvalue(), (buf.getvalue(), buf2.getvalue()))
 
 # the new session is a front agent of another project: contact only where an update would take it
 clear()
