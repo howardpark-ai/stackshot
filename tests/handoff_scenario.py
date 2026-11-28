@@ -859,7 +859,31 @@ out_aq = _wt_update.stackshot_update("a35", status="completed", outcome="done", 
 last_an = (mt(35).get("handoff_history") or [{}])[-1]
 check("12 close: a close through update (status=completed, the step marked in the call) on such an item: mover and then dropped, the record to him ends into the history unchanged but for how it ended (not taken, no event added), get shows the closed hand-off line (handed to, not taken, live; see handoff_closed_scenario.py)",
       rd(35)["status"] == "completed" and "mover" not in mt(35) and "then" not in mt(35) and "handoff" not in mt(35) and last_an.get("ended") == "the item closed" and not last_an.get("taken_at") and "events" not in last_an
-      and {k: v for k, v in last_an.items() if k not in ("ended", "ended_at")} == pre_as[2] and "handoff: handed to" in _wt_get.stackshot_get("a35") and "not taken, live" in _wt_get.stackshot_get("a35"), (mt(35), ho(35), pre_as[2], _wt_get.stackshot_get("a35")))
+      and {k: v for k, v in last_an.items() if k not in ("ended", "ended_at", "closed_at")} == pre_as[2] and "handoff: handed to" in _wt_get.stackshot_get("a35") and "not taken, live" in _wt_get.stackshot_get("a35"), (mt(35), ho(35), pre_as[2], _wt_get.stackshot_get("a35")))
+# a later write to a closed item moves its state clock; the live time stays the close's (the close is set 4 h back: the record's close time and the state clock)
+def live_after_edits(i):
+    raw = rd(i); back = time.time() - 4 * 3600
+    raw["state_updated"] = raw["updated"] = back
+    rec_c = raw["metadata"].get("handoff") or raw["metadata"]["handoff_history"][-1]
+    stamped = isinstance(rec_c.get("closed_at"), float)
+    rec_c["closed_at"] = back
+    (T / f"store/a/{i}.json").write_text(json.dumps(raw))
+    def shown(): return [ln for ln in _wt_get.stackshot_get(f"a{i}").splitlines() if ln.startswith("handoff: handed to")]
+    was = shown(); seen = []
+    for kw in ({"description": "- A thing\n- It shipped\n- Edited later"}, {"status": "completed"}, {"due": "2099-01-01"}):
+        clock = rd(i)["state_updated"]
+        time.sleep(0.01)
+        upd(i, "team-back", **kw)
+        seen.append((sorted(kw), rd(i)["state_updated"] > clock, shown() == was))
+    return stamped and len(was) == 1 and was[0].endswith(f"live {H._hhmm(back, time.time(), ZONE)}") and all(moved and same for _, moved, same in seen), (stamped, was, seen, shown())
+ok_ut, got_ut = live_after_edits(35)
+check("12 close: later writes to the closed item (untaken record) move its state clock and leave the live time", ok_ut, got_ut)
+item(172, mover="team-back", next="team-back: do the thing")
+upd(172, "home-send", mover="home-peer", next="home-peer: do the thing", check=CHK)
+upd(172, "home-peer", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", done=[1])
+check("12 close: a hand-off the closing write takes stays on the closed item with its close time", isinstance(ho(172).get("taken_at"), float) and isinstance(ho(172).get("closed_at"), float), mt(172))
+ok_tk, got_tk = live_after_edits(172)
+check("12 close: later writes to the closed item (taken record) move its state clock and leave the live time", ok_tk, got_tk)
 shut = json.loads(json.dumps(rd(35))); shut["metadata"].update(mover="team-back", needs=["decision"], ask=ASK, handoff=dict(pre_as[2]))
 check("12 close: the hooks themselves leave a closed item alone: _settle_mover_on_save on a closed item with a stored agent mover beside his state changes nothing",
       _mover_steps._settle_mover_on_save(shut, rd(35)) is False and shut["metadata"]["mover"] == "team-back", shut["metadata"])

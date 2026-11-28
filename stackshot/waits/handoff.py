@@ -19,6 +19,7 @@ An alive item has one mover. When a write changes the effective mover (model.der
   recovery_at    when the ladder, with nobody left to hand the item to, asked the fleet's builder (a front-only project's -main agent: `recovery_by` says who, in words, the fleet's builder when absent) to recover the session (recovery_reason says why): once per record, so a pass that sees it again sends nothing; the
                  mover writing to the item, or the record ending (the item handed on), starts a new episode
   events         the last few lines about what the server did with it ({at, text}), shown on the item
+  closed_at      when the item was closed, on its last hand-off, written by the save that closes it (`stamp_close`); a later write to the closed item leaves it
 
 The record stays after it is taken (history); a newer hand-off moves the old one into metadata.handoff_history (the last three).
 
@@ -728,16 +729,28 @@ def last_record(item: dict[str, Any] | None) -> dict[str, Any] | None:
     return hist[-1] if hist else None
 
 
+def stamp_close(item: dict[str, Any], before: dict[str, Any] | None, now: float) -> bool:
+    """The save that closes an item (open in `before`, not in `item`) writes `closed_at` on its last hand-off, so the closed line keeps the close's own time: the item's state clock
+    also moves on a later edit of a closed item. A second close, after a reopen, writes it anew. → True when it was written."""
+    if not before or before.get("status") != "open" or item.get("status") == "open":
+        return False
+    r = last_record(item)
+    if r:
+        r["closed_at"] = now
+    return bool(r)
+
+
 def closed_words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: Callable[[str], str] = str) -> list[str]:
-    """The one hand-off line of a closed item, with the three times it has: handed (the record's `at`), taken (its `taken_at`, or "not taken"), live (the item's close clock,
-    `state_updated`: the moment the item closed, which for a release is the moment its merge was seen live; a later close moves it). [] when the item has no hand-off on record.
+    """The one hand-off line of a closed item, with the three times it has: handed (the record's `at`), taken (its `taken_at`, or "not taken"), live (its `closed_at`:
+    the moment the item closed, which for a release is the moment its merge was seen live; a later close moves it, no other write does; no live part when the record
+    has none). [] when the item has no hand-off on record.
       handoff: handed to X at 14:02, taken 14:05, live 14:40"""
     r = last_record(item)
     if not r or not r.get("at"):
         return []
     to = label(r.get("to") or "") if not _model.is_owner(r.get("to")) else _model.owner_display()
     taken = f"taken {_hhmm(float(r['taken_at']), now, tz)}" if r.get("taken_at") else "not taken"
-    live = float(item.get("state_updated") or 0)
+    live = float(r.get("closed_at") or 0)
     parts = [f"handed to {to} at {_hhmm(float(r['at']), now, tz)}", taken] + ([f"live {_hhmm(live, now, tz)}"] if live else [])
     return ["handoff: " + ", ".join(parts)]
 
