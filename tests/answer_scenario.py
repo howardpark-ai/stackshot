@@ -263,14 +263,14 @@ check("the form needs no script and fits a phone: the box is full width, the but
 check("the answer is sent by script: a same-origin fetch of the form's fields and the pressed button, url-encoded, then location.replace "
       "with the item page it landed on (the pre-answer page is replaced in history); the buttons are disabled meanwhile, a refusal shows inline",
       ui_render._ANSWER_JS in p1 and p1.index("</form>") < p1.index(ui_render._ANSWER_JS)
-      and all(x in ui_render._ANSWER_JS for x in ("document.querySelector('form.ianswer')", "ev.preventDefault()", "if(s&&s.name)d.append(s.name,s.value)",
-                                              "fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',redirect:'follow'})",
-                                              "location.replace(u.href)", "b.disabled=!on", "E.hidden=false"))
+      and all(x in ui_render._ANSWER_JS for x in ("F.matches('form.ianswer,form.hanswer')", "ev.preventDefault()", "if(s&&s.name)d.append(s.name,s.value)",
+                                              "fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',headers:{'Accept':'application/json'}})",
+                                              "location.replace(to)", "b.disabled=!on", "E.hidden=false"))
       and '<p class="isent warn aerr" role="alert" hidden></p></form>' in p1)
 check("the no-script fallback: the form is still a plain POST to the answer address with named submit buttons, and a browser "
       "without SubmitEvent.submitter keeps it (the script returns before preventDefault)",
       'method="post" action="/items/a1/answer"' in form1.group(0) and form1.group(0).count('type="submit"') == 1 and form1.group(0).count('type="radio" name="choice"') == 3
-      and ui_render._ANSWER_JS.index("if(s===undefined)return;") < ui_render._ANSWER_JS.index("ev.preventDefault()"))
+      and "s===undefined)return;ev.preventDefault()" in ui_render._ANSWER_JS)
 check("pages restored from the back-forward cache reload: the item page (with or without the form) and the project page; "
       "the answer script only where there is a form",
       ui_render._BFCACHE_JS in p1 and ui_render._BFCACHE_JS in p4 and ui_render._BFCACHE_JS in B.item_html("a1") and ui_render._BFCACHE_JS in B.routing_html("projects/alpha")
@@ -364,6 +364,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("home answer: the Location's query parses back to exactly sent and item, nothing from the item's subject (&x=1#frag, %, CR/LF, an astral character, a forged &sent=) in it",
           r_sp.status_code == 303 and _u.path == "/" and parse_qs(_u.query, keep_blank_values=True) == {"sent": ["empty"], "item": ["a12"]} and _u.fragment == "task-a-12"
           and r_sp.headers["location"] == "/?sent=empty&item=a12#task-a-12" and not any(x in r_sp.headers["location"] for x in ("spoof", "%", "\r", "\n", "Cookie", "x=1")), r_sp.headers["location"])
+    rj = post("/items/a12/answer", {"token": tok("a12"), "text": " ", "act": "comment", "back": "/#task-a-12"}, headers={**SAME, "Accept": "application/json"})
+    rj0 = post("/items/a12/answer", {"token": tok("a12"), "text": " ", "act": "comment"}, headers={**SAME, "Accept": "application/json"})
+    check("send script: a JSON ask from a home row gets {sent, to} (to is the address the 303 would go to), and one with no back gets {sent} alone, no redirect either way",
+          rj.status_code == 200 and rj.json() == {"sent": "empty", "to": "/?sent=empty&item=a12#task-a-12"} and "location" not in rj.headers
+          and rj0.status_code == 200 and rj0.json() == {"sent": "empty"} and "location" not in rj0.headers, (rj.text, rj0.text))
     check("home answer: the item page's own form (no back) behaves as before: 303 to its own page, ?sent only", b_(None).headers["location"] == "/items/a5?sent=empty", b_(None).headers["location"])
     check("home answer: _answer_back keeps (path, anchor) for a known page and None for the rest", _rt_answers._answer_back("/#task-a-5") == ("/", "#task-a-5") and _rt_answers._answer_back("/projects/alpha/sub") == ("/projects/alpha/sub", "")
           and _rt_answers._answer_back("/index.html") == ("/index.html", "") and _rt_answers._answer_back(None) is None and _rt_answers._answer_back("//x") is None)

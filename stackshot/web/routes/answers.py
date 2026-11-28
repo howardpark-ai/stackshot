@@ -79,8 +79,6 @@ async def item_answer(request: Request):
         code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who, f("ref"), file_ids(form.get("files") or []))      # ref: the question the form showed; a form drawn before it carried one sends none
     except _memo.Refused as e:      # a bad list of files: nothing written, the files stay waiting; the sentence says why (the page's notice for it comes with the memo box)
         return PlainTextResponse(str(e), status_code=e.status, headers={"Cache-Control": "no-store"})
-    if request.headers.get("accept", "").strip().lower() == "application/json":      # a script that asks for the code itself (the answer frame's) gets it in place of the redirect; every gate above is the same for it
-        return JSONResponse({"sent": code}, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
     back = _answer_back(f("back"))
     if back:      # from the home page's row: back to the page the form was on, with the item named for its notice
         path, frag = back
@@ -88,7 +86,13 @@ async def item_answer(request: Request):
         if code in ("done", "donenote", "stepreply"):     # and who takes it from here: a session name, which the page shows only when it is one of the fleet's it knows
             try: q["then"] = _session_label(str(_model.derive(_load(gid)).mover or ""))[:80]
             except Exception: pass
-        return RedirectResponse(path + "?" + urlencode(q) + frag, status_code=303, headers={"Cache-Control": "no-store"})
+        to = path + "?" + urlencode(q) + frag
+    else:
+        to = ""
+    if request.headers.get("accept", "").strip().lower() == "application/json":      # a script that asks for the code itself gets it in place of the redirect; every gate above is the same for it. With a `back` (the home page's row) it also gets `to`, the address the redirect would go to, so the page opens it without a second read of the page
+        return JSONResponse({"sent": code, **({"to": to} if to else {})}, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    if to:
+        return RedirectResponse(to, status_code=303, headers={"Cache-Control": "no-store"})
     return RedirectResponse(f"/items/{_gh.href_id(gid)}?" + urlencode({"sent": code}), status_code=303, headers={"Cache-Control": "no-store"})
 
 

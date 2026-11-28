@@ -913,10 +913,10 @@ AJ13 = r2._ANSWER_JS; BJ13 = r2._BFCACHE_JS
 BOX13 = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 ip13, ip13_done = Bd().item_html("a1", answer=BOX13, watch=None), Bd().item_html("a40", answer=BOX13, watch=None)
 check("the answer is sent by script: a same-origin fetch of the form's fields and the pressed button, then location.replace with the item page it landed on, the buttons disabled meanwhile, a refusal inline",
-      AJ13 in ip13 and all(x in AJ13 for x in ("document.querySelector('form.ianswer')", "ev.preventDefault()", "if(s&&s.name)d.append(s.name,s.value)",
-                                                 "fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',redirect:'follow'})", "location.replace(u.href)", "b.disabled=!on", "E.hidden=false"))
+      AJ13 in ip13 and all(x in AJ13 for x in ("F.matches('form.ianswer,form.hanswer')", "ev.preventDefault()", "if(s&&s.name)d.append(s.name,s.value)",
+                                                 "fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',headers:{'Accept':'application/json'}})", "location.replace(to)", "b.disabled=!on", "E.hidden=false"))
       and '<p class="isent warn aerr" role="alert" hidden></p></form>' in ip13, AJ13[:200])
-check("the script returns before preventDefault when the browser has no SubmitEvent.submitter, so the plain POST still works", AJ13.index("if(s===undefined)return;") < AJ13.index("ev.preventDefault()"))
+check("the script returns before preventDefault when the browser has no SubmitEvent.submitter, so the plain POST still works", "s===undefined)return;ev.preventDefault()" in AJ13)
 check("the answer script is only on a page with the form", AJ13 not in ip13_done and AJ13 not in ITEMP and 'class="ianswer"' not in ip13_done)
 PRJP = Bd().routing_html("projects/alpha")
 check("pages restored from the back-forward cache reload: the item page (with or without a form), the project page, Closed and Projects",
