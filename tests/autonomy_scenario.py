@@ -9,6 +9,7 @@ Covers:
   * the file's place: `[paths] autonomy`, else `autonomy.toml` in `[paths] repo`;
   * the kinds and levels of the design, and the example profile in docs/ naming each kind with a level word;
   * the read-back through the `autonomy` tool: one kind gives `<kind>: <level>`, none gives the whole table, an unknown kind says hand-on;
+  * `stackshot autonomy PERSON KIND`: the word and its exit code (0, 10, 11, 12; 2 for a usage error), hand-on for every gap, never a write, the same answer as the tool for all fourteen kinds;
   * doctor names a member with no table, a kind with no level, a word that is no level, an unreadable file, and says nothing is wrong for a whole profile; it never changes the file.
 
     tests/run-suite autonomy      -> exit 0 / 1"""
@@ -142,6 +143,36 @@ check("tool: no kind gives one line per kind, in order, with its level and meani
       and out[4].splitlines()[0].startswith("release: auto · ") and out[4].splitlines()[1].startswith("release-migrating: ask-first · "), out)
 check("tool: `autonomy` is registered and no tool writes the profile", res and "autonomy" in res["names"] and not [n for n in res["names"] if n.startswith("autonomy") and n != "autonomy"], res and res["names"])
 
+
+# ---- 6b. the `stackshot autonomy PERSON KIND` command: the word and an exit code, read only, the same answer as the tool
+WORDS = ["auto", "when-told", "ask-first", "hand-on"]; CODES = {"auto": 0, "when-told": 10, "ask-first": 11, "hand-on": 12}
+BIN = os.path.join(STACK, "bin", "stackshot")
+def cmd(path, *args):
+    r = subprocess.run([BIN, "autonomy", *args], capture_output=True, text=True, env=env_for(path), cwd=STACK, stdin=subprocess.DEVNULL, timeout=300)
+    return r.stdout.strip(), r.returncode, r.stderr
+PROFILE.write_text("version = 1\n[person.Pat]\n" + "\n".join(f'{k} = "{WORDS[i % 4]}"' for i, k in enumerate(KINDS[:13])) + "\n", encoding="utf-8")   # the last kind has no key
+stamp = (PROFILE.read_bytes(), PROFILE.stat().st_mtime_ns)
+got = {k: cmd(cfg, "Pat", k)[:2] for k in KINDS}
+check("command: each level word gives its exit code and the word", all(got[k] == (WORDS[i % 4], CODES[WORDS[i % 4]]) for i, k in enumerate(KINDS[:13])), got)
+check("command: a kind with no key reads hand-on and exits 12", got[KINDS[13]] == ("hand-on", 12), got[KINDS[13]])
+check("command: an alias in another case reads the same row", cmd(cfg, "pa", "release")[:2] == ("auto", 0) and cmd(cfg, "PAT", "merge")[:2] == (WORDS[8 % 4], CODES[WORDS[8 % 4]]), None)
+check("command: an unknown kind and a missing person read hand-on and exit 12", cmd(cfg, "Pat", "bogus")[:2] == ("hand-on", 12) and cmd(cfg, "Nobody", "release")[:2] == ("hand-on", 12))
+PROFILE.unlink()
+check("command: a missing file reads hand-on and exits 12", cmd(cfg, "Pat", "release")[:2] == ("hand-on", 12))
+PROFILE.write_bytes(stamp[0]); os.utime(PROFILE, ns=(stamp[1], stamp[1]))
+for args in ((), ("Pat",), ("Pat", "release", "extra"), ("Pat", "release", "--set", "auto")):
+    o, c, e = cmd(cfg, *args)
+    check(f"command: usage error {args!r} exits 2 and prints no level", c == 2 and o == "" and "usage" in e.lower(), (o, c, e[-200:]))
+check("command: it never writes (bytes and stamp unchanged)", (PROFILE.read_bytes(), PROFILE.stat().st_mtime_ns) == stamp)
+check("command: no write flag in its help", "--" not in " ".join(w for w in subprocess.run([BIN, "autonomy", "-h"], capture_output=True, text=True, env=env_for(cfg), cwd=STACK, timeout=300).stdout.split() if w.startswith("--") and w not in ("--help",)))
+bad = T / "badcfg.toml"; bad.write_text("this is not = [ toml", encoding="utf-8")
+check("command: a config that does not load reads hand-on and exits 12", cmd(bad, "Pat", "release")[:2] == ("hand-on", 12))
+TOOL_ALL = TOOL.replace('got = [await call(person="Pat", kind="release"), await call(person="pa", kind="spend"), await call(person="Pat", kind="bogus"), await call(person="Nobody", kind="release"), await call(person="Pat")]',
+                        'got = [await call(person="Pat", kind=k) for k in %r]' % (KINDS,))
+assert TOOL_ALL != TOOL
+r = run(cfg, TOOL_ALL, {"STACKSHOT_GOOGLE_CLIENT_ID": "test-client-id.apps.googleusercontent.com", "STACKSHOT_GOOGLE_CLIENT_SECRET": "test-secret"})
+res = next((json.loads(ln[7:]) for ln in r.stdout.splitlines() if ln.startswith("RESULT ")), None)
+check("command and tool agree for all 14 kinds on one profile", res and [o.split(": ")[1].split(" ")[0] for o in res["out"]] == [got[k][0] for k in KINDS], (res and res["out"], r.stderr[-300:]))
 
 # ---- 7. doctor
 def doctor(label, text, members=("Pat",)):

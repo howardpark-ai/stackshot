@@ -197,7 +197,11 @@ The four levels, least to most careful: `auto` (acts without asking), `when-told
 
 The fourteen kinds, each with its one-line meaning, are a tuple in `stackshot/core/autonomy.py` (a new kind is added in code, never in the file): `release`, `release-migrating`, `design-choice`, `new-notice`, `spend`, `message-person`, `email`, `connector-write`, `merge`, `delete`, `retire`, `revive`, `fleet-op`, `public-repo`. [`autonomy.example.toml`](autonomy.example.toml) holds a full table.
 
-A missing file, person, kind or level word, an unknown kind and a file that is not TOML all read `hand-on`, the most careful level: nothing is permitted by default. The `autonomy(person, kind)` tool reads the profile (no kind: the person's whole table); there is no tool that writes it. `stackshot doctor` names the gaps (a member with no table, a kind with no level, a word that is no level, a file that cannot be read) and fixes nothing. In this release nothing acts on the profile: no hook or rule reads it yet.
+A missing file, person, kind or level word, an unknown kind and a file that is not TOML all read `hand-on`, the most careful level: nothing is permitted by default. The `autonomy(person, kind)` tool reads the profile (no kind: the person's whole table); there is no tool that writes it. `stackshot doctor` names the gaps (a member with no table, a kind with no level, a word that is no level, a file that cannot be read) and fixes nothing.
+
+`stackshot autonomy <person> <kind>` is the same read for a script that does not import stackshot: it prints the level word and exits 0 for `auto`, 10 for `when-told`, 11 for `ask-first` and 12 for `hand-on` (also for an unknown person or kind, a missing file and a config that does not load), and 2 for a usage error. It calls `autonomy.level` and has no flag that writes.
+
+In this release nothing acts on the profile: no hook or rule reads it yet.
 
 ## Host words: naming a machine by its role
 
