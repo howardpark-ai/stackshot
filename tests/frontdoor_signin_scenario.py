@@ -18,8 +18,8 @@ Covers:
   * fail closed: the board's 403, 404, 400, 429, any 5xx (and a bearer that is not ASCII is no bearer: it is never sent), a redirect, a body that is no JSON, names no address or a bad one, an answer that never ends or arrives a byte at a time (a total
     deadline), a board that cannot be reached, a secret that is missing, loose or short, a members file that cannot be read, an identity that cannot be put in a header, a board that accepts a
     request with no token: each is 503 with no identity header, never 200 and never 401, and it is not remembered;
-  * the cache: a 200 of the board is reused for `cache_seconds` under a hash of the token and not longer; another token (even one sharing a long prefix) is never served from it; a refusal
-    and a failure are never kept; it is bounded; `cache_seconds = 0` turns it off; an unreadable secret or members file is an outage with a token in the cache too;
+  * the cache: a 200 of the board for a member's address is reused for `cache_seconds` under a hash of the token and not longer; another token (even one sharing a long prefix) is never served from it; a refusal,
+    a failure and an answer for an address no member holds are never kept; it is bounded; `cache_seconds = 0` turns it off; an unreadable secret or members file is an outage with a token in the cache too;
   * what is sent to the board: the caller's bearer as it came, a header signed with the secret read now (a rotated secret applies to the next request), nothing else of the caller's request;
   * what is never echoed: an identity header the client sends (of any of the names in use) is not the answer's, nor any other header of the request; no token, secret or address is in the log;
   * the board's machine token (`"via": "portal"`) is 403 with no identity unless `accept_portal_token` is true, and an answer that names no kind of token is 503; an address that is not
@@ -568,6 +568,17 @@ async def cache_part(board):
         board.accept(F, "dana.one@example.invalid")
         x = await r.get(F)
         check("cache: inside the window the answer of the cache is the first answer (the board is not asked again)", who(x) == KEY_A, who(x))
+        # an address no member holds may be registered at any moment, and its next request has to reach the board
+        N = tok("not-yet"); board.accept(N, "later@example.invalid")
+        n0 = board.calls(); x = await r.get(N); y = await r.get(N)
+        check("cache: an address no member holds is asked about at every request, and nothing is kept", who(x) == who(y) == "later@example.invalid" and board.calls() == n0 + 2
+              and hashlib.sha256(N.encode()).hexdigest() not in r.svc.cache, (who(x), who(y), board.calls() - n0))
+        MEMBERS.write_text(json.dumps({"later@example.invalid": ["main"]}))
+        try:
+            x = await r.get(N); y = await r.get(N)
+            check("cache: ... once a member holds it, the next request asks the board and that answer is kept", x.status_code == y.status_code == 200 and who(y) == "later@example.invalid" and board.calls() == n0 + 3, board.calls() - n0)
+        finally:
+            MEMBERS.write_text(json.dumps(MEMBER_RECORDS))
     finally:
         await r.close()
     # bounded

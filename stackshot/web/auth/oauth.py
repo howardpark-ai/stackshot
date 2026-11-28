@@ -13,6 +13,8 @@ from fastmcp.exceptions import ToolError
 
 from stackshot.core import behind_door as _door
 from stackshot.core import config as _cfg
+from stackshot.core import frontdoor_identity as _ident
+from stackshot.core import invites as _invites
 from stackshot.core import members as _members
 from stackshot.web.auth import signin as _signin
 from stackshot.web.auth.signin import _ui_is_board_client
@@ -21,6 +23,23 @@ from stackshot.web.auth.signin import _ui_is_board_client
 def _env(key: str) -> str:
     """A secret from the environment (secrets/oauth.env): STACKSHOT_<key>, or the older BOARD_MCP_ spelling."""
     return os.environ.get("STACKSHOT_" + key) or os.environ.get("BOARD_MCP_" + key) or ""
+
+
+def _barred(claims: dict) -> str:
+    """Why the registrations refuse the sign-in a verified token's claims describe (a key of `frontdoor_identity.REFUSALS`, "" when none does; core/invites.py). The
+    board's machine token is no Google sign-in, so no registration speaks of it."""
+    if claims.get("via") == "portal":
+        return ""
+    return _invites.admit(claims.get("email"), claims.get("sub"), claims.get("email_verified"))
+
+
+def _redirect_uris() -> list[str]:
+    """The redirect URIs a client may ask for: [auth] allowed_client_redirect_uris and the board's own callback, and on a board that can invite people those of the
+    apps its setup page names (`invites.APP_REDIRECT_URIS`)."""
+    out = list(_cfg.CFG["auth"].get("allowed_client_redirect_uris") or []) + [str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/ui/callback"]
+    if _invites.settings().on:
+        out += [u for u in _invites.APP_REDIRECT_URIS if u not in out]
+    return out
 
 
 def _auth():
@@ -85,7 +104,7 @@ def _auth():
         client_secret=sec,
         base_url=_cfg.CFG["auth"]["base_url"],
         required_scopes=scopes,
-        allowed_client_redirect_uris=list(_cfg.CFG["auth"].get("allowed_client_redirect_uris") or []) + [str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/ui/callback"],
+        allowed_client_redirect_uris=_redirect_uris(),
     )
     from stackshot.web.auth.cimd import _harden_cimd   # retry claude.ai's metadata fetch and serve the last good document when it fails
     mgr = getattr(p, "_cimd_manager", None)
@@ -118,7 +137,11 @@ def _who() -> str:
         return ""
     from fastmcp.server.dependencies import get_access_token
     tok = get_access_token()
-    email = (getattr(tok, "claims", None) or {}).get("email", "")
+    claims = getattr(tok, "claims", None) or {}
+    email = claims.get("email", "")
     if not _members.person_of_email(email):
         raise ToolError(f"Refused: {email or 'unknown identity'} is not allowed on this board")
+    why = _barred(claims)
+    if why:
+        raise ToolError(f"Refused: {email} is not let in. {_ident.REFUSALS[why]}")
     return email

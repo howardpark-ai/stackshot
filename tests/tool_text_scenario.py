@@ -480,7 +480,7 @@ one
 
     # ================================================================= 6. the real files
     TEXT_DIR = pathlib.Path(STACK, "stackshot", "web", "tools", "text")
-    mods = ["anchors", "brief", "complete", "create", "get", "message", "route", "rules", "sessions", "update"]
+    mods = ["anchors", "brief", "complete", "create", "get", "invite", "message", "route", "rules", "sessions", "update"]
     check("there is a text file for each tool module and the shared one, and nothing else in the folder", sorted(p.name for p in TEXT_DIR.iterdir()) == sorted([f"{m}.md" for m in mods] + ["shared.md"]), sorted(p.name for p in TEXT_DIR.iterdir()))
     import tool_text as tt
     tt.live_snapshot()          # builds the server on a throwaway config, so every module has asked for its text

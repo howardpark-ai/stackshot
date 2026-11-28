@@ -18,13 +18,16 @@ For each request the proxy asks `GET /verify`, carrying the original request's h
     person is a member of;
   * on the board's 401 (no bearer, a token the board does not know, expired or revoked) it answers 401 with the board's own `WWW-Authenticate` text when the board's answer has one,
     so a connector's discovery of the sign-in keeps working: nothing of that text is held here;
-  * on anything else it answers 503 with no identity header: the board's 403 (a secret that differs, the board's clock), 404 (a board with no sign-in), 5xx, a redirect, a
+  * on the board's 403 that says a registration refuses the sign-in (`{"error": "not_admitted", ...}`, core/invites.py) it answers 200 with an identity that is a member of nothing and
+    carries the reason and the address (`frontdoor_identity.barred`), so the front door tells the person in words; it is not cached;
+  * on anything else it answers 503 with no identity header: any other 403 of the board (a secret that differs, the board's clock), 404 (a board with no sign-in), 5xx, a redirect, a
     body that is no address or names no kind of token, no answer in `timeout_seconds` (a total deadline), a board that cannot be reached, a secret or members file that cannot be
     read, or any fault of this service. Never 200, and never 401: a 401 makes a connector throw its token away, which is wrong for an outage.
 
-A 200 of the board that the service accepts is kept for `cache_seconds` (a short time, 5 by default), under a hash of the token, at most MAX_ENTRIES of them. Nothing else is
-kept: a refusal or a failure is never remembered, so a token the board refused is asked again at the next request, and an entry can only repeat what the board said of that very token a moment ago (a token revoked
-at Google keeps working here for at most `cache_seconds`). The members file and the secret are read at each request, cached or not. The board is reached directly (a proxy of the environment is ignored), no redirect of it is followed, and
+A 200 of the board that the service accepts, for an address a member holds, is kept for `cache_seconds` (a short time, 5 by default), under a hash of the token, at most MAX_ENTRIES of them. Nothing else is
+kept: a refusal or a failure is never remembered, so a token the board refused is asked again at the next request, and neither is an answer for an address no member holds, so that the next request
+of an address registered a moment later is asked about. An entry can only repeat what the board said of that very token a moment ago (a token revoked at Google keeps working here for at most
+`cache_seconds`). The members file and the secret are read at each request, cached or not. The board is reached directly (a proxy of the environment is ignored), no redirect of it is followed, and
 no cookie it sets is kept: one caller's check carries nothing of another's.
 
 Nothing the caller sent is echoed: the answer's only header of its own is `X-Verified-User`, whatever the request carried under that name. A token, a secret or an address is never
@@ -202,7 +205,8 @@ class Service:
 
     async def ask(self, secret: str, token: str) -> tuple[str, str]:
         """Ask the board who `token` is for ("" for a request that carries none): ("ok", the address in lower case), ("machine", the address: the token is the board's own machine
-        token and `accept_portal_token` is not on), ("refused", the board's WWW-Authenticate text, "" if none) or ("down", why: a word for the log)."""
+        token and `accept_portal_token` is not on), ("barred", the identity that says a registration refuses this sign-in: `frontdoor_identity.barred`), ("refused", the board's
+        WWW-Authenticate text, "" if none) or ("down", why: a word for the log)."""
         headers = {"accept": "application/json", VERIFY_HEADER: _ident.sign(secret.encode("utf-8"), VERIFY_WHO)}
         if token:
             headers["authorization"] = "Bearer " + token
@@ -214,15 +218,21 @@ class Service:
             return "down", f"{type(e).__name__}"
         if status == 401:
             return "refused", www if len(www) <= MAX_WWW and _TEXT.fullmatch(www) else ""
-        if status != 200:
+        if status not in (200, 403):
             return "down", f"the board answered {status}"
         try:
             d = json.loads(body.decode("utf-8"))
-        except ValueError:
-            return "down", "the board's answer is not JSON"
+        except (ValueError, RecursionError):
+            return "down", "the board's answer is not JSON" if status == 200 else f"the board answered {status}"
         email = d.get("email") if isinstance(d, dict) else None
         email = email.strip().lower() if isinstance(email, str) and email.isascii() else ""      # ASCII first: lower() turns some other characters into ASCII ones
-        if not _ADDRESS.fullmatch(email) or len(email) > 254:
+        named = bool(_ADDRESS.fullmatch(email)) and len(email) <= 254
+        if status == 403:      # a refusal of the header or the board's clock is plain text; a refused registration says so by name
+            why = d.get("why") if isinstance(d, dict) and d.get("error") == "not_admitted" else None
+            if named and isinstance(why, str) and why in _ident.REFUSALS:
+                return "barred", _ident.barred(why, email)
+            return "down", f"the board answered {status}"
+        if not named:
             return "down", "the board's answer names no address"
         kind = d.get("via")
         if kind not in KINDS:
@@ -231,18 +241,18 @@ class Service:
 
     # ------------------------------------------------------------------ the route
 
-    def identity_of(self, email: str) -> str:
-        """The identity the proxy is told, by the front door's members file read now: the key of the member whose sign-in addresses hold the address, else the address itself (lower case).
+    def identity_of(self, email: str) -> tuple[str, bool]:
+        """(the identity the proxy is told, whether a member holds the address), by the front door's members file read now: the identity is the key of the member whose sign-in addresses hold the address, else the address itself (lower case).
         "" when no member holds the address and it is written as a key of the file: the front door matches keys exactly, so passing it on would make this caller that member.
         FileError when the file cannot be used, or when the front door would give that member other boards than the records do."""
         records = _files.read_member_records(self.s.members_file)
         listed = _files.read_members(self.s.members_file)      # the front door's own reader: every key as it looks it up, a case duplicate too
         member = _files.member_of_address(records, email)
         if not member:
-            return "" if email in listed else email
+            return ("" if email in listed else email), False
         if set(listed.get(member, ())) != set(records[member].boards):      # two keys a surrounding space apart: the records take the first entry, the front door the last
             raise _files.FileError(f"members_file {os.path.expanduser(self.s.members_file)} lists the member {tag(member)} more than once with different boards: list one key with all its boards")
-        return member
+        return member, True
 
     async def verify(self, request: Any) -> Any:
         try:
@@ -272,17 +282,20 @@ class Service:
             if verdict == "machine":
                 log.warning("403 token %s: the board's machine token, which accept_portal_token does not switch on", tag(token))
                 return _plain(403, MACHINE_REFUSED)
+            if verdict == "barred" and token:      # not a member's request: the front door says why, with the address. Never cached
+                log.info("200 token %s: a registration refuses this sign-in, said by the front door", tag(token))
+                return granted(what)
             if verdict != "ok":
-                log.warning("503 token %s: %s", tag(token) if token else "-", what)
+                log.warning("503 token %s: %s", tag(token) if token else "-", "the board refused a check that carries no token as a sign-in" if verdict == "barred" else what)
                 return outage()
             email = what
-            if token:
-                self._keep(key, email)
         try:
-            identity = self.identity_of(email)
+            identity, held = self.identity_of(email)
         except _files.FileError as e:
             log.error("503: %s", e)
             return outage()
+        if token and via == "board" and held:      # an address no member holds may be registered at any moment, and its next request has to be asked about (core/invites.py)
+            self._keep(key, email)
         if not identity:
             log.warning("403 token %s: address %s is no member's sign-in address and is written as a member's key", tag(token), tag(email))
             return _plain(403, NOT_THEIRS)

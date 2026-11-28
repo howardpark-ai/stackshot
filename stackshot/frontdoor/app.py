@@ -18,6 +18,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import NotFoundError, ToolError
 from fastmcp.server.middleware import Middleware
 from mcp import types as mt
+from mcp.shared.exceptions import MCPError
 from starlette.middleware import Middleware as AsgiMiddleware
 from starlette.responses import JSONResponse
 
@@ -73,6 +74,12 @@ class DoorMiddleware(Middleware):
         if isinstance(result, mt.DiscoverResult):
             return result.model_copy(update={"instructions": await self._text()})
         return result
+
+    async def on_list_tools(self, context: Any, call_next: Any) -> Any:
+        try:
+            return await call_next(context)
+        except ToolError as e:      # a refused listing: a client of the stateless protocol is told "Internal server error" for any exception but the protocol's own, and never sees why
+            raise MCPError(mt.INVALID_REQUEST, str(e)) from None
 
     async def on_call_tool(self, context: Any, call_next: Any) -> Any:
         try:

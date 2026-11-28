@@ -1666,6 +1666,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     out.extend(frontdoor_signin_notes(cfg))
     out.extend(frontdoor_splitter_notes(cfg))
     out.extend(behind_door_notes(cfg))
+    out.extend(invites_notes(cfg))
     return out
 
 
@@ -1679,6 +1680,12 @@ def behind_door_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """The lines for the `[behind_frontdoor]` table: [] when the config has no such table."""
     from stackshot.core import behind_door
     return behind_door.notes(cfg)
+
+
+def invites_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """The lines for the `[invites]` table (core/invites.py): [] when the config has no such table."""
+    from stackshot.core import invites
+    return invites.notes(cfg)
 
 
 def frontdoor_notes(cfg: dict[str, Any] | None = None) -> list[str]:
@@ -1789,6 +1796,7 @@ RESTART_ONLY: dict[str, str] = {
     "auth.allowed_client_redirect_uris": "",
     "auth.portal_identity": "",
     "behind_frontdoor": "",                       # the guard of the MCP endpoint is put around the HTTP app at start (web/door_guard.py), and the members the front door lists are read from the first call on
+    "invites": "",                                # the invite tool, the setup page and the apps' redirect URIs are put in at start
     "runner.process": "",                         # where the minute set's runner runs (a thread of the server, or `stackshot minute`): read once at a start, by the server and by that process
     "locks": "",                                  # the store locks are made at import and each holds or skips its flock for a whole hold
     "paths": "",                                  # the store, state and secrets dirs hold the running process's files, ids and locks,
