@@ -6,12 +6,14 @@ import datetime as dt
 import re
 import time
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
+from stackshot.core import instance as _inst
 from stackshot.github import ghsync as _gh
 from stackshot.model import draft as _draft
 from stackshot.model import item_project as _ip
@@ -32,6 +34,7 @@ from stackshot.service import checks as _checks
 from stackshot.service import contacts as _contacts
 from stackshot.service import handoff as _handoff
 from stackshot.service import item_read as _item_read
+from stackshot.service import memo_files as _memo
 from stackshot.service import mover_steps as _mover_steps
 from stackshot.service import proofs as _proofs
 from stackshot.service import store as _svcstore
@@ -197,6 +200,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.append(f"{_model.owner_display(m)}'s answers on the board" + (f" (last 3 of {len(ans)})" if len(ans) > 3 else "") + ":\n" + "\n".join(
             f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), _wttext.ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
             + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
+    if _memo.listing(item):                  # the files he sent with a note: where a machine fetches each (the client route, with its token)
+        base = _inst.BOARD_URL.rstrip("/")
+        out.append("files:\n" + "\n".join(f"- {f['name']} ({_memo.size_words(int(f.get('size') or 0))}) {base}/client/items/{_gh.href_id(str(item.get('gid') or item.get('id')))}/files/{f['id']}/{quote(str(f['name']), safe='')}" for f in _memo.listing(item)))
     idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}
     if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
         w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), _wttext.ZONE))

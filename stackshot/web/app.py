@@ -34,6 +34,7 @@ from stackshot.web import door_guard as _door_guard, frame_guard as _frame_guard
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _MembersOnly, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
 from stackshot.web.routes import answers as _routes_answers
+from stackshot.web.routes import memo_files as _routes_memo_files
 from stackshot.web.routes import door_verify as _routes_door_verify
 from stackshot.web.routes import join as _routes_join
 from stackshot.web.routes import ui_api as _routes_ui_api
@@ -239,6 +240,7 @@ def build(
     _routes_door_verify.register(mcp)      # `GET /frontdoor/verify` for the sign-in service, only on a board whose [behind_frontdoor] names a verify_secret_file (web/routes/door_verify.py)
     _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
     _routes_answers.register(mcp, answer=answer)
+    _routes_memo_files.register(mcp)      # the files of a memo-box note: upload and the two downloads (web/routes/memo_files.py)
     _routes_ui_api.register(mcp, contact_label=contact_label, runner_status=runner_status, phase_sweep_status=phase_sweep_status)
     _routes_join.register(mcp)      # `GET /join`, the setup page an invite's link names, only on a board that can invite (web/routes/join.py); before the catch-all
     _routes_answer_frame.register(mcp)      # before the catch-all of board_pages, which answers the address while [ui] answer_frame_origins is empty

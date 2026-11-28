@@ -57,4 +57,6 @@ who it was `ruled by:`, the `item:` it went onto and when it was `ruled:`; a rep
 names the notice it repeats on a `repeat of:` line; a notice not ruled yet shows that it is still held for the router
 and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router
 gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers "no notice
-<id>".{{STALL_FORM}}
+<id>". A note he sent with files shows them on its answer line (`[files: name (size), …]`) and, under his answers,
+a `files:` line for each with its address: fetch one with `Authorization: Bearer <this machine's client token>` (a GET to
+that address; the same token the client calls take). A file is kept until 30 days after the item closes.{{STALL_FORM}}

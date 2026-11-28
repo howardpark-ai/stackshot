@@ -69,11 +69,16 @@ async def item_answer(request: Request):
     if not gid or not _path(gid).exists():
         return PlainTextResponse("no such item", status_code=404)
     import hmac
-    if not hmac.compare_digest(f("token"), _answer_token(email, gid)):
+    if not hmac.compare_digest(f("token").encode("utf-8", "surrogatepass"), _answer_token(email, gid).encode("utf-8")):      # bytes: a non-ASCII token is a 403, not a TypeError
         return PlainTextResponse("refused: the form's token does not match; reload the item's page and send again", status_code=403)
     from starlette.concurrency import run_in_threadpool
     who = _members.signed_in(email).name      # the person the signed-in address belongs to: the answer is recorded under that name
-    code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who, f("ref"))      # ref: the question the form showed; a form drawn before it carried one sends none
+    from stackshot.service import memo_files as _memo
+    from stackshot.web.routes.memo_files import file_ids
+    try:
+        code = await run_in_threadpool(_answer, gid, f("choice"), f("text"), f("act"), "board", None, who, f("ref"), file_ids(form.get("files") or []))      # ref: the question the form showed; a form drawn before it carried one sends none
+    except _memo.Refused as e:      # a bad list of files: nothing written, the files stay waiting; the sentence says why (the page's notice for it comes with the memo box)
+        return PlainTextResponse(str(e), status_code=e.status, headers={"Cache-Control": "no-store"})
     if request.headers.get("accept", "").strip().lower() == "application/json":      # a script that asks for the code itself (the answer frame's) gets it in place of the redirect; every gate above is the same for it
         return JSONResponse({"sent": code}, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
     back = _answer_back(f("back"))

@@ -50,6 +50,8 @@ The passes of step 3 end only when nothing changed, so, logs aside, the copy is 
 
 In the first three, lock files (`*.lock`, `lock`) and temporary files (`*.tmp`) are left out too. A link to a file is copied as that file. A link to a directory, a dangling link and a special file are not copied; the command names the first ten, the manifest lists all of them under `skipped`, and `--verify` names them again. A state dir or a store with nothing to copy fails the run: that would not be a copy of a server.
 
+**Memo-box files** (`state/memo-files`, [memo-files.md](memo-files.md)) travel with `state/`. An upload still arriving is `upload.tmp`, which the copy leaves out; a stored file is not written again, so the first copy (made without locks) carries it and the locked passes do not wait for it. `standby-push` sends the whole copy each time, so these files are sent again every run; the 100 MB limit on all memo files bounds that.
+
 **Extra directories** are for data written outside the store locks, such as the sign-in library's own client store. Each is copied after the locks are let go, until a scan before the copy and a scan after it find the same sizes and times (six tries). One that never settles, is not there, or overlaps one of the three folders fails the run.
 
 ## The output

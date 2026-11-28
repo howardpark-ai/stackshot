@@ -20,6 +20,7 @@ from stackshot.core import config as _cfg
 from stackshot.core import xlock as _xlock
 from stackshot.model import option_labels as _option_labels
 from stackshot.model import states as _states
+from stackshot.service import memo_files as _memo_files
 from stackshot.web import render as _rmod
 from stackshot.core import instance as _inst
 from stackshot.web.auth.signin import _ui_key
@@ -129,10 +130,18 @@ def _answer_words(rec: dict[str, Any], limit: int = 600) -> str:
     if len(text) > limit:
         text = text[:limit].rstrip() + " … (the whole text is on the item's page)"
     choice = _choice_words(rec)
-    return f"{choice} — {text}" if choice and text else choice or text
+    words = f"{choice} — {text}" if choice and text else choice or text
+    files = _memo_files.words(rec.get("files"))      # the files of the note: their names and sizes (the `get` tool gives the addresses to fetch them from)
+    return (words + " " if words else "") + f"[files: {files}]" if files else words
 
 
 def _answer_note(rec: dict[str, Any]) -> str:
+    """The line a board answer is stored under on the item, with the names of its files when it carries any."""
+    files = _memo_files.words(rec.get("files"))
+    return _answer_note_text(rec) + (f"\n\nfiles: {files}" if files else "")
+
+
+def _answer_note_text(rec: dict[str, Any]) -> str:
     """The line a board answer is stored under on the item (`metadata.answers` and the History); since an earlier change it is no longer posted to the issue."""
     text = str(rec.get("text") or "").strip()
     if rec.get("kind") == "comment":

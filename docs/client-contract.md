@@ -155,6 +155,7 @@ Underneath it is one authenticated write:
 - `POST /client/items/{key}/watch`, the same token, body `{"state": "watch" | "mute" | "default", "sender": "<label>"}`. `{key}` is an item as shown
   (`board%23N` in the path, or `N`) or its store id, read the way the other client routes read an id. 200 `{"ok": true, "item": "board#N", "state": "<the
   new state>", "flags": {<the whole map, as in GET /client/for-you>}}` (`default` removes the flag). 400 a bad `state` or `sender`; 401; 403 as above; 404 an unknown item.
+- `GET /client/items/{key}/files/{id}/{name}`, `Authorization: Bearer <machine token>`: a file sent with a note on the item (`{key}` as above; `{id}` is the file's 32-hex id and `{name}` its name, both as `get` gives them). 200 the file as an attachment of type `application/octet-stream` with `X-Content-Type-Options: nosniff`; 401 no or an unknown token; 404 an unknown item, or an id that is not on one of the item's answers or whose file is gone (files are removed 30 days after the item closed). See [memo-files.md](memo-files.md).
 
 ## The owner's whole Your move group
 
