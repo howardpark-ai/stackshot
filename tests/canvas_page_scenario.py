@@ -138,6 +138,13 @@ for what, html in (("a data-href", f'<body><span data-href="{B}/items/5">x</span
 check("link: an unquoted href counts", P.item_link(f"<body><a href={B}/items/8>x</a>", B) == 8)
 check("link: a trailing slash after the number counts", P.item_link(f'<body><a href="{B}/items/8/">x</a>', B) == 8)
 check("link: an entity in the href is read", P.item_link(f'<body><a href="{B}/items/8?a=1&amp;b=2">x</a>', B) == 8)
+for what, html in (("a hidden div", f'<body><div hidden><a href="{B}/items/5">x</a></div>'), ("a display:none span", f'<body><span style="display:none"><p><a href="{B}/items/5">x</a></p></span>'),
+                   ("a hidden div with a div inside", f'<body><div hidden><div>y</div><a href="{B}/items/5">x</a></div>')):
+    check(f"link: {what} hides the anchor inside it", P.item_link(html, B) is None, html)
+check("link: a hidden element ahead does not hide a link after it", P.item_link(f'<body><div hidden><div>y</div></div><a href="{B}/items/6">y</a>', B) == 6)
+check("link: a head never closed does not hide a link after the title", P.item_link(f'<html><head><title>t</title><a href="{B}/items/7">x</a>', B) == 7)
+check("link: a head never closed still hides a link element", P.item_link(f'<head><title>t</title><link href="{B}/items/7">', B) is None)
+check("served: a style attribute with no value on html or body is served", all("<a" in P.served(f"<html{x}><body{x}><a href=x>x</a>") for x in (" style", " style=''")))
 check("link: a hidden anchor does not hide the one after it", P.item_link(f'<body><a hidden href="{B}/items/5">x</a><a href="{B}/items/6">y</a>', B) == 6)
 check("link: a long head does not push the body's link out of the first part", P.item_link(f"<head><title>t</title>{'<meta name=a content=b>' * 200}</head><body>{LINK}", B) == 42)
 check("link: the item the page names is the first link's, whatever number follows", P.item_link(f'<body><a href="{B}/items/9">x</a><a href="{B}/items/{N}">y</a>', B) == 9)
