@@ -50,6 +50,7 @@ FILE = "session-registry.json"
 TTL = 1.0                       # s: how long a look at the directory (its listing and stat) is trusted; a board render asks thousands of times
 STALE = 1800.0                  # s: how long the last good read of a file stands in for it when it stops reading (the tool rewriting it, a torn write)
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_SHORT = re.compile(r"^[0-9a-f]{6,31}$")      # the id `sala sessions` lists: the first characters of a permanent id with the dashes left out
 _LOCK = threading.Lock()
 
 
@@ -238,6 +239,9 @@ def _resolve(reg: _Reg, s: str) -> str | None:
     live = [i for i in ids if reg.rows[i].get("state") == "live"]
     if len(live) > 1:                                  # one live row whose CURRENT name it is beats live rows that keep it only as an alias
         live = [i for i in live if _text(reg.rows[i].get("name")) == s]
+    if not ids and _SHORT.match(low):                  # no name is this: the short id of a session (the start of its permanent id), only when it names one row
+        hit = [i for i in reg.rows if i.replace("-", "").startswith(low)]
+        return hit[0] if len(hit) == 1 else None
     return live[0] if len(live) == 1 else None
 
 
@@ -394,6 +398,14 @@ def _role_name(roles: dict[str, Any], who: str, *extra: str) -> str:
     def mine(n: str) -> bool:        # a name the registry gives this session counts only when it resolves back to it: a retired row never takes a live row's entry by alias
         return not sid or n == who or n in extra or resolve(n) == sid
     return next((n for n in (who, _session_label(who), *names_of(who), *extra) if n and n in roles and mine(n)), "")
+
+
+def named(value: str) -> str:
+    """A short session id (see `_SHORT`) as the session's current name; anything else, a name that happens to look like one included, as it came. For a field that holds a name (an item's mover), so it never stores the id."""
+    v = str(value or "").strip()
+    if not _SHORT.match(v.lower()) or v in load().by_name:
+        return v
+    return display_name(v) or v
 
 
 def _store_ref(value: str) -> str:
