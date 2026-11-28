@@ -1260,9 +1260,8 @@ _update_svc._update("a3", wake=D(3), sender="home-beta"); res = _update_svc._upd
 check("hold: clear_wake=true the same", not held_("a3") and not _WT.stored_until(rd("a3")["metadata"]), (res, rd("a3")["metadata"]))
 _update_svc._update("a3", hold=True, recycle=True, sender="home-beta"); res = _update_svc._update("a3", wake=D(3), sender="home-beta"); res = _update_svc._update("a3", wake="none", sender="home-beta")
 check("hold: with a recycle to wait for, wake=\"none\" drops the date and the hold stays", rd("a3")["metadata"].get("hold") is True and not _WT.stored_until(rd("a3")["metadata"]) and rd("a3")["metadata"].get("recycle") is True, rd("a3"))
-res = _update_svc._update("a3", clear_recycle=True, sender="home-beta")
-check("hold: clear_recycle=true that would leave the hold waiting on nothing is accepted, with the server's backstop day stored and the hold flag gone",
-      "recycle" not in rd("a3")["metadata"] and "hold" not in rd("a3")["metadata"] and _WT.stored_until(rd("a3")["metadata"]) == D(14) and rd("a3")["metadata"].get("until_server") == D(14), (res, rd("a3")["metadata"]))
+e = refusal(lambda: _update_svc._update("a3", clear_recycle=True, sender="home-beta"))
+check("hold: clear_recycle=true that would leave the hold waiting on nothing is refused, as before the default: a write that drops a wait's condition gets no server day", e.startswith("Refused: a park names what it waits for") and rd("a3")["metadata"].get("recycle") is True, e)
 _update_svc._update("a3", wake=D(1), sender="home-beta"); _update_svc._update("a3", clear_recycle=True, sender="home-beta")   # a wake on an item already on hold is that hold's
 check("hold: …and passes once a wake holds it", held_("a3") and wk_(rd("a3")["metadata"]) == D(1) and "recycle" not in rd("a3")["metadata"], rd("a3"))
 # the wake pass: items due (wakes in the past, written into the store files past the gate), one due today, one not yet.
@@ -2142,9 +2141,8 @@ check("anchored hold: the update description carries the exception", "anchored t
 # the item: a notice from the anchor scoped to a held item
 # releases the hold when the keeper passes or merges it, never when it drops it; the anchor alone is no condition (the backstop wake stays);
 # a project with no keeper releases on the notice itself, by the minute loop's pass
-res = _update_svc._update(g5, wake="none", sender="home-beta")
-check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is accepted; the server's own backstop day stands in, the hold flag kept, its anchor kind kept too",
-      held_(g5) and rd(g5)["metadata"].get("hold") is True and _WT.stored_until(rd(g5)["metadata"]) == D(14) and rd(g5)["metadata"].get("wait_kind") == "anchor", (res, rd(g5)["metadata"]))
+e = refusal(lambda: _update_svc._update(g5, wake="none", sender="home-beta"))
+check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop, as before the default: the server never replaces an end the item holds", e.startswith(f"Refused: a park that waits on a notice from the anchor scoped to {g5} still carries a backstop date, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
 t0 = time.time(); time.sleep(0.05)
 n_d = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="a comment on #7", target="for home-beta", anchor=TH, bot=True)
 _wt_route._route(n_d, "dropped", reason="noise", sender="home-beta")
