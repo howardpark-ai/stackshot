@@ -212,8 +212,9 @@ parts = two.split("### projects/gamma"); check("two pages share it evenly", len(
 check("the budget holds", len(two.encode()) < p.INJECT + 400, len(two.encode()))
 
 # ---- 3. what the turn did
+_TURN_CLOCK = [int(time.time()) - 600]     # each transcript's prompt is one second later than the last: two turns that began in the same second are one turn to the hook (its early mark is the turn's start second)
 def transcript(prompt, tools, final="done", lead=""):
-    f = T / f"t{len(ran)}.jsonl"; ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - 60))
+    f = T / f"t{len(ran)}.jsonl"; _TURN_CLOCK[0] += 1; ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(_TURN_CLOCK[0]))
     rows = [{"type": "user", "timestamp": ts, "message": {"content": prompt}}]
     if lead: rows.append({"type": "assistant", "message": {"content": [{"type": "text", "text": lead}]}})
     for n, inp in tools:
