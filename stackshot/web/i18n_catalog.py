@@ -58,10 +58,20 @@ CATALOG: dict[str, str] = {
     "join.refused.title": "If the sign-in is refused",
     "join.refused": "The refusal names the address that signed in. Sign in with the invited address, or ask the person who invited you.",
     "join.busy": "Too many requests: try again in a minute.",
-    "invite.mail.subject": "You are invited to a shared board",
-    "invite.mail.body": "You are invited to a shared board. Paste the next two lines to your own AI agent (claude.ai, Claude Code, ChatGPT or Cursor):\n\n"
-                        "Open {link} and add that board's MCP connection to the app you run in, or tell me how.\n"
-                        "Then read the board and walk me through my first use; I sign in with Google as {address}.",
+    "invite.mail.subject": "You are invited to the {board} board",
+    "invite.mail.body": "Open this link and set up the stackshot connection for me: {link}\n"
+                        "The connection is the one MCP address shown on that page, and I sign in with Google once, by hand.\n"
+                        "----------------------------------------\n"
+                        "Hello,\n\n"
+                        "You are invited to the {board} board on stackshot. stackshot is a shared board where a team and its AI agents keep one list of work, "
+                        "so your own AI agent can read it and add to it for you.\n\n"
+                        "Board name: {board}\n"
+                        "Board address (the MCP connection): {mcp_url}\n"
+                        "Setup page: {link}\n\n"
+                        "Give the setup page to your own AI agent (claude.ai, Claude Code, ChatGPT or Cursor) and it sets the connection up. "
+                        "The one step only you can do: when the agent connects, a Google sign-in page opens. Sign in as {address} and press Allow. "
+                        "Your agent never asks for your password.\n\n"
+                        "If anything is unclear, ask the person who sent you this mail.",
 
     # ------------------------------------------------------------------ the pages after the item page: sessions, for you, sent notices, said tags (stage 3b)
     "page.archived": "Archived",
