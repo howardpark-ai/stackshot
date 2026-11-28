@@ -188,6 +188,18 @@ def part_roster():
     check("4 a page with an empty map and a hub without one is front-only", A.front_only("projects/e", {"projects/e": page(agents={}), "projects/hub0": page(agents={"x-main": "front"})}) is True)
     check("4 a page with an empty map reads its hub's", A.front_only("projects/e", {"projects/e": page(agents={}, hub="projects/hub1"), "projects/hub1": page(agents={"x-main": "front", "x-eng": "builds"}, back_agents={"x-eng": "builds"})}) is False)
     check("4 a page entry with no fields at all is front-only", A.front_only("projects/odd", {"projects/odd": {}}) is True)
+    # the lead of a project with a background agent and no front agent (anchors.background_lead / chore_main): the page's marked keeper first, else the ranked background agent, a retired one skipped
+    BL = {"projects/bl": page(session="home-bl", agents={"home-bl-aaa": "builds it", "home-bl-docs": "writes the chapters"}, back_agents={"home-bl-aaa": "builds it", "home-bl-docs": "writes the chapters"}),
+          "projects/bl-mark": {**page(session="home-bl-docs", agents={"home-bl-aaa": "keeps the pages", "home-bl-docs": "writes the chapters"}, back_agents={"home-bl-aaa": "keeps the pages", "home-bl-docs": "writes the chapters"}), "role": "mark"},
+          "projects/bl-front": page(session="home-blf", agents={"home-blf-main": "front", "home-blf-docs": "writes"}, back_agents={"home-blf-docs": "writes"}),
+          "projects/bl-none": page(session="home-bln", agents={})}
+    check("4 background_lead: no front agent -> the ranked background agent (the builder first); chore_main is that agent", A.background_lead("projects/bl", BL) == "home-bl-aaa" and A.chore_main("projects/bl", BL) == "home-bl-aaa", (A.background_lead("projects/bl", BL), A.chore_main("projects/bl", BL)))
+    check("4 background_lead: a page that marks its keeper -> the marked agent, before the ranking", A.background_lead("projects/bl-mark", BL) == "home-bl-docs", A.background_lead("projects/bl-mark", BL))
+    check("4 background_lead: a retired lead is skipped, the next background agent takes it; with the whole page retired there is none and chore_main is fallback_main's pick",
+          A.background_lead("projects/bl-mark", BL, retired=lambda n: n == "home-bl-docs") == "home-bl-aaa" and A.background_lead("projects/bl", BL, retired=lambda n: True) == ""
+          and A.chore_main("projects/bl", BL, retired=lambda n: True) == A.fallback_main("projects/bl", BL), (A.background_lead("projects/bl-mark", BL, retired=lambda n: n == "home-bl-docs"), A.chore_main("projects/bl", BL, retired=lambda n: True)))
+    check("4 background_lead: a project with a front agent, and one with no agent, have none: chore_main is fallback_main", A.background_lead("projects/bl-front", BL) == "" and A.background_lead("projects/bl-none", BL) == ""
+          and A.chore_main("projects/bl-front", BL) == A.fallback_main("projects/bl-front", BL) == "home-blf-main", (A.chore_main("projects/bl-front", BL), A.chore_main("projects/bl-none", BL)))
 
     # ---------------------------------------------------------------- 5. the default registry: the page registry file, plus the agents only the record holds
     from stackshot.projects import projects as P  # noqa: E402
@@ -461,10 +473,10 @@ def part_ladder():
     stk(T1); stk(T2)
     _pane_recovery._recovery_target = _real_tgt
     check("5 the target is computed once per request (the record, the wording of `tried` and the send follow the one answer)", len([c for c in CALLS if c[0] == "projects/beta" and c[1] == "home-peer3"]) == 1 and len(CALLS) == 1, CALLS)
-    check("5 …the hand-off record says who was asked, and its event line names the -main agent, not the fleet's builder", ho(10).get("recovery_by") == "the project's -main agent"
-          and any("the project's -main agent was asked" in t for t in ev_texts(10)) and not any("fleet's builder" in t for t in ev_texts(10)), (ho(10), ev_texts(10)))
-    check("5 …`get` reads it the same way (the hand-off line)", any("the project's -main agent was asked to recover it" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)) and not any("fleet" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)), H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x))
-    check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's -main agent was told" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
+    check("5 …the hand-off record says who was asked, and its event line names the -main agent, not the fleet's builder", ho(10).get("recovery_by") == "the project's lead"
+          and any("the project's lead was asked" in t for t in ev_texts(10)) and not any("fleet's builder" in t for t in ev_texts(10)), (ho(10), ev_texts(10)))
+    check("5 …`get` reads it the same way (the hand-off line)", any("the project's lead was asked to recover it" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)) and not any("fleet" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)), H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x))
+    check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's lead was told" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
     check("5 …and what was tried says there was no builder (a stall record: the notice again and a fresh session's call)", any("What the ladder tried: the stall pass sent the notice again and asked a fresh session who takes it." in t for t in msgs("a10", "home-beta-front"))
           and not any("project's builder" in t for t in msgs("a10", "home-beta-front")), msgs("a10", "home-beta-front"))
     _it10 = rd(10); H.touch(_it10, "home-peer3", U["home-peer3"], T2 + 60, handoff_svc.ho_same)
@@ -488,7 +500,7 @@ def part_ladder():
     item(13, project="projects/beta", mover="home-peer3", handoff=rec("home-peer3"))
     hcold_svc.handoff_recover("a13", "home-peer3 did not take it"); drain()
     check("5 the hand-off ladder, a quiet session of a front-only project: its -main agent is asked, in its words, and what was tried leaves out the project's builder", len(MAIN_ONLY("a13")) == 1 and "the hand-off ladder tried a fresh session's call and the sender." in MAIN_ONLY("a13")[0][1]
-          and "project's builder" not in MAIN_ONLY("a13")[0][1] and ho(13).get("recovery_by") == "the project's -main agent", (MAIN_ONLY("a13"), ho(13)))
+          and "project's builder" not in MAIN_ONLY("a13")[0][1] and ho(13).get("recovery_by") == "the project's lead", (MAIN_ONLY("a13"), ho(13)))
     close(13)
 
     # (d) a project with a builder keeps the old words everywhere
@@ -514,6 +526,17 @@ def part_ladder():
     with contextlib.redirect_stderr(io.StringIO()) as eb: boom = tgt("projects/beta", "home-peer3")
     _anc.front_only = _real_fo
     check("4 a front-only test that raises keeps the fleet's builder and says so on stderr", boom == ("home-fleet", "fleet", False) and "front-only test of projects/beta failed" in eb.getvalue(), (boom, eb.getvalue()))
+    # a project with a background agent and no front: the last rung asks its lead (kind "main"); the fleet's builder when the lead is the quiet session or is retired
+    GREG = {"projects/gam": {"session": "home-gam", "role": "name", "status": "active", "type": "project", "agents": {"home-gam-docs": "writes the chapters"}, "back_agents": {"home-gam-docs": "writes the chapters"}}}
+    _real_reg, _real_sr = _anc.registry, _anc.session_roles
+    _anc.registry = lambda: GREG
+    try:
+        check("4 a background-only project (no front, no builder) -> (its lead, main, builderless)", tgt("projects/gam", "home-peer3") == ("home-gam-docs", "main", True), tgt("projects/gam", "home-peer3"))
+        check("4 …the lead is the quiet session -> the fleet's builder, still builderless", tgt("projects/gam", "home-gam-docs") == ("home-fleet", "fleet", True), tgt("projects/gam", "home-gam-docs"))
+        _anc.session_roles = lambda *a, **k: {n: ({**r, "retired": True} if n == "home-gam-docs" else r) for n, r in _real_sr(*a, **k).items()}
+        check("4 …a retired lead is not asked: the fleet's builder", tgt("projects/gam", "home-peer3") == ("home-fleet", "fleet", True), tgt("projects/gam", "home-peer3"))
+    finally:
+        _anc.registry, _anc.session_roles = _real_reg, _real_sr
 
     return ran, fails
 

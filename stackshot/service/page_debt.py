@@ -93,19 +93,24 @@ def page_agent(key: str) -> str:
 
 def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[tuple[str, str, str]], why: str, now: float) -> str:
     """The debts the call did not settle go, in one message with the rows as today's relay writes them, to the agent that keeps the page
-    (page_agent: the page's own `agent:`, when live), else the agent the project marks as its keeper, else the project's builder (a background agent whose mandate builds), else its -main
-    agent (anchors.fallback_main: its project's, else the scope's general -main agent); with none of them the debts stay moved, for the next audit run's call.
+    (page_agent: the page's own `agent:`, when live), else the agent the project marks as its keeper, else the project's builder (a background agent whose mandate builds), else the lead of a project with a background agent and no front
+    (anchors.background_lead, a retired one skipped), else its -main agent (anchors.fallback_main: its project's, else the scope's general -main agent); with none of them the debts stay moved, for the next audit run's call.
     The message carries no [for <owner>] mark, to a front agent or any other: it is the agent's own page update to write and holds nothing for the owner,
     and its delivery reads no mark. → who was told."""
     own = page_agent(key)
     main = _hooks().main_agent(key)
-    builder = _hooks().builder_agent(key)
+    back = _hooks().builder_agent(key)
+    if not back:
+        try:
+            back = _anc.background_lead(key)      # a project with a background agent and no front: that agent keeps its page, not the scope's general -main agent
+        except Exception:
+            back = ""
     try:
         marked = _router_live.marked_in(key, _anc.registry())      # a project that marks its keeper: that agent keeps the page, builder or not (the gates answer it)
     except Exception:
         marked = ""
     lead = own or marked
-    keeper = lead or builder or main
+    keeper = lead or back or main
     if not keeper:
         return ""         # nobody can take them: they stay moved, and the next audit run's call tries again
     rows = []
@@ -121,10 +126,10 @@ def page_debt_fallback(key: str, moved: dict[str, dict[str, Any]], debts: list[t
             + ("Write the Current state: you keep this page." if lead else "Write the Current state, or hand it to the agent that keeps the page."))
     if keeper and rows:
         for nid in _telling.pilot_relay_many(keeper, rows, head=head):
-            if lead or builder or main:      # the notices went to the page's agent, the builder or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
+            if lead or back or main:      # the notices went to the page's agent, the builder or lead, or the -main agent, which has no `route`: ruled passed at once, so nothing is left unruled
                 try:
                     _routing.rule(nid, "passed", to=keeper, by=_routing.AUTO_RULER,
-                                  reason="the audit's page call could not write the page update: passed to " + ("the agent that keeps the page" if lead else "the builder" if builder else "the -main agent"))
+                                  reason="the audit's page call could not write the page update: passed to " + ("the agent that keeps the page" if lead else "the project's background agent" if back else "the -main agent"))
                 except Exception:
                     pass
     page_debt_forget(key, moved, keeper, now)

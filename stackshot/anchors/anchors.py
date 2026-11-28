@@ -896,6 +896,31 @@ def fallback_main(project: str, reg: dict[str, dict[str, Any]] | None = None, ro
     return general_main(root, reg, roots)[0] or sole_front(reg)
 
 
+def background_lead(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None, retired: Any = None) -> str:
+    """The lead of a project that has a background agent and no front agent (has_front is False): the agent its page marks as its keeper, else its background agent (background_agent: the builder first),
+    skipping a retired one (`retired(name)`, default: session_roles marks it retired), so a project whose lead is gone falls to the next background agent, and with none left to fallback_main's pick. "" for a
+    project with a front, and for one with no background agent. The lead takes the chores that ask nothing of the owner; a message marked `[for <owner>]` never goes to it (a front agent takes those)."""
+    reg = registry() if reg is None else reg
+    if has_front(project, reg):
+        return ""
+    if retired is None:
+        try:
+            roles = session_roles(reg)
+        except Exception:  # noqa: BLE001
+            roles = {}
+        retired = lambda n: bool((roles.get(n) or {}).get("retired"))
+    root = pilot_root(project, roots) or "/".join(str(project or "").strip("/").split("/")[:2])
+    names = [marked_for(root, reg)] + [n for _c, _i, n in background_ranked(project, reg)]
+    return next((n for n in names if n and not retired(n)), "")
+
+
+def chore_main(project: str, reg: dict[str, dict[str, Any]] | None = None, roots: list[str] | None = None, retired: Any = None) -> str:
+    """Where a project's chores (the audit's tells and chases, a page's debts, a hand-off's last rung) go when they ask nothing of the owner: the lead of a project with a background agent and no front
+    (background_lead), else fallback_main. A message marked `[for <owner>]` goes to fallback_main, never here."""
+    reg = registry() if reg is None else reg
+    return background_lead(project, reg, roots, retired) or fallback_main(project, reg, roots)
+
+
 def sole_front(reg: dict[str, dict[str, Any]] | None = None) -> str:
     """`[front] agent`: the one front agent that stands for a project whose page, top-level page and hub (front_pages) list no front agent of their own: a question or a script's item is filed under it, it is the contact of such a
     project's items, it can be named as one, and it ends the fallback chain of fallback_main. An agent's name or a page key (as general_<scope>); it counts only while some page lists it as a front
