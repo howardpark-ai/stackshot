@@ -547,7 +547,7 @@ def sc_double(pg, say):
     rowheld = []
     pg.route(f"**/items/a{b}/answer", lambda r: rowheld.append(r))
     pg.evaluate(ROW_SEND, row(b)); soon(pg, "(s) => !!document.querySelector(s + ' form.hanswer[aria-busy]')", row(b))
-    open_(pg, b); got = panelsend(pg)
+    pg.focus(f"{row(b)} a.ir-link"); pg.keyboard.press("Enter"); loaded(pg, b); got = panelsend(pg)      # by key: a row sending is dimmed and takes no pointer (data-sending), so a click would land on the list
     say("a send under way from a row shuts the panel's Send", bool(got) and got[0] and "Sending" in got[1], got)
     pg.evaluate("() => document.querySelector('#brief form.ianswer').requestSubmit()"); pg.wait_for_timeout(500)
     say("…and the panel sends nothing", count(b) == 1 and len(rowheld) == 1, (count(b), len(rowheld)))
