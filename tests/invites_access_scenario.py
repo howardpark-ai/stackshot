@@ -188,7 +188,8 @@ def part_direct():
             check(f"the first verified sign-in records its account ({mode})", account(members) == "111", members.read_text())
             asyncio.run(writes_and_does_not_invite(B, T, "an invitee after being added", bearer("token-new"), mode))
             refused("another Google account of the invited address", "token-new-second", mode, barred("other_account"))
-            asyncio.run(removed_on_an_open_session(B, "a removed invitee", bearer("token-new"), mode, NEW, lambda: invites.remove(NEW, S), lambda: invites.register(NEW, "alice", S)))
+            kept = []
+            asyncio.run(removed_on_an_open_session(B, "a removed invitee", bearer("token-new"), mode, NEW, lambda: (kept.append(members.read_bytes()), invites.remove(NEW, S)), lambda: members.write_bytes(kept[-1])))      # listed again as it was: a new registration is a new person's, and refuses the earlier account
             asyncio.run(removed_while_open(mode))
             refused("a removed invitee, on a new session", "token-new", mode, sentence(NEW))
             asyncio.run(member_is_answered(B, "a member, after the invitee's removal", bearer("token-bob"), mode))
