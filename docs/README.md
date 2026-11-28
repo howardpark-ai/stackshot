@@ -23,6 +23,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 - [The board pages](board-ui.md): How the board pages are drawn: search, the item page, the home lists, rows, cards, buttons, the side panel and the CI runners page.
 - [The color tool](color-tool.md): The Colors button that tries a whole dark color combination, and the saved color combinations.
 - [Asks and answers on the board](asks-and-answers.md): The board sign-in, how a wrong ask leaves the owner, how the owner answers from an item page, the answer box and the History after a decision.
+- [Canvases](canvas.md): Pages an agent shares with the board's owner: their addresses, the shell and the sandboxed page, the headers that keep a page apart from the board, the store, and the import that is off by default.
 - [The answer frame](answer-frame.md): One item's answer block shown in a frame on another site of yours: the config key, the address, the states, the messages between the frame and its parent page, and what protects it.
 - [The For you list and the Closed page](for-you-and-closed.md): The list of notices for the owner, Watch and Mute, the Slack post for an urgent row, the machine-token routes of the web form, and the Landed list that is now the Closed page.
 - [Drafts, steps and the Next checklist](next-and-steps.md): The draft of a text the owner will send, the one-line step, the Next checklist and its write checks, step proofs and the hand-over of a finished step.
