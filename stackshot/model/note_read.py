@@ -27,7 +27,10 @@ from typing import Any, Callable, Iterable
 ASK_MARKS = ("?", chr(0xFF1F))      # the question mark and its full-width form (the router reads a notice that asks something by the same two)
 _CLOSERS = "\"')]}*_`" + chr(0x201D) + chr(0x2019) + chr(0xFF09) + chr(0x300D)      # what may follow a sentence's last mark
 _EA_MARKS = chr(0x3002) + chr(0xFF01) + chr(0xFF1F)      # the East Asian full stop, exclamation and question marks: a sentence ends at one with no space after
-_SENTENCE_RX = re.compile(rf"(?<=[.!?])[\"'{chr(0x201D)}{chr(0x2019)})\]]*\s+|(?<=[{_EA_MARKS}])|\n+")      # where one sentence ends: a mark and a space, an East Asian mark, a line end
+_ELLIPSIS = chr(0x2026)
+_SENTENCE_RX = re.compile(      # where one sentence ends: a mark or an ellipsis and a space, an East Asian mark, a line end; with no space, an ellipsis before a letter, a full stop between two lower-case letters and a capital, or one before a letter outside ASCII (before a lower-case letter it may be a file name or a web address)
+    rf"(?<=[.!?{_ELLIPSIS}])[\"'{chr(0x201D)}{chr(0x2019)})\]]*\s+|(?<=[{_EA_MARKS}])|\n+"
+    rf"|(?<={_ELLIPSIS})(?=[^\W\d_])|(?<=\.\.\.)(?=[^\W\d_])|(?<=[a-z]{{2}}\.)(?=[A-Z])|(?<=\.)(?=[^\W\d_a-zA-Z])")
 _JOINED_RX = re.compile(r";|\s--?\s|\s–\s|—")      # a semicolon or a dash may join a statement to a question inside one sentence
 
 _DONE_VERBS = r"(?:ran|did|done|finished|completed|executed|applied|deleted|merged|pasted|posted|sent)"      # no bare "run": "run it" asks for the step, it does not say it was done

@@ -381,6 +381,8 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
             asked_note, kind, text, choice, eff = text, "comment", text or f"(pressed: {choice})", "", {"do": ""}      # `asked_note`: the note as he wrote it
         now = time.time()
         asks = _question_fields(item, text) if kind in ("decision", "comment") and not stepped and not pressed and via != "mail" else {}      # nothing but a question, typed with no pick: no call of his
+        if asks and eff["do"] == "words":
+            eff["question"] = "1"      # a watcher ask: the item goes to its mover as with any words in the box, and the lines say he asked
         rec: dict[str, Any] = {"ts": now, "kind": "comment" if asks else kind, **asks}
         if choice:
             rec["choice"] = choice
@@ -499,7 +501,7 @@ def _answer(gid: str, choice: str, text: str, act: str, via: str = "board", mail
         if via != "mail" and kind in ("decision", "step-reply") and not ticked and not parked and eff["do"] != "wait" and item.get("status") == "open":   # a park is acted on here, and so is a wait put back; any other decision waits for a session's write
             st = _answers()._answers_load()
             st[gid] = {"ts": now, "owner": _session_id(_telling.holder(item)), "project": str(meta.get("project") or ""),
-                       "told": told, "words": _answers()._answer_words(rec, 300)}
+                       "told": told, "words": _answers()._answer_words(rec, 300), **({"question": True} if asks else {})}
             _answers()._answers_save(st)
     if asks:
         kind = "comment"      # the page's notice and the log line: nothing was decided
@@ -540,8 +542,9 @@ def _answer_tick(now: float | None = None) -> list[str]:
                 continue
             at = _hooks().when_words(dt.datetime.fromtimestamp(float(e.get("ts") or now), _hooks().zone()))
             olabel = _sr._session_label(owner) if owner else "none"
-            tells.append((gid, sid, f"[stackshot] {_model.owner_display(meta)} answered {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
-                                  f"in {_answers()._ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: see that his answer is acted on "
+            did, see = ("asked a question on", "see that his question is answered on the item") if e.get("question") else ("answered", "see that his answer is acted on")
+            tells.append((gid, sid, f"[stackshot] {_model.owner_display(meta)} {did} {_gh.shown(gid)} on the board at {at} and its mover {olabel} has not written to the item "
+                                  f"in {_answers()._ANSWER_ESCALATE_S / 60:g} min: {e.get('words') or ''}. As {_telling.keeper_words(project, stew)}: {see} "
                                   f"(by {olabel}, or the session named in its needs). → {_item_url(gid) or _telling.notice_link(gid)}", e))
             out.append(gid)
         _answers()._answers_save(st)

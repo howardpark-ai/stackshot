@@ -38,7 +38,8 @@ fallback). The older `[idle] hours` key is no longer read.
 
 **A question in place of an answer** (`stackshot/model/note_read.py` `is_question`, `service/answer.py` `_question_fields`; `tests/answer_question_scenario.py`). Words typed with no button, off a step (an
 answer in the box, a comment from the board or from GitHub), that are nothing but a question are marked on their record: `kind: comment`, `question: true`, and `description_at`, a digest of the item's
-description as it stood. They are nothing but a question when every sentence ends in a question mark (`?` or its full-width form). They are not when they open with a yes or a no (the words a Recommend part
+description as it stood. They are nothing but a question when every sentence ends in a question mark (`?` or its full-width form); a sentence ends at a full stop, an exclamation or question mark or an
+ellipsis before a space, at an East Asian mark or a line end, and, with no space, at an ellipsis before a letter, at a full stop between two lower-case letters and a capital, or at a full stop before a letter outside ASCII. They are not when they open with a yes or a no (the words a Recommend part
 may open with, `[keywords.ask_options] yes_no_words` included), open with an option's name or letter followed by a comma, a colon or a bracket, or hold a semicolon or a dash that joins two parts. Anything
 not read as a question is recorded as it was before: a pick (with any note), and typed words that say something beside what they ask, are his decision. The reading is that mechanical, so a statement and a
 question joined by a comma alone, with no yes or no in front, reads as a question, and a question with a sentence before it reads as a decision. A question typed in place of his call decides nothing: no

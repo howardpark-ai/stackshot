@@ -1045,7 +1045,8 @@ def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: l
     """One ask per decision: refuse a write that puts `decision` back into needs within an hour of the owner's last answer on the item
     (a board answer or a comment of his: metadata.answers), unless the ask line changes in the same write. A decision already in needs is not put back.
     A record the server marked as a question (model/note_read.py) is no call of his. Answered on the item (the description as this write leaves it, `description`, is another one than he asked under), it
-    does not count. Not answered, and newer than anything he decided or commented, it refuses the put-back in words that say to answer it there."""
+    does not count. Not answered, and newer than anything he decided or commented, it refuses the put-back in words that say to answer it there. A question that stores no ask (a comment) was asked about the
+    one the item holds, else the latest ask an earlier record of his stores, answered question or not."""
     h = _hooks()
     was_on_call = any(str(x).lower() == "decision" for x in was_needs) or h.eff_state(item) == "your-call"      # already on his call before this write: nothing is put back
     back = not was_on_call and "decision" in _needs_kinds(meta)
@@ -1054,21 +1055,25 @@ def gate_decision_again(item: dict[str, Any], meta: dict[str, Any], was_needs: l
     written = item.get("description") if description is None else description
     last, prev = 0.0, str(ask_was or "")
     asked_at, asked_prev = 0.0, ""      # his newest question that the item has not answered
+    said: list[tuple[float, dict[str, Any]]] = []
     for a in h.answers_of(item):
         try:
-            if not (a.get("text") or a.get("choice")):
-                continue
-            ts, ask = float(a.get("ts") or 0), str(a.get("ask") or ask_was or "")      # a board decision keeps the ask it answered (its answer drops the ask from the item)
+            if a.get("text") or a.get("choice"):
+                said.append((float(a.get("ts") or 0), a))
         except (TypeError, ValueError):
             continue
+    stored = ""      # the latest ask a record of his stores, in the order he wrote them (a GitHub comment is read later than it was written)
+    for ts, a in sorted(said, key=lambda x: x[0]):
+        stored = str(a.get("ask") or "") or stored
+        ask = str(a.get("ask") or ask_was or "")      # a board decision keeps the ask it answered (its answer drops the ask from the item)
         if not a.get("question"):
             if ts >= last:
                 last, prev = ts, ask
         elif ts >= asked_at and not _noteread.answered_on_item(a, written):
-            asked_at, asked_prev = ts, ask
+            asked_at, asked_prev = ts, ask or stored      # a comment holds no ask, and the item may hold none any more: the one he was last asked still stands
     unanswered = asked_at > last
     if unanswered:
-        last, prev = asked_at, asked_prev or prev      # a comment of his holds no ask: the ask of what he said before it still stands
+        last, prev = asked_at, asked_prev or prev
     age = time.time() - last
     if last <= 0 or not 0 <= age < _DECISION_AGAIN_S:
         return

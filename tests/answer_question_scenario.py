@@ -178,6 +178,41 @@ it = rd(22); it["metadata"]["answers"][-1]["ts"] = time.time() - 3700
 (T / "store/a/22.json").write_text(json.dumps(it))
 passes("3: an hour after the question the same ask passes, as after any words of his", 22, needs=["decision"], ask=ASK)
 
+# ---- a newer question typed as a comment holds no ask of its own: the ask he was asking about still stands
+DESC3 = DESC2.replace("nothing more", "nothing more, and we pay")
+
+
+def comment_by(way, i, text, n):
+    if way == "board":
+        answer_svc._answer(f"a{i}", "", text, "comment")
+    else:
+        ghev_svc._github_comment(f"a{i}", {"id": n, "ts": time.time(), "text": text, "url": f"https://example.test/{n}"})
+
+
+for i, way in ((23, "board"), (24, "GitHub")):
+    ask(i)
+    answer_svc._answer(f"a{i}", "", "What does it cost?", "answer")
+    comment_by(way, i, "And who pays?", 200 + i)
+    check(f"3: (setup, {way}) the later question comment is marked and stores no ask", last(i).get("question") is True and "ask" not in last(i) and len(mt(i)["answers"]) == 2, mt(i)["answers"])
+    refused(f"3: a question comment ({way}) after a question in place of his call keeps the ask held", i, lambda: upd(i, needs=["decision"], ask=ASK), "asked a question", "does not answer yet")
+    passes(f"3: …and the rewrite lets the same ask line through ({way})", i, needs=["decision"], ask=ASK, description=DESC2)
+
+for i, way in ((25, "board"), (26, "GitHub")):
+    ask(i)
+    answer_svc._answer(f"a{i}", "", "What does it cost?", "answer")
+    upd(i, description=DESC2)
+    comment_by(way, i, "And who pays?", 200 + i)
+    refused(f"3: an answered question, a rewrite, then a new question ({way}): the ask is still held", i, lambda: upd(i, needs=["decision"], ask=ASK), "asked a question", "does not answer yet")
+    refused(f"3: …also when the write sends the description he asked under ({way})", i, lambda: upd(i, needs=["decision"], ask=ASK, description=DESC2), "asked a question")
+    passes(f"3: …until the new question is answered on the item too ({way})", i, needs=["decision"], ask=ASK, description=DESC3)
+
+ask(27)
+answer_svc._answer("a27", "", "What does it cost?", "answer")
+comment_by("board", 27, "And who pays?", 227)
+comment_by("GitHub", 27, "And when?", 228)
+refused("3: several question comments in a row keep it held", 27, lambda: upd(27, needs=["decision"], ask=ASK), "asked a question")
+passes("3: …and a changed ask line still passes", 27, needs=["decision"], ask=ASK2)
+
 # ================================================================ 4. the other ways his words arrive
 ask(30)
 out = answer_svc._answer("a30", "", "Why that one?", "answer", ref="0" * 12)
@@ -186,6 +221,26 @@ ask(31)
 ghev_svc._github_comment("a31", {"id": 99, "ts": time.time(), "text": "Why that one?", "url": "https://example.test/c"})
 ghev_svc._github_comment("a31", {"id": 100, "ts": time.time(), "text": "go ahead", "url": "https://example.test/d"})
 check("4: a GitHub comment that is a question is marked, another is not", [a.get("question") for a in mt(31)["answers"]] == [True, None] and "decision" in mt(31)["needs"], mt(31)["answers"])
+
+# ================================================================ 4b. the words other lines use for a question
+ask(32)
+answer_svc._answer("a32", "", "Why now?", "answer")
+ask(33)
+answer_svc._answer("a33", "", "ship it", "answer")
+del told[:]
+answer_svc._answer_tick(time.time() + 1801)
+for i, want, never in ((32, "asked a question on", "answered"), (33, "answered", "asked a question")):
+    lines = [n for g, s, n in told if g == f"a{i}"]
+    check(f"4b: the line to the keeper on an unacted item says what he did ({i})", len(lines) == 1 and want in lines[0].split(" on the board at ")[0] and never not in lines[0].split(" on the board at ")[0], lines)
+
+WATCHED = "Decide: has the lease arrived? " + chr(0xB7) + " Options: arrived / drop"      # a watcher's ask: no Recommend part
+item(34, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "post_wake_mover": BACK}})
+answer_svc._answer("a34", "", "Which lease is this?", "answer")
+woke = str((mt(34).get("woke") or {}).get("what") or "")
+check("4b: a question on a watcher ask is not called an answer on the item", "asked a question" in woke and "Which lease is this?" in woke and "answered" not in woke, mt(34).get("woke"))
+item(35, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "post_wake_mover": BACK}})
+answer_svc._answer("a35", "", "not yet, try next week", "answer")
+check("4b: …and words that decide still read as one", "answered in words" in str((mt(35).get("woke") or {}).get("what") or ""), mt(35).get("woke"))
 
 # ================================================================ 5. the answer frame
 ask(40)
@@ -202,9 +257,13 @@ check("5: …and a first load shows no older answer as its answer", state("", No
 reads = lambda t, *names: note_read.is_question(t, ask_read.recommend_stance, names)
 WIDE = chr(0xFF1F)
 QUESTIONS = ["Why that one?", "What does it cost? And who pays?", "Why that one?\nWhen?", "(is it safe?)", "Is that so" + WIDE, "Why" + WIDE + "When" + WIDE, "Is version 3.5 meant?"]
-check("6: words that are nothing but questions read as a question", [t for t in QUESTIONS if not reads(t)] == [], [t for t in QUESTIONS if not reads(t)])
 DECIDED = ["", "ship it", "Ship it. Why was it late?", "Why was it late? Ship it", "yes, but why that one?", "No, why would we?", "I wonder; is it safe?", "ship it - can you do it today?",
            "ship it " + chr(0x2014) + " today?", "ship it " + chr(0x2013) + " today?", "why that one", "ship it" + chr(0x3002) + "why" + WIDE]
+ELL = chr(0x2026)
+YES_KO, WHEN_KO = "\uc88b\uc544", "\uc5b8\uc81c \uc2dc\uc791\ud574?"      # Korean "good" and "when does it start?"
+DECIDED += ["ship it" + ELL + " why?", "ship it" + ELL + "why?", "ship it...why?", "Ship it.Who tells them?", YES_KO + "." + WHEN_KO, YES_KO + ELL + WHEN_KO]
+QUESTIONS += ["Why" + ELL + "?", "Is it safe...?", "Is server.py ready?", "Is example.com up?", "Is README.MD there?", WHEN_KO]
+check("6: words that are nothing but questions read as a question", [t for t in QUESTIONS if not reads(t)] == [], [t for t in QUESTIONS if not reads(t)])
 check("6: …a statement beside the question, a yes or a no, a semicolon or a dash keeps them a decision", [t for t in DECIDED if reads(t)] == [], [t for t in DECIDED if reads(t)])
 NAMED = ["B, but why so late?", "Slowly: can it start today?", "option A) when?"]
 check("6: …and so does an option's name or letter set off in front", [t for t in NAMED if reads(t, "Slowly", "At once", "A", "B")] == [], [t for t in NAMED if reads(t, "Slowly", "At once", "A", "B")])
