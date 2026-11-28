@@ -42,7 +42,7 @@ TASK_TAIL_BYTES = 32 * 1024 * 1024    # of a subagent's own transcript at most t
 TAIL_BYTES = 8 * 1024 * 1024   # of the session's transcript at most this much of its end is read to find a resume of a subagent and the end notices of background tasks
 LAST_ROW_BYTES = 16 * 1024     # of the end of a subagent's transcript at most this much is read to see whether its last row is an interruption (a longer last row is none)
 RESUME_SLACK_S = 1.0           # a resume dated within this long before the last write of the subagent's meta still counts as newer (the two are stamped by different clocks of one second's grain); a Monitor is read as past its lifetime only this long after it
-TASK_START = re.compile(r"Command running in background with ID: (\w+)|Command (?:did not complete within its \d+s timeout and )?was moved to the background \(ID: (\w+)\)|Monitor started \(task (\w+)")      # what a background Bash or a Monitor answers with: a tool result that OPENS with it (a result that only quotes it, a `cat` of another transcript, is no start)
+TASK_START = re.compile(r"Command (?:running in background|was manually backgrounded by user) with ID: (\w+)|Command (?:did not complete within its \d+s timeout and )?was moved to the background \(ID: (\w+)\)|Monitor started \(task (\w+)")      # what a background Bash or a Monitor answers with, read where the row has no command record (`pending_tasks`): a tool result that OPENS with it (a result that only quotes it, a `cat` of another transcript, is no start)
 TASK_LIFE = re.compile(r"expires in (?:(\d+)h)? ?(?:(\d+)m)? ?(?:(\d+)s)?|timeout (\d+)ms")      # a Monitor's lifetime, in its start text: `expires in 30m`, `expires in 15m 30s`, `expires in 45s`, `timeout 900000ms`; a Monitor with none lasts until its notice or the window
 TASK_NOTE = re.compile(r"<task-id>(\w+)</task-id>((?:(?!<task-id>).){0,1500})", re.S)      # a notice of a task, which ends it only when it carries a `<status>`: a Monitor's per-event notice carries none
 TASK_STOP = re.compile(r'"name":\s*"TaskStop",\s*"input":\s*\{\s*"task_id":\s*"(\w+)"')
@@ -134,8 +134,9 @@ def _life(text: str) -> float | None:
 
 
 def pending_tasks(tp: Path, now: float | None = None) -> set[str]:
-    """The background tasks a subagent started and has no end of in its own transcript: a Bash run in the background (started so, or moved there after its timeout) or a Monitor, whose task id shows in the tool result that
-    OPENS with the start text (a result that only quotes it, a `cat` of another transcript, starts nothing), minus the ids a task notice carrying a `<status>` (completed, failed, stopped), a Monitor's expiry event or a TaskStop ended.
+    """The background tasks a subagent started and has no end of in its own transcript: a Bash run in the background (started so, or moved there later) or a Monitor, minus the ids a task notice carrying a `<status>` (completed, failed, stopped), a Monitor's expiry event or a TaskStop ended.
+    A Bash is read from the record Claude Code keeps beside its result (`toolUseResult.backgroundTaskId`): a command that printed something before it was moved answers with that output first and the start text after it. A command's
+    record (it has `stdout`) that names no task starts none, whatever the output says. A row with no such record (a Monitor's) starts a task only when its tool result OPENS with the start text (a result that only quotes it, a `cat` of another transcript, starts nothing).
     A Monitor's per-event notice carries no status and ends nothing. With `now`, a Monitor is also ended when its start (the record's time) plus its lifetime (`expires in 10m`) plus `RESUME_SLACK_S` is past and the transcript was
     not written after that: its notice may reach only the session's transcript (`read_parent`). A Bash has no lifetime. Only the last `TASK_TAIL_BYTES` are read. An empty set when the file cannot be read."""
     try:
@@ -152,6 +153,13 @@ def pending_tasks(tp: Path, now: float | None = None) -> set[str]:
             try:
                 d = json.loads(line)
                 texts = _result_texts(d) if d.get("type") == "user" else []
+                rec = d.get("toolUseResult") if texts else None
+                if isinstance(rec, dict):
+                    tid = rec.get("backgroundTaskId")
+                    if isinstance(tid, str) and tid:
+                        started[tid], texts = None, []
+                    elif "stdout" in rec:
+                        texts = []      # a command that went to no background: a start text in its result is what it printed
             except (Exception, RecursionError):  # noqa: BLE001  — a torn line says nothing
                 texts = []
             for x in texts:
@@ -236,7 +244,7 @@ def running(session: str, roots: Any, now: float) -> list[dict[str, Any]]:
 
     A `finished` flag is not proof that a subagent is done. Claude Code writes `finished: true` into the meta at the end of EVERY turn of a subagent, also when it ends the turn waiting for a background task of its own (a Bash in
     the background, a Monitor), and drops it only when that task's notice, or a SendMessage, wakes the subagent again: a reviewer can end its turn a dozen times in ten hours while it works. A subagent flagged `finished` therefore
-    still counts as running (the same entry, `quiet` by the same rule) when EITHER its own transcript holds a background task with no end (`pending_tasks`: started by a tool result that opens with the start text, and not a
+    still counts as running (the same entry, `quiet` by the same rule) when EITHER its own transcript holds a background task with no end (`pending_tasks`: started as the record beside a command's result says, else by a tool result that opens with the start text, and not a
     Monitor past its lifetime) and was written within `PARKED_S`, and no notice of that task reached the session's transcript (`read_parent`: the end notice of such a task is often written only there), OR the session's
     transcript holds a resume of it (`toolUseResult.resumedAgentId`, or `revivedAgentId`) dated no earlier than its meta's last write (the meta's mtime; `RESUME_SLACK_S` allowed): the flag is then about to be dropped, or was
     not yet. A subagent with NO flag whose last row is `[Request interrupted by user]` (`interrupted`) was stopped: it is dead, not quiet, unless the session's transcript holds a resume of it dated no earlier than that last
