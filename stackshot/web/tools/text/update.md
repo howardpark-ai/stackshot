@@ -112,8 +112,8 @@ description). A step of his is reworded as drop plus add, and the reply says so.
 The status of your open step, one line per call: {"text": "PR 83 up", "state": "in progress"}. It replaces the status
 of your first open step in place (the step is the stage, such as "stage 11: auth and who", and the status says where
 you are in it; the page keeps one line per step, so a night of updates is one line). text is at most {{WORK_TEXT_MAX}}
-characters (details go on the project page). state: in progress (the default) | done; done also ticks the step, as
-done=[n] does. A status has no waiting state: a wait is until, after or wait_kind. With no open step of yours, one is made from the text. {"remove": true} clears the status. Written by
+characters (details go on the project page). state: in progress (the default) | done; done also ticks your first open step, as
+done=[n] does, unless the same call has done=[...]: then only the steps done names are ticked and the work line is not recorded. A status has no waiting state: a wait is until, after or wait_kind. With no open step of yours, one is made from the text. {"remove": true} clears the status. Written by
 the mover or a session named in needs; it changes no needs and owes no page. A project builder's step with a status in
 progress (changed within 90 minutes) tells the stall pass and the balancer that a build subagent is running on the
 item, so the item is not handed on meanwhile; a status left in progress stops hiding the item after that, and a status

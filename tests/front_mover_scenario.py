@@ -542,6 +542,11 @@ told.clear(); kinds.clear()
 r = call(lambda: _wt_update.stackshot_update(item_id="a227", sender=BUILD, mover=MAIN, work={"state": "done", "remove": True, "agent": MAIN}))
 check("hand-back, a work line removed (remove: true) for the holder: it finishes no step, so the hand-back is kept as sent and the front agent is pushed once", telling.holder(rd(227)) == MAIN and "(fixed:" not in r and len(pushed(MAIN)) == 1, (r[:300], told, rd(227)["metadata"].get("mover")))
 check("gates.step_marks: a work line removed (remove: true) marks no step", _gates.step_marks({"project": "projects/delta", "next": f"{MAIN}: {STEPF}\n{BUILD}: build it"}, work={"state": "done", "remove": True, "agent": MAIN}, sender=BUILD) == frozenset(), None)
+put(228, mover=BUILD, next=f"{BUILD}: build it\n{BUILD}: follow up")
+r = call(lambda: _wt_update.stackshot_update(item_id="a228", sender=BUILD, done=[2], work={"state": "done", "text": "built"}))
+_st228 = [s.get("status") == "done" for s in rd(228)["metadata"].get("steps") or []]
+check("a call that names the steps done ticks only those, even with a work status done: the other open step of the sender stays open", _st228 == [False, True], (r[:300], _st228))
+check("gates.step_marks: done names the steps, so a work status done adds none of its own", _gates.step_marks(m_two_w := {"project": "projects/delta", "next": f"{BUILD}: build it\n{BUILD}: follow up"}, [2], work={"state": "done"}, sender=BUILD) == frozenset({1}) and _gates.step_marks(m_two_w, work={"state": "done"}, sender=BUILD) == frozenset({0}), None)
 # the flag: cleared at the start of every update, by the call that raises after the gate, and set by mover only
 telling.HO_STATE.handback = {MAIN}
 put(225, mover=BUILD, next=f"{MAIN}: {STEPF}\n{BUILD}: build it")

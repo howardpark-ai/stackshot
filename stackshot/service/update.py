@@ -1002,7 +1002,9 @@ def update_unlocked(
                     if ti_w < 0 and not in_next_w:
                         work_skip = f"{work_who} has no open step on the item, so there is no status to clear"
                 elif work_spec["state"] == "done":
-                    if ti_w >= 0:
+                    if _fg._marks_given(done):
+                        work_skip = "done names the steps finished, so the status done ticks no step of its own and is not recorded"
+                    elif ti_w >= 0:
                         work_tick = ti_w                                   # the status done ticks the step, as done=[n] does
                     elif not in_next_w:
                         work_skip = f"{work_who} has no open step on the item to finish; the stage you finished is marked with done=[n] on the step, or not a step of the item"

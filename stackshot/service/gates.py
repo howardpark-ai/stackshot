@@ -274,7 +274,8 @@ def step_marks(meta: "dict[str, Any] | None", done: Any = None, dropped: Any = N
         ix = {*_steps.resolve(steps, done, "done"), *_steps.resolve(steps, dropped, "dropped")}
         if _steps.reword_given(reword):
             ix |= set(_steps.resolve_reword(steps, reword))
-        if work is not None and str(work).strip():
+        ix_named = _fg._marks_given(done)      # a call that names the steps done ticks only those: a work status done adds none
+        if work is not None and str(work).strip() and not ix_named:
             spec = _work.parse(work)
             if spec.get("state") == "done" and not spec.get("remove"):
                 nm = _anc.names()
