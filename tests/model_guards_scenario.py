@@ -111,7 +111,7 @@ def upd(i, **kw): return _update_svc._update(f"a{i}", sender="home-front", **kw)
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 def set_cfg(**kw):
-    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], "wait_alias_until": "2099-12-31", "post_wake_alias_until": "2099-12-31", **kw}      # the example-owner instance lists box-a and holds the alias windows open (tests/_instance.py); a suite that sets [model] whole keeps both
+    _cfg.CFG["model"] = {"rebullet_machines": ["box-a"], "wait_alias_until": "2099-12-31", **kw}      # the example-owner instance lists box-a and holds the alias window open (tests/_instance.py); a suite that sets [model] whole keeps it
 set_cfg()
 
 # ================================================================ the words (pure)
@@ -207,19 +207,19 @@ check("2 wait: …with its after and an end it passes", mt(64)["after"] == ["a63
 item(65, needs=[BACK])
 refused_nw("2 wait: a relay wait names the party or event", 65, lambda: upd(65, wait_kind="relay", ask_by=FUT), "news only", "wait_event=<who or what>")
 upd(65, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT)
-check("2 wait: …with its event and an ask-by day it passes (the post-wake mover defaults to the owner)", mt(65)["wait_kind"] == "relay" and model.derive(_service_store._load("a65")).wait.post_wake_mover == OWN, mt(65))
+check("2 wait: …with its event and an ask-by day it passes (the post-wake mover defaults to the owner)", mt(65)["wait_kind"] == "relay" and model.derive(_service_store._load("a65")).wait.mover == OWN, mt(65))
 item(66, needs=[BACK])
 item(166, needs=[BACK])
 out = upd(166, wait_kind="time")
 check("2 wait: a time wait with no date is not refused: until is taken (tomorrow when nothing gives one) and the reply says so", W.stored_until(mt(166)) and "wait_kind=time came with no date" in out and "set to tomorrow" in out, (out[-300:], mt(166)))
-refused_nw("2 post-wake mover: a post-wake mover that is no one is refused, with the fix", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-nobody"),
+refused_nw("2 post-wake mover: a post-wake mover that is no one is refused, with the fix", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, mover="home-nobody"),
            "the mover who takes it then, home-nobody", "no session the registry or the fleet knows", "Set mover=<")
-refused_nw("2 post-wake mover: …one whose pane is gone is refused too", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-lost"), "home-lost", "pane is gone")
-upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, post_wake_mover="home-peer")
+refused_nw("2 post-wake mover: …one whose pane is gone is refused too", 66, lambda: upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, mover="home-lost"), "home-lost", "pane is gone")
+upd(66, wait_kind="relay", wait_event="Robin", ask_by=FUT, mover="home-peer")
 check("2 post-wake mover: …a live session passes", mt(66)["mover"] == "home-peer", mt(66))
 item(67, owner=U["home-lost"], needs=[])
 upd(67, wait_kind="item", after=["a63"], ask_by=FUT)
-check("2 post-wake mover: an unnamed one defaults like a mover, to the project's builder, which passes", mt(67)["wait_kind"] == "item" and "post_wake_mover" not in mt(67), mt(67))
+check("2 post-wake mover: an unnamed one defaults like a mover, to the project's builder, which passes", mt(67)["wait_kind"] == "item" and "mover" not in mt(67), mt(67))
 upd(67, wait_kind="relay", wait_event="Robin", ask_by=FUT)
 check("2 post-wake mover: …a relay's default is the owner, who always passes", mt(67)["wait_kind"] == "relay", mt(67))
 
@@ -898,7 +898,7 @@ upd(91, wake=day(4), wait_basis=basis(), next="home-front: and once more")
 check("10 re-park: …a re-park that also edits next is still a re-park: the second", mt(91).get("repark") == 2, mt(91))
 refused_nw("10 re-park: …so the third, whose only other change is next and the description, is refused", 91, lambda: upd(91, wake=day(5), wait_basis=basis(), next="home-front: another line", description="- A thing\n- Reworded again\n- Done when done"),
            "re-parked 2 times in a row with nothing else changed", "third move of its wake")
-upd(91, post_wake_mover=OTHER, wake=day(5), wait_basis=basis())
+upd(91, mover=OTHER, wake=day(5), wait_basis=basis())
 check("10 re-park: a change of a structured field (the post-wake mover) is a real change: allowed, and the count starts again", "repark" not in mt(91) and wk_(mt(91)) == day(5), mt(91))
 check("10 re-park: the compared fields are the structured ones", "wait_kind" in gates._REPARK_FIELDS and "needs" in gates._REPARK_FIELDS and "next" not in gates._REPARK_FIELDS and "description" not in gates._substance({"metadata": {}}), gates._REPARK_FIELDS)
 
@@ -1011,7 +1011,7 @@ item(1, needs=[BACK])                                                           
 item(2, owner=U["home-lost"], needs=[], mover="home-lost")                                                    # a mover that is no one (its pane is gone)
 item(3, needs=[BACK], mover="home-nobody")                                                                 # …stored
 item(4, needs=[BACK], wait_kind="anchor", wait_event="merged")                                           # wait input + no end
-item(5, needs=[BACK], wait_kind="relay", wait_event="Robin", post_wake_mover="home-nobody", ask_by=FUT)    # post-wake mover
+item(5, needs=[BACK], wait_kind="relay", wait_event="Robin", mover="home-nobody", ask_by=FUT)    # post-wake mover
 item(6, needs=[BACK], hold=True, wake=day(3))                                                            # snooze
 item(7, needs=[BACK], next="home-front: TBD")                                                              # filler
 item(8, needs=["decision", FRONT], ask=ASK, hold=True)                                                    # decision + hold, second mover
@@ -1034,7 +1034,7 @@ check("report: wait input → 4; post-wake mover → 5; snooze → 6", ids("wait
 check("report: filler → 7; decision + hold → 8; second mover → 8 and 9", ids("filler") == [7] and ids("decision_hold") == [8] and ids("second_mover") == [8, 9], rep.ids)
 check("report: next with no name → 10; a wait in next → 11; an alarming word → 12; no end → 4 and 13", ids("next_unnamed") == [10] and ids("next_wait") == [11] and ids("alarm") == [12] and ids("no_end") == [4, 13], rep.ids)
 check("report: the closed items without an outcome → 15 and 16; the broad list flags 12", ids(mg.CLOSED_NO_OUTCOME) == [15, 16] and rep.flagged == ["a12"], (rep.ids, rep.flagged))
-check("report: what rests on a default is counted (alive items with no stored mover, waiting ones with no post-wake mover)", rep.defaulted.get("mover", 0) >= 7 and rep.defaulted.get("post_wake_mover", 0) >= 4, rep.defaulted)
+check("report: what rests on a default is counted (alive items with no stored mover, waiting ones with no mover)", rep.defaulted.get("mover", 0) >= 7 and rep.defaulted.get("picker", 0) >= 4, rep.defaulted)
 line = mg.brief_line(rep)
 check("report: the brief line is one line of counts", line.startswith("model guards would refuse on existing items: mover 2 · wait input 1 · post-wake mover 1 · snooze 1 · filler 1 · wait with no end 2 · decision that is parked 1 · second mover 2 · next line with no name 1 · wait in next 1 · alarming word 1 · closed without an outcome 2")
       and "\n" not in line, line)

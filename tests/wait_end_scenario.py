@@ -6,7 +6,7 @@ it cannot it asks the mover a specific question; a wait for an event no type rep
 
   1  detect     each kind of gap, and what is no gap: a negated wait, an "or", several items, another session's step, the owner's step, a held item, an item that already names the wait
   2  findings   the wait-end finding names the line and what to say; the settle window; modes fix | ask | off; the event-missing finding goes to the builder
-  3  fix        the pass sets `after`, an event wait (pull request, machine), an anchor wait, a step proof, a backstop day: stored waiting, the mover as post_wake_mover, History, one message
+  3  fix        the pass sets `after`, an event wait (pull request, machine), an anchor wait, a step proof, a backstop day: stored waiting, the mover as mover, History, one message
   4  send back  clear_after, clear_wait and step_proof "none" are the mover's no: the server leaves that line alone, a changed line is a new fact
   5  never      nothing closed, no ask written, an item the owner moves or a front agent's item is left alone, at most ten fixes a pass, a second pass changes nothing
   6  after      a line the server fixed is not asked about again once the wait ended; a stored day that is no date is no backstop; a refused gate leaves the anchors list as it was;
@@ -52,7 +52,8 @@ ZONE_OFFSET = 4 * HOUR
 (T / "store/next-id").write_text("9000"); (T / "store/anchors.json").write_text("{}")
 OLD = now - 3 * HOUR                          # an item last written three hours ago: past the settle window
 DESC = "- A thing, finished when it works"
-def item(i, nxt, mover="team-back", status="open", updated=None, **meta):
+def item(i, nxt, mover="team-back", status="open", updated=None, picker=None, **meta):
+    if picker: meta["mover"] = picker      # the stored mover of a wait: who picks it up when it ends (`mover` here is the session in needs)
     up = OLD if updated is None else updated
     d = {"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": up, "written_at": up, "written_by": mover,
          "state_updated": up, "confirmed": up,
@@ -162,15 +163,15 @@ g = gaps("team-back: wait for the nightly run to finish")
 check("1 an event no type reports: a gap of the event kind, never a fix", len(g) == 1 and g[0].kind == WE.EVENT and g[0].plan == {} and "scheduled job" in g[0].cls, g)
 g = gaps("team-back: write the summary")
 check("1 a step that waits for nothing is no gap", g == [], g)
-w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", needs=[])
+w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", mover="team-back", needs=[])
 check("1 a stored event wait with no backstop gets a backstop day", len(w) == 1 and w[0].kind == WE.STORED and w[0].plan == {"op": "backstop"}, w)
-w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", until="2099-01-01", needs=[])
+w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", mover="team-back", until="2099-01-01", needs=[])
 check("1 …a stored event wait whose until is its backstop has none to fix (the wait's end date is read from until, not only from ask_by and wake)", w == [], w)
-w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", until="someday", needs=[])
+w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", mover="team-back", until="someday", needs=[])
 check("1 …an until that is no date is no backstop: the stored event wait is asked for one", len(w) == 1 and w[0].plan == {"op": "backstop"}, w)
-w = gaps("x", state="waiting", wait_kind="event", wait_event="nonsense words", post_wake_mover="team-back", ask_by="2099-01-01", needs=[])
+w = gaps("x", state="waiting", wait_kind="event", wait_event="nonsense words", mover="team-back", ask_by="2099-01-01", needs=[])
 check("1 …a stored event the server cannot read is a question", len(w) == 1 and w[0].plan == {}, w)
-w = gaps("x", state="waiting", wait_kind="event", wait_event="job_run nightly", post_wake_mover="team-back", ask_by="2099-01-01", needs=[])
+w = gaps("x", state="waiting", wait_kind="event", wait_event="job_run nightly", mover="team-back", ask_by="2099-01-01", needs=[])
 check("1 …a stored job_run wait (no type reports it) goes to the builder", len(w) == 1 and w[0].kind == WE.EVENT, w)
 check("1 tokens: a changed line is a new token, a kind is read back from it", WE.token("item", "a1", "team-back: wait for board#" "1") != WE.token("item", "a1", "team-back: wait for board#" "1 to close") and WE.kind_of_token(WE.token("pr", "x#1", "t")) == "pr")
 
@@ -215,7 +216,7 @@ wipe()
 r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 m = mt(9201)
 check("3 after: the pass sets after on the item it waits for", m.get("after") == ["g9202"], m)
-check("3 …the item waits on an item's close, with the picker stored as mover and no old key", MODEL.derive(rd(9201)).state == MODEL.WAITING and m.get("mover") == BACK and "post_wake_mover" not in m and m.get("wait_kind") == "item", m)
+check("3 …the item waits on an item's close, with the picker stored as mover and no old key", MODEL.derive(rd(9201)).state == MODEL.WAITING and m.get("mover") == BACK and m.get("wait_kind") == "item", m)
 check("3 …a backstop day is set (now plus cap_days), and the stored phase is waiting on an item", bool(ab_(m)) and (m.get("phase"), m.get("waits_on")) == ("waiting", "item"), m)
 check("3 …History has one line saying what was set and how to send it back", len(log(9201)) == 1 and "after=" in log(9201)[0] and "clear_after" in log(9201)[0], log(9201))
 check("3 …the fix is recorded, and the wait-end finding is not sent (the message is the audit's retired)", any(SF.mark_tokens(m, SF.WAIT_END)) and not [x for x in sent if "· wait-end ·" in x[1]], (m.get(SF.MARK), sent))
@@ -231,7 +232,7 @@ item(9212, "team-back: wait for hp-box to come back online")
 item(9213, "team-back: wait for the reply in https://github.com/acme/widgets/issues/5")
 item(9214, "team-back: write the notes\nteam-back: wait for other/repo#8 to merge")
 item(9215, "team-back: ship PR #9")
-item(9216, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover=BACK, state=None)
+item(9216, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", picker=BACK, state=None)
 for i in (9211, 9212, 9213, 9214, 9215, 9216):
     mt_ = rd(i); mt_["metadata"].pop("state", None) if i == 9216 else None; (T / f"store/g/{i}.json").write_text(json.dumps(mt_))
 wipe()
@@ -319,7 +320,7 @@ check("6 …a changed line is a new fact: it is a gap again", [f["category"] for
 
 for p in (T / "store/g").glob("*.json"): p.unlink()
 ISO = re.compile(r"^\d{4}-\d\d-\d\d")
-item(9611, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover=BACK, ask_by="nonsense")
+item(9611, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", picker=BACK, ask_by="nonsense")
 d = rd(9611); d["metadata"].pop("state", None); (T / "store/g/9611.json").write_text(json.dumps(d))
 item(9612, "team-back: wait for board#" "9613 to close, then report", wake="sometime")
 item(9613, "home-other: build the thing")
@@ -330,7 +331,7 @@ check("6 a stored ask_by that is no date is no backstop: the pass writes a real 
 check("6 …an item wait set beside a wake that is no date gets a real backstop day", mt(9612).get("after") == ["g9613"] and ISO.match(str(ab_(mt(9612)))), mt(9612))
 check("6 …an anchor wait too", mt(9614).get("wait_kind") == "anchor" and ISO.match(str(ab_(mt(9614)))), mt(9614))
 check("6 …and none of them is left as a wait nothing can end", all(WATCH.can_end(mt(i)) for i in (9611, 9612, 9614)), [mt(i) for i in (9611, 9612, 9614)])
-item(9615, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover=BACK, wake="2099-01-01")
+item(9615, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", picker=BACK, wake="2099-01-01")
 d = rd(9615); d["metadata"].pop("state", None); (T / "store/g/9615.json").write_text(json.dumps(d))
 wipe()
 r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))
@@ -474,7 +475,7 @@ check("7 the handled line alone gives nothing", not [f for f in fs if f["id"].en
 # one item's failure is skipped, the rest of the pass goes on
 for p in (T / "store/g").glob("*.json"): p.unlink()
 item(9711, "team-back: wait for the reply in https://github.com/acme/widgets/issues/11"); item(9712, "team-back: wait for board#" "9713 to close, then report"); item(9713, "home-other: build the thing")
-item(9714, "x", needs=[], wait_kind="anchor", post_wake_mover=BACK, state=None)
+item(9714, "x", needs=[], wait_kind="anchor", picker=BACK, state=None)
 d = rd(9714); d["metadata"].pop("state", None); (T / "store/g/9714.json").write_text(json.dumps(d))
 def raising_anchors(gid): raise RuntimeError("anchors file unreadable")
 def bad_facts():
@@ -507,7 +508,7 @@ check("7 …and the same pass with the gate working sets the anchor wait without
 
 # a backstop day that would not end the wait is refused, not recorded as a fix
 for p in (T / "store/g").glob("*.json"): p.unlink()
-item(9731, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover=BACK)
+item(9731, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", picker=BACK)
 d = rd(9731); d["metadata"].pop("state", None); (T / "store/g/9731.json").write_text(json.dumps(d))
 real_can_end = WATCH.can_end
 WATCH.can_end = lambda meta: False
@@ -742,7 +743,7 @@ check("10 …", found(9841))
 for p in (T / "store/g").glob("*.json"): p.unlink()
 waiting(9851, needs=["external"], wait_kind="relay", wait_event="the badge")                    # a stored relay kind with no day: nothing wakes it
 waiting(9852, needs=["external"], wait_kind="relay", wait_event="the badge", wake=day(3))         # …with a wake the old pass takes: not the owner-moved item's finding
-waiting(9853, needs=["external"], wait_kind="event", wait_event="pr_merged other/repo#9", post_wake_mover=OWN)      # …an event wait with no backstop: the server adds one on a session's item, never on this one
+waiting(9853, needs=["external"], wait_kind="event", wait_event="pr_merged other/repo#9", picker=OWN)      # …an event wait with no backstop: the server adds one on a session's item, never on this one
 waiting(9854, wait_kind="event", wait_event="pr_merged other/repo#9", mover="team-back", needs=["team-back"])
 fs, _fl = AC.filing_findings(store_items(), {}, now, env(**FIXING))
 check("10 a stored kind nothing ends is found whoever picks it up; one the old pass wakes stays quiet for the owner's", "9851" in cats(fs, "wait-end") and "9853" in cats(fs, "wait-end") and "9852" not in cats(fs, "wait-end"), cats(fs, "wait-end"))

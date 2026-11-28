@@ -32,12 +32,11 @@ from stackshot.model import model as _model
 from stackshot.model import nextlines as _nl
 from stackshot.model import states as _states
 from stackshot.model import steps as _steps
-from stackshot.model.needs import _needs_kinds
-from stackshot.waits import mover_pass as _mp
+from stackshot.model.needs import _needs_kinds, _needs_of
 from stackshot.waits import stall as _stall
 from stackshot.waits import until_pass as _up
+from stackshot.waits import watchers as _watch
 
-LEGACY = _model.LEGACY_PICKER_KEY
 KEYS = ("answers", "mover", "next", "next_by", "steps")        # the keys the pass may change
 ENTRY_KEYS = frozenset(KEYS)                                    # what an undo entry's before and after may name
 ENTRY_FIELDS = _up.ENTRY_FIELDS                                 # item, before, after, history, dropped
@@ -135,12 +134,51 @@ def probe_diff(a: dict[str, Any], b: dict[str, Any]) -> str:
     return "; ".join(out)
 
 
+def _prepared(S: Any, gid: str, item: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+    """The item as the readers see it (the old hold and needs forms applied) and the model's reading of it."""
+    seen = {**copy.deepcopy(item), "gid": gid}
+    S._legacy_hold(seen)
+    S._legacy_needs(seen)
+    return seen, S._item_read._model_of(seen)
+
+
+def _restored(S: Any, seen: dict[str, Any]) -> Any:
+    """Who picks the item up, and its `then`, when the owner's "not yet" puts the turned wait back (watchers.restore_wait on a copy), None for an item with no snapshot."""
+    w = (seen.get("metadata") or {}).get("watch")
+    if not isinstance(w, dict) or not isinstance(w.get("was"), dict) or not w["was"]:
+        return None
+    back = copy.deepcopy(seen)
+    _watch.restore_wait(back["metadata"], "2099-01-01", False)
+    mod = S._item_read._model_of(back)
+    waiting = mod.state == _model.WAITING and mod.wait is not None
+    return [mod.wait.mover if waiting else mod.mover, mod.then]
+
+
+def _reading(S: Any, gid: str, item: dict[str, Any]) -> dict[str, Any]:
+    """What the item reads as, for the check that the pass changes no reading: everything the until pass keeps (phase, kind of wait, mover, watched, held, stamp, date, conflicts), and the picker (the model's and
+    the shown one), `then`, needs, whether a wait on a date alone ends with its date, and who picks the item up when a turned wait is put back."""
+    seen, mod = _prepared(S, gid, item)
+    shown = _model.view(seen, mod, after_open=lambda i_: S._item_read._after_open(i_.get("metadata") or {}))
+    waiting = mod.state == _model.WAITING and mod.wait is not None
+    return {**_up.reading(S, gid, item), "picker": [mod.picker, shown.picker], "then": [mod.then, mod.then_explicit], "needs": list(_needs_of(seen.get("metadata") or {})),
+            "ends": bool(_watch.ends_on_the_date(seen.get("metadata") or {}, mod)) if waiting else None, "restored": _restored(S, seen)}
+
+
+def _same(r0: dict[str, Any], r1: dict[str, Any]) -> str:
+    """"" when two readings are the same, else what differs, in words."""
+    diffs = [_up.same(r0, r1)] if _up.same(r0, r1) else []
+    for k in ("picker", "then", "needs", "restored", "ends"):
+        if r0[k] != r1[k]:
+            diffs.append(f"{k} {r0[k]} -> {r1[k]}")
+    return "; ".join(diffs)
+
+
 def decision_mover_edit(meta: dict[str, Any], mod: Any, name: str) -> bool:
-    """Does an open, alive item that needs a decision store no mover and read the first person as its mover by default (so the pass may store him)? A waiting item, an item with an old picker key, and one whose mover is
+    """Does an open, alive item that needs a decision store no mover and read the first person as its mover by default (so the pass may store him)? A waiting item and one whose mover is
     stored (whoever it names) are left as they are."""
     if getattr(mod, "state", "") != _model.ALIVE or "decision" not in _needs_kinds(meta):
         return False
-    if LEGACY in meta or _model.clean(meta.get("mover")):
+    if _model.clean(meta.get("mover")):
         return False
     return bool(_model.is_owner(mod.mover) and not mod.mover_explicit and _model.clean(mod.mover) == name)
 
@@ -248,7 +286,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             h0 = S._stamp_sha(data)
             meta = raw["metadata"]
             is_open = raw.get("status") == "open"
-            mod = _mp.prepared(S, gid, raw)[1] if is_open else None
+            mod = _prepared(S, gid, raw)[1] if is_open else None
             plan = plan_for(meta, mod, is_open)
             base = {"item": shown, "status": str(raw.get("status") or ""), "form": plan["form"], "notes": plan["notes"], "answers": plan["answers"], "sha256_before": h0}
             if not plan["edits"]:
@@ -260,7 +298,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             if recorded(new["metadata"]) != recorded(meta):
                 why = "an answer would read as another person's"
             elif is_open:
-                why = _mp.same(_mp.reading(S, gid, raw), _mp.reading(S, gid, new))
+                why = _same(_reading(S, gid, raw), _reading(S, gid, new))
             if why:
                 return {**out, "action": "refused", "why": f"the item would read differently with the first person stamped: {why}; left as it is"}
             if dry:

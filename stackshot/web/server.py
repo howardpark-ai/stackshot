@@ -120,7 +120,6 @@ from stackshot.service import stall as _stallsvc  # noqa: E402  — the stall pa
 from stackshot.service import stamp as _stamp_svc  # noqa: E402  — the stored phase sweep the start and a reload run (service/stamp.py)
 from stackshot.service import migrations as _migrations  # noqa: E402  — the start-up migrations (service/migrations.py)
 from stackshot.service import wait_fixes as _wait_fixes  # noqa: E402  — the one warning for a missing [model] wait_alias_until (service/wait_fixes.py)
-from stackshot.service import gates as _gates  # noqa: E402  — the one warning for a missing [model] post_wake_alias_until (service/gates.py)
 from stackshot.web import runners as _runners  # noqa: E402  — the Runners page: its snapshot and its rebuild are set up by `_start_background` (runners.py)
 from stackshot.web import search as _search  # noqa: E402  — the board's search index: its loop is started by `_start_background` (search.py)
 from stackshot.core import store as _store  # noqa: E402  — the store's path, for the standby backstop and the store directory below (core/store.py)
@@ -243,7 +242,6 @@ def _start_background() -> list[str]:
     for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
         print(f"config: {_n}", file=sys.stderr, flush=True)
     _wait_fixes._wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
-    _gates.post_wake_alias_check()                      # one warning when [model] post_wake_alias_until is missing: the code's default end of the alias window stands
     _lap("config notes")
     try:
         if _migrations.migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner

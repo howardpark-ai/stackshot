@@ -260,9 +260,9 @@ def held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[st
             mod = h.model_of({**src, "gid": src.get("gid") or src.get("id") or ""})
             if mod.state == _model.ALIVE:
                 cands = [(mod.mover, "mover"), (mod.then, "then")]
-            elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
+            elif mod.wait:      # a waiting item: the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
                 # The order is the one the writers that store a wait's picker (_decision_hand_over, release_after in service/wakes.py) use, so the reader finds the same session.
-                cands = [(_model.stored_picker(meta), "then" if _model.norm_who(meta.get(_model.LEGACY_PICKER_KEY)) else "mover"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
+                cands = [(_model.stored_picker(meta), "mover"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
     except Exception:  # noqa: BLE001  — a notice's addressee is never worth failing a write over
         cands = []
     cands += [(_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then")]      # a stored mover or `then` still holds an item that waits on someone outside (it relays; it is told when the wait ends)

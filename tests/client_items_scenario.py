@@ -68,7 +68,7 @@ for i in range(1, N_OPEN + 1):
     if kind == 0: put(i, subject=f"[home] {ko} {i}", project=prj, owner=owner, owner_name=a)                           # no stored mover: the project's default
     elif kind == 1: put(i, subject=f"[home] {ko} {i}", **base, needs=["decision"], then=a)                              # the decision is the person's, and a session takes it after the answer
     elif kind == 2: put(i, subject=f"[home] {ko} {i}", **base, hold=True, mover=a)                                      # held
-    elif kind == 3: put(i, subject=f"[home] {ko} {i}", **base, wait_kind="time", wake=D(2 + i % 5), then=b, post_wake_mover=b)       # parked to a date
+    elif kind == 3: put(i, subject=f"[home] {ko} {i}", **base, wait_kind="time", wake=D(2 + i % 5), then=b, mover=b)       # parked to a date
     elif kind == 4: put(i, **base, mover=a, after=[f"a{i - 1}"])                                                        # after an open item
     elif kind == 5: put(i, **base, mover=a, after=[f"a{i - 5}"])                                                        # after an item that is open too
     elif kind == 6: put(i, status="completed", **base, mover=a)                                                         # closed

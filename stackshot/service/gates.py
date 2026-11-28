@@ -183,7 +183,7 @@ def _sibling_pointer(key: str, verb: str = "update") -> str:
 
 def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "") -> "tuple[str, str, list[str], str] | None":
     """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
-    the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
+    the owner's answer) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
     and not taken until the owner noticed. Not a case: a front agent naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item
     already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as front_sender does."""
     h = _hooks()
@@ -252,14 +252,14 @@ def _front_only_why(key: str, project: str, sender: str) -> str:
 
 def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", project: str = "", sender: str = "") -> ToolError:
     """The refusal of a front-mover case. A project that has a builder says the front agent gets no hand-off notice (the explanation is still true there). A front-only project (no builder: anchors.front_only)
-    states only the rule that applies, a live session some project page lists may name a live front agent of the item's project in `mover` (told by a hand-off notice), `then` or `post_wake_mover` (told
+    states only the rule that applies, a live session some project page lists may name a live front agent of the item's project in `mover` (told by a hand-off notice) or `then` (told
     by the answer or the wake), which half of that this call failed (_front_only_why), and the path to the peer for a check: the page key with `For <peer>,` first."""
     key, proj, builder, hub = case
     via = _for_peer(key, proj)
     if not builder:
         what = project or "the project"
         return ToolError(f"Refused: {field}={key} names {key}, a front agent of {proj}, for an item of {what}, and {hub or 'The project'} has no builder to hand it to, so the item stays with its current mover. "
-                         f"A live session some project page lists may name a live front agent of {what} in mover= (told by a hand-off notice), then= or post_wake_mover= (told by the owner's answer or the wake); "
+                         f"A live session some project page lists may name a live front agent of {what} in mover= (told by a hand-off notice) or then= (told by the owner's answer or the wake); "
                          f"this call was refused because {_front_only_why(key, project, sender)}." + (f" To ask {key} for a check or an answer, {via}." if via else ""))
     return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
                      f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). Hand build work to the project's builder, {builder[0]} ({field}={builder[0]})"
@@ -290,7 +290,7 @@ def step_marks(meta: "dict[str, Any] | None", done: Any = None, dropped: Any = N
 
 
 def handed_back(value: str, sender: str, builder: list[str], meta: "dict[str, Any] | None", item: "dict[str, Any] | None", project: str = "", marked: "frozenset[int] | None" = frozenset(), ends: bool = False) -> bool:
-    """Is a session's `mover`, `then` or `post_wake_mover` = the front agent `value` a hand-back: the item goes back to the front agent that holds its first open named step (past the owner's own lines), as the item
+    """Is a session's `mover` or `then` = the front agent `value` a hand-back: the item goes back to the front agent that holds its first open named step (past the owner's own lines), as the item
     STANDS before this write (`meta`, never a step line the write itself adds). All must hold: the front agent holds that step (telling.step_holder_at, in any letter case, as own_step reads it) and is a front agent of the
     item's `project` (telling.front_name, as the owner's answer reads its holder); the write leaves that step open (`marked`: the positions it ticks, drops or rewords, `step_marks`, None when its refs cannot be read; `ends`: it closes the item or clears next), so the
     notice has a step to read; the sender is the project's builder, or the item's current mover (`item`, read as the board reads it) when that mover is no front agent (a front agent that moves the item hands it to a
@@ -317,12 +317,12 @@ def handed_back(value: str, sender: str, builder: list[str], meta: "dict[str, An
 
 
 def fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None", said_l: "Callable[[], list[dict[str, Any]]] | None" = None, verb: str = "update", item: "dict[str, Any] | None" = None, marked: "frozenset[int] | None" = frozenset(), ends: bool = False) -> "tuple[str, str, list[tuple[str, str, str]]]":
-    """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
+    """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover or then that another session sets to a front agent becomes the project's builder, since the front agent gets
     no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
     no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
-    field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute (front-only), a `mover`, `then` or `post_wake_mover` goes through when
+    field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute (front-only), a `mover` or `then` goes through when
     `front_handover_ok` says so (the target is a live front agent of the item's project, the sender a live session some project page lists, of any project); a `mover` target is told by a hand-off
-    notice, a `then` or `post_wake_mover` target by the owner's answer or the wake (no write tells it, as before).
+    notice, a `then` target by the owner's answer or the wake (no write tells it, as before).
     One case goes before all of that: the sender is a live front agent of the item's project and the value another live front agent of it (a sibling), and `said_l` (`lazy_said`: the write's `said`, checked) carries the
     owner's words (`sibling_quote`, the wake cap's reading). The value is then kept as sent, builder or none, with a note; the hand-off record carries his quoted words and its notice (handoff_notify) tells the sibling. With no
     such words a sibling's swap note says how to send them (`verb`: the call, update or create, the note names)."""
@@ -331,7 +331,8 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     if case is None:
         return value, "", []
     key, proj, builder, _hub = case
-    if handed_back(value, sender, builder, meta, item, project, marked, ends):      # the front agent holds the item's open step and the sender is its builder or its mover (no front agent): the item goes back to it as sent, and it is told (handoff_notify, for this write's hand-back only; a then or post_wake_mover, by the answer or the wake)
+    told_now = field == "mover" and not (meta and _model.waits_stored(meta))      # a mover write on an item that waits names who picks it up when the wait ends: the owner's answer or the wake tells it, no write does
+    if handed_back(value, sender, builder, meta, item, project, marked, ends):      # the front agent holds the item's open step and the sender is its builder or its mover (no front agent): the item goes back to it as sent, and it is told (handoff_notify, for this write's hand-back only; a then, by the answer or the wake)
         if field == "mover":
             hb = getattr(_telling.HO_STATE, "handback", None)
             if hb is None:
@@ -341,7 +342,7 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
     sib = _front_sibling(sender, key, project)
     if sib and sibling_quote(said_l() if said_l else []):
         return value, (f"\n(note: {field}={key} is kept as you sent it, on {OWNER}'s words in said; {key} is a front agent of {proj}, and "
-                       + (f"is told it is handed the item)" if field == "mover" else "if the item keeps it, the owner's answer or the wake hands it the item and tells it)")), []
+                       + (f"is told it is handed the item)" if told_now else "if the item keeps it, the owner's answer or the wake hands it the item and tells it)")), []
     token = f"{field}={key}"
     by, now = h.session_id(sender) or sender, time.time()
     hit = _sf.marked_by(meta, _sf.FRONT_MOVER, token, by, now)       # the substitution was this session's, within a day: its second send is the mover's no
@@ -349,8 +350,8 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if h.front_handover_ok(sender, key, project):      # a front-only project (anchors.front_only): any session a project page lists may name one of its front agents; a mover is told by a notice (handoff_notify), a then or post_wake_mover by the answer or the wake
-            return value, (f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is a front agent of the project and is told it is handed the item)" if field == "mover" else
+        if h.front_handover_ok(sender, key, project):      # a front-only project (anchors.front_only): any session a project page lists may name one of its front agents; a mover is told by a notice (handoff_notify), a then by the answer or the wake
+            return value, (f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is a front agent of the project and is told it is handed the item)" if told_now else
                            f"\n(note: {project} has no builder, so {field}={key} is not replaced by one; {key} is a front agent of the project, and if the item keeps it, the owner's answer or the wake hands it the item and tells it)"), []
         raise _front_mover_refusal(field, case, project, sender)
     via = _for_peer(key, proj)
@@ -593,11 +594,10 @@ _NOT_PASSED = ("until", "waits", "wait_mode", "until_server")      # in the wait
 
 
 def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[str, Any] | None = None) -> tuple[dict[str, str], set[str]]:
-    """The model fields a write passes (model.py): goal, mover, then, wait_kind, wait_anchor, wait_event, ask_by, post_wake_mover → (the fields to set, whitespace
+    """The model fields a write passes (model.py): goal, mover, then, wait_kind, wait_anchor, wait_event, ask_by → (the fields to set, whitespace
     collapsed and the owner's name and wait_kind normalised, the fields to drop). A value of none, clear or - drops that field; clear_goal, clear_mover, clear_then drop theirs
-    and clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by, and the old picker key stored beside them; the wake and after keep their own flags). A clear does not go with a new value
-    for what it drops. post_wake_mover is the old name of mover (an alias in its window, the service folds it, model.fold_picker_alias): passed beside a different mover it is refused here, naming mover.
-    Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards.
+    and clear_wait the wait's four (wait_kind, wait_anchor, wait_event, ask_by; the wake and after keep their own flags). A clear does not go with a new value
+    for what it drops.     Only the form is judged here (model.check_fields): whether an alive item names a mover or a wait its mover is for the write guards.
     `stored`: the item's metadata as it stands (an update's): the refusal of clear_wait beside a new wait_kind names the stored wait_anchor and wait_event the call to send would keep."""
     h = _hooks()
     faults: list[str] = []
@@ -609,15 +609,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[
             drop.add(k)
         elif v:
             setv[k] = v
-    pw_, mv_ = _model.clean(vals.get("post_wake_mover")), _model.clean(vals.get("mover"))
-    if pw_ and mv_ and mv_.lower() not in h.ask_none:      # the old name beside a named mover: the same value is one value, a different one is the one real contradiction (mover=none beside it is the old way to say "no live mover, and this one takes it when the wait ends": the old name then wins as the picker)
-        a_, b_ = ("none" if pw_.lower() in h.ask_none else _model.norm_who(pw_).lower()), _model.norm_who(mv_).lower()
-        if a_ != b_:
-            faults.append(f"Refused: mover and post_wake_mover differ (mover={mv_}, post_wake_mover={pw_}); post_wake_mover is the old name of mover, the one who moves the item "
-                          "(on a waiting item, the one who takes it when the wait ends): pass mover=<who> alone")
-    if clears.get("mover") and pw_ and pw_.lower() not in h.ask_none:      # clear_mover and a named old-name picker contradict each other (the alias would store it as mover, over the explicit clear)
-        faults.append(f"Refused: clear_mover and post_wake_mover={pw_} contradict each other (post_wake_mover is the old name of mover): clear_mover drops the mover, mover=<who> sets one; pass one of them")
-    for flag, fields in (("goal", ("goal",)), ("mover", ("mover",)), ("then", ("then",)), ("wait", (*_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY))):
+    for flag, fields in (("goal", ("goal",)), ("mover", ("mover",)), ("then", ("then",)), ("wait", _model.WAIT_GROUP)):
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
@@ -633,7 +625,7 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[
                 drop.update(fields)
     if "wait_kind" in setv:
         setv["wait_kind"] = setv["wait_kind"].lower()
-    for k in ("mover", "then", "post_wake_mover"):
+    for k in ("mover", "then"):
         if k in setv:
             setv[k] = _sr.named(_model.norm_who(setv[k]))      # a short session id (`sala sessions`) is stored as the session's name: a mover that is an id would not be told from its name
     probs = _model.check_fields(setv)
@@ -642,25 +634,6 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool], stored: dict[
     if faults:
         raise _faults.refusals(faults)
     return setv, drop
-
-
-def post_wake_alias_until() -> dt.date:
-    """[model] post_wake_alias_until (YYYY-MM-DD, default the code's, model.PICKER_ALIAS_UNTIL): the last day the parameter post_wake_mover is still accepted as an alias of mover. A value that is not a date reads as
-    the default. Read at each call, so moving it needs no release."""
-    v = str(_cfg.get("model", "post_wake_alias_until", default=_model.PICKER_ALIAS_UNTIL) or _model.PICKER_ALIAS_UNTIL).strip()
-    try:
-        return dt.date.fromisoformat(v)
-    except ValueError:
-        return dt.date.fromisoformat(_model.PICKER_ALIAS_UNTIL)
-
-
-def post_wake_alias_check() -> None:
-    """At the server's start: one stderr warning when [model] post_wake_alias_until is missing or not a date, so the code's own default end of the alias window (model.PICKER_ALIAS_UNTIL) never stands in silently."""
-    v = str(_cfg.get("model", "post_wake_alias_until", default="") or "").strip()
-    try:
-        dt.date.fromisoformat(v)
-    except ValueError:
-        print(f"config: [model] post_wake_alias_until is {'missing' if not v else 'not a date (' + v + ')'}: the old parameter post_wake_mover stays accepted as mover to the code's default, {_model.PICKER_ALIAS_UNTIL}", file=sys.stderr, flush=True)
 
 
 @dataclass
@@ -828,7 +801,7 @@ def owner_waiting(meta: Any) -> bool:
     try:
         if _waits_decision(m) or _model.clean(m.get("state")).lower() in _model.OWNER_STATES or _model.clean(m.get("ask")):
             return True
-        if any(_model.is_owner(x) for x in (m.get("mover"), m.get(_model.LEGACY_PICKER_KEY), *_needs_list(m.get("needs"))) if _model.clean(x)):
+        if any(_model.is_owner(x) for x in (m.get("mover"), *_needs_list(m.get("needs"))) if _model.clean(x)):
             return True
         opts = m.get("options")
         if isinstance(opts, list) and opts:
@@ -976,7 +949,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
 #   5  next may be stale: another session changed needs, state, hold, wake or after and not next (metadata.next_stale), or next names a date that has passed
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused; a question of his is no answer once the description has answered it
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
-_REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "waits", "wait_mode")     # the structured fields a re-park may not change (status and hold beside them)
+_REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "waits", "wait_mode")     # the structured fields a re-park may not change (status and hold beside them)
 
 
 def _list_shape(v: Any) -> Any:
@@ -1128,7 +1101,7 @@ def gate_repark(item_was: dict[str, Any], item: dict[str, Any], meta: dict[str, 
     meta["repark"] = n
 
 
-_WAIT_STRUCTURE = ("wait_kind", "wait_event", "wait_anchor", "after", "waits", "wait_mode")      # what a wait stands on (the clock fields apart; post_wake_mover is who takes the item after, and the holder rules cover hand-offs; a changed list of waits is a new shape)
+_WAIT_STRUCTURE = ("wait_kind", "wait_event", "wait_anchor", "after", "waits", "wait_mode")      # what a wait stands on (the clock fields apart; the mover is who takes the item after, and the holder rules cover hand-offs; a changed list of waits is a new shape)
 
 
 _STRUCT_KEEP = 5      # earlier signatures of the wait's structure kept in metadata.clock_struct

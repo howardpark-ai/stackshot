@@ -59,7 +59,7 @@ _ck = NOW.strftime("%Y-%m-%d %H:%M:%S")
 
 def item(i, subject, status="open", age=3 * H, owner="back", project="projects/alpha", **meta):
     meta = {"owner": SESS[owner], "next": "team-back: do the thing", **meta}
-    if meta.get("hold") and not meta.get("needs"): meta.setdefault("post_wake_mover", SESS[owner])      # a parked item is taken, when its wait ends, by its post-wake mover (the creator is no one's mover)
+    if meta.get("hold") and not meta.get("needs"): meta.setdefault("mover", SESS[owner])      # a parked item is taken, when its wait ends, by its post-wake mover (the creator is no one's mover)
     if project: meta["project"] = project
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": subject, "description": "A fixture item.", "status": status, "updated": now - age, "state_updated": now - age,
                                                     "confirmed": now - age, "metadata": meta}))
@@ -103,7 +103,7 @@ item(26, "[home] a wait with no date", age=4 * D, hold=True, next="team-back: so
 item(28, "[home] anchor wait, no anchor recorded", age=1 * D, needs=["external"], wait_kind="anchor", wait_event="the vendor answers", mover="team-back", wake=day(6), next="team-back: look again")
 item(29, "[home] anchor wait, anchor scoped to the item", age=1 * D, needs=["external"], state="outside", party="Acme", wake=day(7), next="team-back: read the thread when it moves")
 item(44, "[home] item wait with only its backstop date", age=1 * D, wait_kind="item", wake=day(5), mover="team-back", next="team-back: look at it then")
-item(43, "[home] time wait, a long then-mover", age=1 * D, hold=True, wake=day(4), post_wake_mover="falcon-engineer-with-a-very-long-name", next="falcon-engineer-with-a-very-long-name: take it")
+item(43, "[home] time wait, a long then-mover", age=1 * D, hold=True, wake=day(4), mover="falcon-engineer-with-a-very-long-name", next="falcon-engineer-with-a-very-long-name: take it")
 item(27, "[home] no project item", age=1 * D, project="", needs=["team-back"], owner="back", next="team-back: no project here")
 # ---- items that store the model's own fields ----
 item(50, "[home] a step with a command", age=1 * D, state="your-step", step="run the one line `sala op reauth box-a --from me --words \"go\"` and say done", needs=["team-back"], owner="front", next="team-back: check it")
@@ -116,7 +116,7 @@ item(53, "[home] a step of plain words", age=1 * D, state="your-step", step="Cal
 item(54, "[home] a yes or no with its options", age=45 * 60, needs=["decision"], ask="Decide: use the cheaper plan? · Recommend: yes · Stakes: low · By: Mon", next="Oliver: decide", owner="front",
      options=[{"label": "Approve", "line": "Take the cheaper plan.", "recommended": True}, {"label": "Decline", "line": "Keep the current plan.", "recommended": False}])   # Approve and Decline stored by its owner
 item(40, "[home] stored mover Oliver", age=4 * D, mover="Oliver", then="team-back", next="Oliver: look at the draft", owner="front")                                                    # alive, the owner the mover, no needs
-item(41, "[home] stored time wait", age=1 * D, wait_kind="time", wake=day(2), post_wake_mover="home-other", next="home-other: take it after the wake", owner="front")                    # waiting, the post-wake mover stored
+item(41, "[home] stored time wait", age=1 * D, wait_kind="time", wake=day(2), mover="home-other", next="home-other: take it after the wake", owner="front")                    # waiting, the post-wake mover stored
 # ---- Completed ----
 item(30, "[home] shipped last week", status="completed", age=2 * D, outcome="done", reason="the thing shipped on Friday", needs=[])
 item(31, "[home] closed with no outcome", status="completed", age=3 * D, needs=[])

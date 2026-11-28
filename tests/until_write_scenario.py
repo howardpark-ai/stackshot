@@ -166,7 +166,7 @@ check("2 …or the date of the item it waits after", W.stored_until(mt(13)) == w
 item(14, needs=[BACK])
 out = bupd(14, wait_kind="relay", wait_event="the vendor's reply")
 check("2 nothing gives a date: tomorrow, and the reply says so and how to change it", W.stored_until(mt(14)) == w(1) and "set to tomorrow" in out and "clear_wait=true" in out and no_old(mt(14)), (out[-400:], mt(14)))
-for kind, extra, idx in (("event", dict(wait_event="recycle", post_wake_mover=BACK), 16), ("time", {}, 17)):
+for kind, extra, idx in (("event", dict(wait_event="recycle", mover=BACK), 16), ("time", {}, 17)):
     item(idx, needs=[BACK])
     try:
         out = bupd(idx, wait_kind=kind, **extra); ok = True
@@ -192,17 +192,17 @@ check("2 fallback_date: the earliest date after today and within the cap in the 
 
 # ================================================================ 3. the end of a wait clears until and wait_kind together
 item(20, needs=[BACK], until=w(-1))
-item(21, needs=[BACK], until=w(-1), wait_kind="time", post_wake_mover=BACK)
-item(22, needs=[BACK], hold=True, wake=w(-1), wait_kind="time", post_wake_mover=BACK)             # stored by the old fields: the pass leaves its kind as it did
+item(21, needs=[BACK], until=w(-1), wait_kind="time", mover=BACK)
+item(22, needs=[BACK], hold=True, wake=w(-1), wait_kind="time", mover=BACK)             # stored by the old fields: the pass leaves its kind as it did
 woke = wakes_svc.wake_pass()
 check("3 the wake pass: a past until ends the wait, and until goes (with the kind when it stood beside it)", "a20" in woke and "a21" in woke and not W.stored_until(mt(20)) and not W.stored_until(mt(21)) and "wait_kind" not in mt(21), (woke, mt(20), mt(21)))
 check("3 …an item that stores the old fields is released as it was: wake and hold go", "a22" in woke and "wake" not in mt(22) and "hold" not in mt(22), mt(22))
-item(23, needs=[BACK], until=w(4), wait_kind="item", after=["a24"], post_wake_mover=BACK)
+item(23, needs=[BACK], until=w(4), wait_kind="item", after=["a24"], mover=BACK)
 item(24, needs=[BACK])
 p24 = rd(24); p24["status"] = "completed"; p24["outcome"] = "done"; (T / "store/a/24.json").write_text(json.dumps(p24))
 rel = wakes_svc.release_after("a24", "done", "", "home-other")
 check("3 the release of an after link: the wait is over, until, after and the kind go", "a23" in rel and not W.stored_until(mt(23)) and "after" not in mt(23) and "wait_kind" not in mt(23), (rel, mt(23)))
-item(25, needs=[BACK], until=w(4), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+item(25, needs=[BACK], until=w(4), wait_kind="relay", wait_event="the vendor's reply", mover=BACK)
 bupd(25, clear_wait=True)
 check("3 clear_wait drops until with the kind and the rest of the wait", not W.stored_until(mt(25)) and "wait_kind" not in mt(25) and "wait_event" not in mt(25) and no_old(mt(25)), mt(25))
 m26 = {"until": w(4), "wait_kind": "anchor", "wait_anchor": "https://github.com/o/r/pull/9", "wait_event": "merged", "watch": {"set_at": 1.0}, "needs": [BACK]}
@@ -217,14 +217,14 @@ check("4 the window note prints the date the wait stands for (the legacy wake)",
 check("4 …and the same date stored as until with a kind is the wait, not a reminder: no note", _wait_fixes_svc._wake_window_note({"until": w(2), "wait_kind": "time", "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == "", None)
 check("4 …and a kind-less until is a wait too: no reminder note for any stored until", _wait_fixes_svc._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == ""
       and not _wait_fixes_svc._wake_alone_on_agent({"until": w(2), "needs": [BACK]}), None)
-item(40, needs=[BACK], until=w(5), post_wake_mover=BACK, watch={"set_at": now0}, wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
+item(40, needs=[BACK], until=w(5), mover=BACK, watch={"set_at": now0}, wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
 bupd(40, clear_hold=True)
-check("4 clear_hold on an item that stores only until releases it: until, the post-wake mover, the watcher stamps and the basis go", not W.stored_until(mt(40)) and not any(k in mt(40) for k in ("post_wake_mover", "watch", "wait_basis", "wait_kind", "ask_by")), mt(40))
-item(41, needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+check("4 clear_hold on an item that stores only until releases it: until, the watcher stamps and the basis go", not W.stored_until(mt(40)) and not any(k in mt(40) for k in ("watch", "wait_basis", "wait_kind", "ask_by")), mt(40))
+item(41, needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", mover=BACK)
 bupd(41, clear_wake=True)
 check("4 clear_wake on a relay keeps its until (the ask-by day was never a wake)", W.stored_until(mt(41)) == w(5) and mt(41).get("wait_kind") == "relay", mt(41))
 bupd(41, clear_hold=True)
-check("4 clear_hold on a relay keeps it too, and its post-wake mover", W.stored_until(mt(41)) == w(5) and mt(41).get("post_wake_mover") == BACK, mt(41))
+check("4 clear_hold on a relay keeps it too, and its post-wake mover", W.stored_until(mt(41)) == w(5) and mt(41).get("mover") == BACK, mt(41))
 item(42, needs=[BACK], until=w(30), wait_basis={"text": f"the license expires {w(31)}", "wake": w(30), "by": BACK, "at": now0}, cap_ok={"wake": w(30), "by": "a checked said entry"})
 bupd(42, priority="p2")
 check("4 the basis is read against the until it was given for: an unrelated write keeps it", W.basis_of(mt(42)) == f"the license expires {w(31)}" and W.stored_until(mt(42)) == w(30), mt(42))
@@ -247,12 +247,12 @@ except Exception as e:
 check("5.1 clear_wake on a stored time wait ends it, no refusal", not e51 and not W.stored_until(mt(51)), (e51, mt(51)))
 
 # 5.2 a date given in the write that changes the kind of the wait is the date that stands
-item(52, needs=[BACK], until=w(3), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+item(52, needs=[BACK], until=w(3), wait_kind="relay", wait_event="the vendor's reply", mover=BACK)
 item(53, needs=[BACK])
 bupd(52, wait_kind="item", after=["a53"], until=w(6))
 check("5.2 relay → item with a new until: the new date stands, not the earlier one", W.stored_until(mt(52)) == w(6) and mt(52).get("wait_kind") == "item", mt(52))
 item(54, needs=[BACK], until=w(6), wait_kind="item", after=["a53"])
-bupd(54, wait_kind="relay", wait_event="the vendor's reply", ask_by=w(3), post_wake_mover=BACK)
+bupd(54, wait_kind="relay", wait_event="the vendor's reply", ask_by=w(3), mover=BACK)
 check("5.2 item → relay with a new ask_by: the new date stands", W.stored_until(mt(54)) == w(3) and mt(54).get("wait_kind") == "relay", mt(54))
 
 # 5.3 a date written as until is a wait, never a reminder: the reply carries no reminder note
@@ -472,7 +472,7 @@ for gid6, stored6 in ((604, dict(needs=["external"])), (605, dict(needs=[])), (6
           W.stored_until(m6) == NEW6 and m6.get("wait_kind") == "anchor" and no_old(m6) and "stayed silent" not in out6, (out6[-500:], m6))
     check(f"6 ...and neither pass wakes it or hands it over ({gid6})", quiet6(gid6), mt(gid6))
 # the same with a stale date in the other field: it does not outlive a new relay or event date
-for gid6, kw6 in ((607, dict(wait_kind="relay", wait_event="the vendor's reply")), (608, dict(wait_kind="event", wait_event="recycle", post_wake_mover=BACK))):
+for gid6, kw6 in ((607, dict(wait_kind="relay", wait_event="the vendor's reply")), (608, dict(wait_kind="event", wait_event="recycle", mover=BACK))):
     item(gid6, needs=[BACK], wake=PAST6)
     out6 = tried6(gid6, until=NEW6, **kw6)
     m6 = mt(gid6)

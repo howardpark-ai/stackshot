@@ -46,11 +46,11 @@ from stackshot.waits import waiting as _wt
 # the metadata fields a planned write may set or drop (the server's route refuses any other), split by status: an open item takes the model's fields and never an outcome, a closed one only its
 # outcome. `needs` follows a mover swap (the one session that moves the item now).
 OUTCOME_FIELDS = frozenset({"outcome", "reason", "superseded_by"})
-OPEN_SET_FIELDS = frozenset({"mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "next", "cap_ok", "wait_basis", "wake", "hold", "hold_set", "after",
+OPEN_SET_FIELDS = frozenset({"mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "next", "cap_ok", "wait_basis", "wake", "hold", "hold_set", "after",
                              "needs"})
 SET_FIELDS = OPEN_SET_FIELDS | OUTCOME_FIELDS
-DROP_FIELDS = frozenset({"hold", "hold_set", "state", "mover", "then", _model.LEGACY_PICKER_KEY, *_states.CARRY_FIELDS})
-MODEL_KEYS = ("mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")
+DROP_FIELDS = frozenset({"hold", "hold_set", "state", "mover", "then", *_states.CARRY_FIELDS})
+MODEL_KEYS = ("mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by")
 DEFINING = (*MODEL_KEYS, "wake", "hold", "hold_set", "after", "cap_ok", "wait_basis", "needs")     # what defines an item's state: stripped from a write the guards would refuse
 RESIDUE_GUARDS = ("wait_input", "no_end", "snooze", "mover", "post_wake")                   # the guards whose refusal means the state cannot be written whole
 AUTHOR = "migration"
@@ -263,7 +263,7 @@ class Env:
         project = clean(m.get("project"))
         refs = [_model.owner_display()]
         if mod is not None:
-            refs += [mod.mover, mod.wait.post_wake_mover if mod.wait else ""]
+            refs += [mod.mover, mod.wait.mover if mod.wait else ""]
         refs += [clean(m.get("owner")), *_states.sessions_of(m), *self.background(project)]
         out: dict[str, str] = {}
         for r in refs:
@@ -465,12 +465,6 @@ def _take(env: Env, plan: Plan, gid: str, who: str, project: str, what: str) -> 
     return who, False
 
 
-def _restated(env: Env, old: Any, new: Any) -> bool:
-    """Does `new` name the session the stored old key `old` names (the same name in any letter case, or a session's id and its name, as the pass's labels read them)? Then setting it is no change."""
-    a, b = clean(old), clean(new)
-    return bool(a) and bool(b) and (a.lower() == b.lower() or env.label(a).lower() == env.label(b).lower())
-
-
 def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.Model") -> tuple[dict[str, Any], list[str]]:
     """The wait fields a waiting item should store, from what the item itself holds: its kind, the post-wake mover (the project's background agent when it is gone), an anchor scoped to it
     (the one, or the one its text names), the party as the event, the chase day or the wake day as the end. → (the fields, notes on what could not be chosen)."""
@@ -480,7 +474,7 @@ def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.
     project = clean(m.get("project"))
     out: dict[str, Any] = {"wait_kind": w.kind}
     extra: list[str] = []
-    want = w.post_wake_mover
+    want = w.mover
     if w.kind == "relay" and not w.post_explicit:        # the model's default for a relay is the owner; he relays the news and never moves on it: the last agent mover moves on it
         who, src = env.relay_post(it, project)
         if not who:                                      # no agent on its record can move it now: the project's background agent, else nobody is stored and it is listed
@@ -493,7 +487,7 @@ def _fill_wait(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model.
             want = ""
         else:
             plan.relay_post[gid] = ("", "none")
-            plan.note(gid, "post_wake", "a relay wait with no agent on its record that can move it, and no background agent in the project: set its post_wake_mover by hand", fields=("post_wake_mover",))
+            plan.note(gid, "post_wake", "a relay wait with no agent on its record that can move it, and no background agent in the project: set its mover by hand", fields=("mover",))
             want = ""
     if want:
         post, _swapped = _take(env, plan, gid, want, project, "post-wake mover")
@@ -585,7 +579,7 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
             ans = read.get("answer")
             if ans and ans.get("wait") == "yes" and ans.get("confident"):
                 ch = env.choices(gid, it, mod)
-                who_ = ans.get("mover") or ans.get("post_wake_mover") or ""      # a read kept from before the answer was translated at the cold call's edge still holds the old key
+                who_ = ans.get("mover") or ""
                 post = ch.get(who_, who_)
                 kind = ans["kind"]
                 if kind == "relay" and _model.is_owner(post):       # never <owner>: he relays the news, the last agent mover moves on it
@@ -605,8 +599,6 @@ def _plan_alive(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_model
                 else:
                     set_.update(wait_event=ans["event"], ask_by=ans["end"])
                 drop += [k for k in ("then", "state", *_states.CARRY_FIELDS) if k in m]      # the mover is set above (a set replaces a stored mover)
-                if _model.LEGACY_PICKER_KEY in m and not _restated(env, m.get(_model.LEGACY_PICKER_KEY), post):
-                    drop.append(_model.LEGACY_PICKER_KEY)      # a stored old key that names another picker would outvote the one set here; one that names the same picker stays (a restated picker changes nothing)
                 rec["applied"] = True
                 notes.append("a wait read from its next")
                 _commit(env, plan, gid, it, f"{today_state} → waiting on {_model.KIND_WORDS[kind].format(owner=_model.owner_display())} (read from its next)", set_, drop, notes, env.label(post))
@@ -706,11 +698,7 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
                     _commit(env, plan, gid, it, f"{today_state} → alive, {who} (snooze: none of his words found)", set_, drop, notes, env.label(mover))
                     return
     fill, extra = _fill_wait(env, plan, gid, it, mod)
-    if "mover" in fill and _restated(env, m.get(_model.LEGACY_PICKER_KEY), fill["mover"]):
-        fill = {k: v for k, v in fill.items() if k != "mover"}      # the picker the old key already names: nothing to set, as the plan read before (it dropped a field equal to the stored one), so the old key stays
     set_.update(fill)
-    if "mover" in fill and _model.LEGACY_PICKER_KEY in m:      # the one save rule: a write that sets a different mover on a wait drops a stored old key, which would outvote it
-        drop.append(_model.LEGACY_PICKER_KEY)
     probe = problems(env, gid, after_state(it, set_, drop))
     lacking = [p for p in probe if p.key in ("wait_input", "no_end")]
     read = env.reads.get(gid)

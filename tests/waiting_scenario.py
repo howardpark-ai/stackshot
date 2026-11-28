@@ -50,7 +50,7 @@ def item(i, owner=None, status="open", su=None, **meta):
     su = now0 - 10 * DAY if su is None else su
     # the creator is no one's mover. An item the scenario means to be moved by its first session (what the creator used to be) stores that mover, as the server's start pass does for a live item with none.
     if status == "open" and not any(meta.get(k) for k in ("needs", "state", "wait_kind")):
-        meta = {("post_wake_mover" if (hd_(meta) or meta.get("after") or meta.get("recycle")) else "mover"): owner or U["home-owner"], **meta}
+        meta = {"mover": owner or U["home-owner"], **meta}
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status,
                                                        "updated": su, "state_updated": su, "confirmed": su,
                                                        "metadata": {"owner": owner or U["home-owner"], "project": "projects/alpha", "next": "do the thing", **meta}}))
@@ -161,7 +161,7 @@ check("a state change on a late item sends the server's ordinary notices only: n
 
 # ---- 4. a close of an `after` item (no failed wait: the item is released, or still waits on the others), a mover that is down
 for i in range(30, 60): (T / f"store/a/{i}.json").unlink(missing_ok=True)
-item(60, hold=True, wake=wk(5 * DAY), after=["a61"], su=now0 - DAY, wait_failed={"what": "after a99", "why": "an old failure", "at": now0 - 82}); item(61, wake=wk(3 * DAY))
+item(60, mover="", hold=True, wake=wk(5 * DAY), after=["a61"], su=now0 - DAY, wait_failed={"what": "after a99", "why": "an old failure", "at": now0 - 82}); item(61, wake=wk(3 * DAY))
 told.clear()
 _wt_complete.stackshot_complete("a61", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
 m60 = rd(60)["metadata"]

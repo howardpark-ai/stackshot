@@ -7,7 +7,7 @@ ask, changing an item the owner moves. Checked against a scratch store and confi
   1  wake_park     the write that parks a wake which is the whole of the mover's wait (service/wait_fixes `_date_only_wait`) is a History line and records the fix; clear_hold sends it back and neither the write nor the
                    pass parks that wake again (a different wake is a new fact); the ten-minute pass parks the same shape set in the store (service/wait_fixes `_wake_park` through audit_run.Env.wake_park) and tells the
                    mover once, so the why-not-now finding for it is no longer sent; a run with no writer (the command line, --dry-run) still lists the finding
-  2  front_mover   another session's mover, then or post_wake_mover set to a front agent becomes the project's builder, with the reply and History saying so; sending the same value again keeps it as sent;
+  2  front_mover   another session's mover or then set to a front agent becomes the project's builder, with the reply and History saying so; sending the same value again keeps it as sent;
                    a project with no builder is refused as before; the sender naming itself, the owner and a background agent are as they were
   3  wait_reason   a hold with a wake and no reason, whose own next or description says what it waits for on the wake's day, takes that line as its wait_basis (the snooze refusal it retired); the mover's
                    own wait_basis is used as given; with no loose reason the refusal stands, and an item waiting on the owner is never fixed

@@ -177,15 +177,15 @@ item(101, "projects/par/kid", mover="kid-main", then="kid-main")                
 item(102, "projects/solo", mover="solo-main")                                                      # alive, only the scope's general agent
 item(103, "projects/live", mover="live-back")                                                      # alive, the project's front agent is live
 item(104, "projects/solo", mover="Oliver")                                                         # his
-item(105, "projects/solo", state="parked", wake=WAKE, wait_kind="time", post_wake_mover="Oliver")  # waiting on him
-item(106, "projects/solo", state="parked", wake=WAKE, wait_kind="time", post_wake_mover="solo-main")      # waiting, post-wake mover gone
+item(105, "projects/solo", state="parked", wake=WAKE, wait_kind="time", mover="Oliver")  # waiting on him
+item(106, "projects/solo", state="parked", wake=WAKE, wait_kind="time", mover="solo-main")      # waiting, post-wake mover gone
 item(107, "projects/live", mover="live-main")                                                      # a live mover
 item(108, "projects/bgp", mover="bgp-main")                                                        # a background agent takes it (told)
 item(109, "projects/par/kid", status="completed", mover="kid-main")                                # closed
 item(112, "projects/both", mover="both-old")                                                       # alive, a front agent and a builder are both live: the builder
 item(113, "projects/par/kid", mover="kid-main", hold=True, wake=WAKE)                              # held on a wake: not moved
 item(114, "projects/par/kid", mover="stackshot")                                                   # the server's own label: no session
-item(115, "projects/solo", state="parked", wake=WAKE, wait_kind="time", post_wake_mover="solo-main", hold=True)      # a held wait: not moved
+item(115, "projects/solo", state="parked", wake=WAKE, wait_kind="time", mover="solo-main", hold=True)      # a held wait: not moved
 for i in range(200, 225):
     item(i, "projects/live", mover="live-main")                                                    # a board of live movers around the few orphans
 for i in (101, 102, 103, 104, 105, 106, 107, 108, 109, 112, 113, 114, 115):
@@ -229,8 +229,8 @@ check("5 server: the project's own live front agent takes the third, when no bac
 m_h = mt(112)
 check("5 server: an alive item whose project has a live front agent AND a live builder goes to the builder, who is told, and its line does not say front agent", m_h["mover"] == "both-build"
       and "a front agent" not in ST.log_of(m_h)[0]["text"] and [t[1] for t in TOLD if "112" in t[0]] in ([U["both-build"]], ["both-build"]), (m_h, TOLD))
-check("5 server: a waiting item takes the successor as its post-wake mover and in `needs`, keeps its wait and its date, and gets no hand-off record", m_f["post_wake_mover"] == "gen-main" and m_f["needs"][0] == "gen-main"
-      and m_f.get("wake") == WAKE and m_f.get("wait_kind") == "time" and not m_f.get("handoff") and m_f.get("mover") in (None, ""), m_f)
+check("5 server: a waiting item takes the successor as its mover and in `needs`, keeps its wait and its date, and gets no hand-off record", m_f["mover"] == "gen-main" and m_f["needs"][0] == "gen-main"
+      and m_f.get("wake") == WAKE and m_f.get("wait_kind") == "time" and not m_f.get("handoff"), m_f)
 check("5 server: …and the same History line, with the reason", len(ST.log_of(m_f)) == 1 and ST.log_of(m_f)[0]["text"].startswith("handed to gen-main: solo-main is gone"), ST.log_of(m_f))
 check("5 server: the background successor is told once, in one message that names its item; the front agents of a project that lists a background agent are not pushed to", [t[1] for t in TOLD if "108" in t[0]] in ([U["bgp-back"]], ["bgp-back"])
       and not any(("101" in t[0] or "103" in t[0]) for t in TOLD), TOLD)
@@ -291,16 +291,16 @@ last = handoff_svc.orphan_handover(apply=True, now=now0 + 240)
 check("7 server: once an agent is live again the item is handed over at the next call", B(111) in ids(last["moved"]) and mt(111)["mover"] == "gen-main", last)
 
 # 8: the minute pass is unchanged: it follows the stored mover only, writes no stall line, and its record is not an orphan's
-item(120, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover="kid-main")
-item(121, "projects/par/kid", mover="kid-main", then="kid-main", post_wake_mover="kid-main")
+item(120, "projects/par/kid", mover="kid-main", then="kid-main")
+item(121, "projects/par/kid", mover="kid-main", then="kid-main")
 done_m = handoff_svc.handoff_exec([H.Step("move", f"a{120}", "kid-main did not take it", "kid-main", "bgp-back", via="redirect")], now0 + 300, verify=False)
 m_i = mt(120)
-check("8 minute pass: a move by the minute pass changes the stored mover and `needs` and records the hand-off, and leaves a post-wake mover as it was (the save drops the `then` beside an agent), with no stall line",
-      done_m == [f"a{120}"] and m_i["mover"] == "bgp-back" and m_i["needs"][0] == "bgp-back" and not m_i.get("then") and m_i["post_wake_mover"] == "kid-main" and "stall" not in m_i
+check("8 minute pass: a move by the minute pass changes the stored mover and `needs` and records the hand-off, (the save drops the `then` beside an agent), with no stall line",
+      done_m == [f"a{120}"] and m_i["mover"] == "bgp-back" and m_i["needs"][0] == "bgp-back" and not m_i.get("then") and "stall" not in m_i
       and m_i["handoff"]["to"] == "bgp-back" and m_i["handoff"].get("via") == "redirect", m_i)
 done_o = handoff_svc.handoff_exec([H.Step("move", f"a{121}", "kid-main is gone", "kid-main", "bgp-back", via="orphan")], now0 + 301, verify=False)
 check("8 minute pass: …the same move as the audit's hand-over (via orphan) also follows the post-wake mover, which is why the keys are limited to it (the `then` beside an agent is dropped by the save)", done_o == [f"a{121}"] and not mt(121).get("then")
-      and mt(121)["post_wake_mover"] == "bgp-back" and ST.log_of(mt(121)), mt(121))
+      and mt(121)["mover"] == "bgp-back" and ST.log_of(mt(121)), mt(121))
 
 # 9: a partial view of the fleet moves nothing it cannot prove
 import shutil

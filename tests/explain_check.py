@@ -45,7 +45,7 @@ DAY = lambda n: (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
 
 
 def waiting(i, **meta):
-    m = {"owner": A, "project": "projects/alpha", "next": "the next step", "hold": True, "needs": [], "post_wake_mover": "alpha-main", **meta}
+    m = {"owner": A, "project": "projects/alpha", "next": "the next step", "hold": True, "needs": [], "mover": "alpha-main", **meta}
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[work] item {i}", "description": "- A thing", "status": "open",
                                                      "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600, "metadata": m}))
 

@@ -345,37 +345,28 @@ def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
-WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "until", "after", "party", "needs", "waits", "wait_mode")      # waits and wait_mode: a list put back on "not yet" keeps its lines and what had arrived
+WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "ask_by", "wake", "until", "after", "party", "needs", "waits", "wait_mode")      # waits and wait_mode: a list put back on "not yet" keeps its lines and what had arrived
 
 
 def was_picker(was: dict[str, Any] | None) -> str:
-    """Who picks the item up when the wait ends, as a `was` snapshot (metadata.watch.was) holds it: a snapshot written by older code stores the legacy key, a newer one `mover`; "" when it names nobody."""
+    """Who picks the item up when the wait ends, as a `was` snapshot (metadata.watch.was) holds it, under `mover`; "" when it names nobody."""
     return _model.stored_picker(was or {})
 
 
 def ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
     """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored, except when the item passes to the builder, watching.py `watch_fire`) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker).
-    With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored: only the old post_wake_mover key turns it. Without `external`, a picker stored under
-    either key (`mod.wait.mover_explicit`) turns it, the one place a stored mover alone now ends a wait the way the old key did. The one reader of this: the migration pass (waits/mover_pass.py) and the
-    watchers' wake (service/watching.py `watch_fire`) cannot read it two ways."""
+    With `external` in needs the item goes back to others at its date, as it always did, whichever mover is stored. Without `external`, a stored picker (`mod.wait.mover_explicit`) turns it. The one reader of this: the watchers' wake (service/watching.py `watch_fire`) and
+    the check that a pass changes no reading (waits/members_pass.py) cannot read it two ways."""
     if str(meta.get("wait_kind") or "").strip():
         return False
     if "external" in [str(n).strip().lower() for n in _wt.needs_of(meta)]:
-        return not str(meta.get(_model.LEGACY_PICKER_KEY) or "").strip()
+        return True
     return not mod.wait.mover_explicit
-
-
-def _picker_as_mover(was: dict[str, Any]) -> dict[str, Any]:
-    """A `was` snapshot with the picker stored as `mover`, whichever key the item (or an older snapshot) held it under: the legacy key, which wins while stored, is folded into `mover` and goes."""
-    legacy = _model.norm_who(was.get(_model.LEGACY_PICKER_KEY))
-    if not legacy or legacy.lower() == "none":      # nothing stored, or the word none under the old key (a session of that name there, nobody under `mover`): kept as stored
-        return was
-    return {**{k: v for k, v in was.items() if k != _model.LEGACY_PICKER_KEY}, "mover": legacy}
 
 
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
     """The item is about to turn to the owner for a watcher ask: keep the wait's fields (what to put back on "not yet" or "keep waiting") and which ask is up, under metadata.watch."""
-    was = _picker_as_mover({k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])})
+    was = {k: meta[k] for k in WAS_FIELDS if meta.get(k) not in (None, "", [])}
     w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
     w.update({"asked": asked, "was": was, "at": now})
     meta["watch"] = w
@@ -392,11 +383,10 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
     """Put the wait back on the item with a new end date (the owner's "not yet" or "keep waiting"): its fields as they were, the end moved to `date` (a relay's ask-by, the backstop of an
     anchor wait: its ask_by, the old wake dropped). A moved date resets the backstop and (reset_chases) the chases, a new round; a notice older than `now` is not the wait's arrival."""
     w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
-    was = _picker_as_mover(dict(w.get("was") or {}))      # a snapshot an older version wrote holds the picker under the legacy key: it is put back as `mover`
+    was = dict(w.get("was") or {})
     by_until = "until" in was                      # a wait that stood on a stored `until` gets its new end there; one on ask_by gets it there, as it always did
     for k in ("wake", "ask_by", "until"):
         meta.pop(k, None)
-    meta.pop(_model.LEGACY_PICKER_KEY, None)      # the picker comes back as `mover`; an old key still on the item would win it
     for k, v in was.items():
         if k not in ("wake", "ask_by", "until"):
             meta[k] = v
@@ -409,7 +399,7 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
 
 
 # ---------------------------------------------------------------------------------------------------------------- the arrival
-LIVE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY)      # what the end of a wait clears (watch_reason: a front agent's reason for watching belonged to this wake, as the old wake pass dropped it)
+LIVE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "watch_reason", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP)      # what the end of a wait clears (watch_reason: a front agent's reason for watching belonged to this wake, as the old wake pass dropped it)
 
 
 def end_wait(meta: dict[str, Any]) -> None:

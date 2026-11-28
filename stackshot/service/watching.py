@@ -125,7 +125,7 @@ def watch_failed(gid: str, now: float) -> None:
 
 
 def _ends_on_the_date(meta: dict[str, Any], mod: "_model.Model") -> bool:
-    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored, unless the item passes to the builder) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker). With `external` in needs only the old post_wake_mover key turns it (waits/watchers.py `ends_on_the_date`, which the migration pass reads too)."""
+    """A wait on a date alone (no wait_kind) ends with its date (`end_date`: needs and the mover stay as stored, unless the item passes to the builder) rather than turning to its picker (`turn_alive`: the picker has it, needs is the picker). With `external` in needs it ends on the date (waits/watchers.py `ends_on_the_date`, which the migration pass reads too)."""
     return _watch.ends_on_the_date(meta, mod)
 
 

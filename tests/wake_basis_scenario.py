@@ -125,7 +125,7 @@ g(22, needs=[BACK], state="doing", after=["g19"], wake=W1, wait_basis=basis(W1),
 # ---- 1. doing + a future wake + a wait_basis + no hold
 m1 = view_of(1)
 check("1 a doing item with a future wake and a wait_basis (no hold) reads as waiting on a time until the wake, the mover kept for after it",
-      m1.state == _model.WAITING and m1.wait.kind == "time" and m1.wait.until == W1 and m1.wait.post_wake_mover == BACK and not m1.wait.due and m1.today == "doing", m1)
+      m1.state == _model.WAITING and m1.wait.kind == "time" and m1.wait.until == W1 and m1.wait.mover == BACK and not m1.wait.due and m1.today == "doing", m1)
 check("1 …the basis is the wait's reason (the text of the wait_basis)", m1.wait.basis == BASIS, m1.wait.basis)
 check("1 …an item with no stored state (a mover and a wake read as doing) is the same", view_of(2).state == _model.WAITING and view_of(2).wait.basis == BASIS and "state" not in mt(2, "g"), view_of(2))
 check("1 …a wake 30 minutes ahead is still ahead: the basis names the wait (no hour floor, unlike a dated step)", view_of(6).state == _model.WAITING, view_of(6))
@@ -169,7 +169,7 @@ check("5 …a stored doing item with a decision in needs, an open after link or 
 check("5 …a closed after link is no wait (the open-link test derive uses): the item waits on its basis wake, listed as waiting; without a callback every link counts as open",
       view_of(22).state == _model.WAITING and view_of(22).wait.basis == BASIS and lst(22) == "waiting" and lst(12) == "agents" and _dw.basis_wait(it_of(22), now_) is None, (view_of(22), lst(22), lst(12)))
 check("5 …a stored wait_kind is a wait already: derive says waiting, with the kind it stores", derive_of(14).state == _model.WAITING and derive_of(14).wait.kind == "time" and _dw.basis_wait(it_of(14), now_) is None, derive_of(14))
-check("5 …another session as the mover is still a session: waiting, then that session moves it", view_of(16).state == _model.WAITING and view_of(16).wait.post_wake_mover == "home-front", view_of(16))
+check("5 …another session as the mover is still a session: waiting, then that session moves it", view_of(16).state == _model.WAITING and view_of(16).wait.mover == "home-front", view_of(16))
 
 # ---- 6. a verifying item
 d15 = derive_of(15)

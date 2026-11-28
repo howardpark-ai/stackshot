@@ -61,8 +61,8 @@ item(2, "home-owner", mover="team-back", needs=["team-back"])    # a background 
 item(3, "home-front", mover="team-back")                        # created by the asking session, moved by a background agent: the creator holds no part
 item(4, "home-front", mover="home-front", needs=["team-back"])    # the asking session moves it, and a background agent is named in its needs
 item(5, "home-other", mover="home-other")                       # no role for either session
-item(8, "home-owner", needs=["team-back"], state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), post_wake_mover="team-back")   # waiting: team-back is named in needs and takes it after the wait
-item(9, "home-owner", state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), post_wake_mover="team-back")   # waiting: team-back takes it after the wait and is named nowhere
+item(8, "home-owner", needs=["team-back"], state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), mover="team-back")   # waiting: team-back is named in needs and takes it after the wait
+item(9, "home-owner", state="parked", wake=time.strftime("%Y-%m-%d", time.gmtime(now0 + 20 * DAY)), mover="team-back")   # waiting: team-back takes it after the wait and is named nowhere
 item(6, "home-owner", mover="home-front")                       # created by another session, moved by the asking session and named nowhere: a hand-back whose needs were cleared
 rows = {x["shown"]: x for x in json.loads(client_reads_svc._client_items(U["home-front"])[2])["items"]}
 check("1: the items read lists the items the session moves, and not the ones it only created or another session moves", sorted(rows) == ["a1", "a4", "a6"], sorted(rows))

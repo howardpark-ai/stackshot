@@ -51,7 +51,7 @@ def clears_needs(kw: dict[str, Any]) -> bool:
 def hands_to_agent(kw: dict[str, Any], project: str = "") -> bool:
     """Does the write hand the item to an agent: a mover or `agent` that names a session (not him), or a line of `next` that opens with the name of a session the mover guard accepts (a mistyped opener
     hands the item to no one, so his step stays refused)?"""
-    for k in ("mover", "post_wake_mover", "agent"):
+    for k in ("mover", "agent"):
         v = _text(kw.get(k))
         if v and v.lower() not in NONE_WORDS and not _model.is_owner(v):
             return True

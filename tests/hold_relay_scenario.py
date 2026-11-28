@@ -96,8 +96,8 @@ def refused(name, f, *want):
 
 A1 = "https://github.com/o/r/pull/101"
 _anc.save({"projects/alpha": [{"url": A1, "items": [f"a{n}" for n in range(1, 12)], "added": now0, "by": "x"}]})
-REL = dict(needs=["external"], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)      # needs external: with the stored state gone the item reads as an outside wait
-EVT = dict(needs=["external"], until=w(5), wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
+REL = dict(needs=["external"], until=w(5), wait_kind="relay", wait_event="the vendor's reply", mover=BACK)      # needs external: with the stored state gone the item reads as an outside wait
+EVT = dict(needs=["external"], until=w(5), wait_kind="event", wait_event="box_online testbox", mover=BACK)
 conflicts = lambda g: list(MODEL.derive(_service_store._load(g)).conflicts)
 STATE_CONFLICT = "which is alive: the wait wins"
 
@@ -146,7 +146,7 @@ for i, nm in ((6, "relay"), (7, "event")):
     check(f"3 ask_by with a time of day on a {nm} wait is fixed the same way", W.stored_until(mt(i)) == w(2) and "T" not in str(W.stored_until(mt(i))) and [k for k, _ in kinds] == ["ask-by-day"] and "ask_by" in kinds[0][1], (mt(i), kinds))
     kinds = fixed_by(lambda i=i: bupd(i, wake=w(1)))
     check(f"3 …the day alone on the {nm} wait is no fix", W.stored_until(mt(i)) == w(1) and kinds == [], (mt(i), kinds))
-item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
+item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", mover=BACK)
 bupd(8, wake=w(3) + "T10:00")
 check("3 a wake with a time of day on an anchor wait is still accepted", W.stored_until(mt(8)) == w(3) + "T10:00", mt(8))
 
@@ -156,7 +156,7 @@ out = bupd(9, hold=True, wake=w(3))
 check("4 a hold on an item with no wait still ends its stored state and sets the flag", mt(9).get("hold") is True and not mt(9).get("state") and "stored state doing dropped" in out, (mt(9), out[-500:]))
 
 # ================================================================ 5. a wait whose needs name only a session: the item reads alive from its fields
-SES = dict(needs=[BACK], until=w(5), wait_event="the vendor's reply", post_wake_mover=BACK)
+SES = dict(needs=[BACK], until=w(5), wait_event="the vendor's reply", mover=BACK)
 for kind, extra in (("relay", {}), ("event", {"wait_event": "box_online testbox"})):
     item(30, wait_kind=kind, **{**SES, **extra})
     check(f"5 a {kind} wait with session-only needs and no stored state lists no conflict", not conflicts("a30"), conflicts("a30"))
@@ -184,7 +184,7 @@ check("6 the same on an event wait stored as outside", mt(43).get("state") == "o
 
 # ################################################################ part B: hold=true with a wake, and until with a time, on a relay wait (the former hold_relay_wake suite)
 # the shared scratch store, helpers and anchor above stand; this part's relay wait names the session in needs (REL2), part A's names external (REL)
-REL2 = dict(needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+REL2 = dict(needs=[BACK], until=w(5), wait_kind="relay", wait_event="the vendor's reply", mover=BACK)
 
 # ================================================================ 1. relay + hold
 item(1, **REL2)
@@ -201,16 +201,16 @@ item(3, **REL2)
 out = bupd(3, hold=True)
 check("1 hold=true alone on a relay wait that has its day is accepted, the day stands", W.stored_until(mt(3)) == w(5) and not mt(3).get("hold") and "stores no park flag" in out, (mt(3), out[-500:]))
 
-item(4, needs=[BACK], until=w(5), wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
+item(4, needs=[BACK], until=w(5), wait_kind="event", wait_event="box_online testbox", mover=BACK)
 bupd(4, hold=True, wake=w(3))
 check("1 an event wait takes the same write", W.stored_until(mt(4)) == w(3) and mt(4).get("wait_kind") == "event" and not mt(4).get("hold"), mt(4))
 
 CAP_MSG = "a wait runs at most 7 days from the item's last move"
-NOREL = dict(needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+NOREL = dict(needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", mover=BACK)
 item(5, **NOREL)
 refused("1 hold=true + a wake past the cap on a relay wait with no stored day is refused by the cap's own message", lambda: bupd(5, hold=True, wake=w(19)), CAP_MSG, "this wake (" + w(19) + ")")
 check("1 …and nothing was stored", not W.stored_until(mt(5)), mt(5))
-item(50, needs=[BACK], wait_kind="event", wait_event="box_online testbox", post_wake_mover=BACK)
+item(50, needs=[BACK], wait_kind="event", wait_event="box_online testbox", mover=BACK)
 refused("1 the same on an event wait with no stored day", lambda: bupd(50, hold=True, wake=w(19)), CAP_MSG)
 item(51, **REL2)
 refused("1 a wake past the cap on a relay wait that has a day is refused too", lambda: bupd(51, hold=True, wake=w(20)), "Refused")
@@ -239,12 +239,12 @@ check("2 until with the day alone is accepted", W.stored_until(mt(6)) == w(3), m
 
 tok = CL.begin()
 try: gid_c, _ = create_svc.create_item(subject="[home] new relay", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: wait for the reply", needs=[BACK],
-                                       wait_kind="relay", wait_event="the vendor's reply", until=w(3) + "T10:00", post_wake_mover=BACK, request_id="hrw-create-1")
+                                       wait_kind="relay", wait_event="the vendor's reply", until=w(3) + "T10:00", mover=BACK, request_id="hrw-create-1")
 finally: fxc = CL.end(tok)
 check("2 a create with until and a time on a relay wait is fixed the same way: the day is stored", W.stored_until(_service_store._load(gid_c)["metadata"]) == w(3) and [k for k, _ in fxc] == ["ask-by-day"], (gid_c, fxc))
 
 # ================================================================ 3. unchanged
-item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
+item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", mover=BACK)
 bupd(8, hold=True, wake=w(3))
 check("3 hold=true + wake on an anchor wait keeps the hold flag and the date", mt(8).get("hold") is True and W.stored_until(mt(8)) == w(3), mt(8))
 item(10, needs=[BACK])

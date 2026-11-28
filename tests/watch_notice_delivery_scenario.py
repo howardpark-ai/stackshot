@@ -105,7 +105,7 @@ check("setup: the front agent is one for both projects, the builder is not", tel
 check("setup: nobody is there for the front agent's pane", not telling.presence_here(U[F_B]), None)
 
 # ================================================================ 1. the front agent's own named step is the item's work: a wake that hands it over starts its turn
-item(1, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], next=f"{F_B}: ask him which one to keep", subject="[home] its own step")
+item(1, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], next=f"{F_B}: ask him which one to keep", subject="[home] its own step")
 reset(); woke = wakes_svc.wake_pass(); drain()
 p, tl = pushes(), [t for t in TOLD if t[0] == U[F_B]]
 check("1 the wake turns the item and the front agent keeps it (no builder in the project)", "a1" in woke and mt(1).get("mover") == F_B, (woke, mt(1)))
@@ -116,8 +116,8 @@ check("1 …nothing held, no archived line and no board line for it: the gate le
 check("1 …the same item whose step is the agent's by its ask alone (no named step) is a turn too", telling.own_move_kind(U[F_B], "a1", {"a1": {"status": "open", "metadata": {"next": "re-raise", "ask": f"{F_B}: which one"}}}, named=True) == "", None)
 
 # ================================================================ 1b. no step of its own: the wake is progress, no turn (what the commit that made own-move notices turn-less meant)
-item(21, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], next="ask him which one to keep", subject="[home] an unnamed step")
-item(22, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], next=f"{SOLO}: ask him which one to keep", subject="[home] a step of another session")
+item(21, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], next="ask him which one to keep", subject="[home] an unnamed step")
+item(22, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], next=f"{SOLO}: ask him which one to keep", subject="[home] a step of another session")
 reset(); woke = wakes_svc.wake_pass(); drain()
 p, tl = pushes(), [t for t in TOLD if t[0] == U[F_B]]
 check("1b the wake turns both items and the front agent keeps them", {"a21", "a22"} <= set(woke) and mt(21).get("mover") == F_B and mt(22).get("mover") == F_B, (woke, mt(21), mt(22)))
@@ -151,13 +151,13 @@ p = pushes()
 check("2 a message listing his item and the agent's own is one push, marked (one of its items is his)", len(p) == 1 and p[0][1].startswith(MARK + " ") and "2 items are yours now" in p[0][1], p)
 
 # ================================================================ 3. a background agent: told as before
-item(3, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=B_B, needs=[], project="projects/delta", subject="[home] the builder's")
+item(3, wait_kind="time", hold=True, wake=day(-1), mover=B_B, needs=[], project="projects/delta", subject="[home] the builder's")
 reset(); woke = wakes_svc.wake_pass(); drain()
 p = pushes()
 check("3 a wait that ends on the project's builder is pushed to it, once, unmarked", "a3" in woke and len(p) == 1 and p[0][0] == U[B_B] and not p[0][1].startswith(MARK) and "is yours now" in p[0][1], p)
 check("3 …nothing held for it, and the front agent is told nothing", held.count(U[B_B]) == 0 and held.count(U[F_B]) == 0 and not [x for x in p if x[0] == U[F_B]], p)
 check("3 a background agent's message is never marked, even for an item that waits on a decision", watching_svc.watch_text(U[B_B], [("a2", {"id": "2", "subject": "s", "metadata": {"project": "projects/delta", "needs": ["decision"]}}, "w")])[1] == "", None)
-item(4, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], project="projects/delta", subject="[home] the front agent's, with a builder")
+item(4, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], project="projects/delta", subject="[home] the front agent's, with a builder")
 reset(); woke = wakes_svc.wake_pass(); drain()
 p = pushes()
 check("3 a wait that ends on a front agent in a project with a builder passes to the builder: the builder is pushed, the front agent is not told",
@@ -165,7 +165,7 @@ check("3 a wait that ends on a front agent in a project with a builder passes to
 
 # ================================================================ 4. the contrast: a notice of a held kind to the same front agent in the same state is held, marked or not
 NOTE = "[stackshot] a1 \"[home] item 1\" (projects/echo): a session wrote the item \u2192 https://stackshot.example.com/items/a1"
-item(5, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=F_B, needs=[], subject="[home] a progress notice's item")
+item(5, wait_kind="time", hold=True, wake=day(-1), mover=F_B, needs=[], subject="[home] a progress notice's item")
 for label, note in (("unmarked", NOTE), ("marked", MARK + " " + NOTE)):
     reset(); h0 = held.count(U[F_B])
     telling.tell_woken("a5", U[F_B], note, tag="owner"); drain()

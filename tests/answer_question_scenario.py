@@ -234,11 +234,11 @@ for i, want, never in ((32, "asked a question on", "answered"), (33, "answered",
     check(f"4b: the line to the keeper on an unacted item says what he did ({i})", len(lines) == 1 and want in lines[0].split(" on the board at ")[0] and never not in lines[0].split(" on the board at ")[0], lines)
 
 WATCHED = "Decide: has the lease arrived? " + chr(0xB7) + " Options: arrived / drop"      # a watcher's ask: no Recommend part
-item(34, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "post_wake_mover": BACK}})
+item(34, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "mover": BACK}})
 answer_svc._answer("a34", "", "Which lease is this?", "answer")
 woke = str((mt(34).get("woke") or {}).get("what") or "")
 check("4b: a question on a watcher ask is not called an answer on the item", "asked a question" in woke and "Which lease is this?" in woke and "answered" not in woke, mt(34).get("woke"))
-item(35, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "post_wake_mover": BACK}})
+item(35, needs=["decision"], ask=WATCHED, watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the lease", "mover": BACK}})
 answer_svc._answer("a35", "", "not yet, try next week", "answer")
 check("4b: …and words that decide still read as one", "answered in words" in str((mt(35).get("woke") or {}).get("what") or ""), mt(35).get("woke"))
 

@@ -71,9 +71,9 @@ item(3, subject="[work] Reply to the supplier about the sample order", age=7 * 8
      draft="Hi Sam,\n\nWe would like to order on the same terms. Please send the price list.\n\nThanks,\nAlex", next="Oliver: reply to the supplier", needs=["alpha-main"])
 item(4, owner=X, subject="[work] Pack the sample widget kit for a partner's own workshop, with two guides", age=5 * 60, next="alpha-builder: map the scope and hand the packing to its builder", state="doing", expected_by="2026-11-04", expected_reason="the build takes until Wednesday")
 item(5, owner=Y, project="projects/beta", subject="[home] Redesign the sample dashboard with a per-panel toggle and a longer title to wrap", age=21 * 60, state="doing", expected_by="2026-11-04", expected_reason="the review is on Tuesday", next="beta-engineer-with-a-rather-long-name: review the change with a second reader, then ship it")
-item(6, owner=B, project="projects/beta", subject="[home] Have the sample check compare every claim against the example", age=3600, wait_kind="time", wake="2026-11-05", post_wake_mover="beta-main",
+item(6, owner=B, project="projects/beta", subject="[home] Have the sample check compare every claim against the example", age=3600, wait_kind="time", wake="2026-11-05", mover="beta-main",
      wait_basis={"text": "the first full sample report, Sunday morning", "wake": "2026-11-05", "by": "beta-main", "at": now0 - 3000}, next="beta-main: read the report")
-item(7, owner=B, project="projects/beta", subject="[home] Report the sample queue cost three days after the change", age=14 * 3600, wait_kind="item", after=["a4"], post_wake_mover="beta-main", wake="2026-11-09", next="beta-main: write the report")
+item(7, owner=B, project="projects/beta", subject="[home] Report the sample queue cost three days after the change", age=14 * 3600, wait_kind="item", after=["a4"], mover="beta-main", wake="2026-11-09", next="beta-main: write the report")
 item(8, owner=B, project="projects/beta", subject="[home] Ask the supplier to raise the sample limit before the move", age=25 * 3600, state="outside", party="the supplier support desk", chase="2026-11-06", next="beta-main: ask the supplier")
 item(14, owner=X, subject="[work] An item with steps behind it", age=2 * 3600, next="alpha-builder: review the PR", goal="Ship the review", priority="p1",
      steps=[{"text": "alpha-builder: write the code", "status": "done", "by": "alpha-builder", "at": now0 - 7000}, {"text": "alpha-builder: try the old way", "status": "dropped", "by": "alpha-builder", "at": now0 - 6000},
@@ -801,8 +801,8 @@ check("header cost: the item page, Closed and Projects ask the release queue at 
 # ---- 12. Waiting: an item that waits on an outside event reads "On <event> · backstop <day>", never as a relay ("ask by"); an anchor wait still reads as before
 import datetime as _dt
 def _day(n): return (_dt.datetime.fromtimestamp(now0, _dt.timezone.utc) + _dt.timedelta(days=n)).strftime("%Y-%m-%d")
-item("ev1", owner=B, project="projects/beta", subject="[home] waits for a build", wait_kind="event", wait_event="a build ends", wake=_day(3), post_wake_mover="beta-main", needs=[], next="beta-main: read the result")
-item("an1", owner=B, project="projects/beta", subject="[home] waits for a review", wait_kind="anchor", wait_anchor="https://example.org/o/r/pull/9", wait_event="the review lands", wake=_day(3), post_wake_mover="beta-main", needs=[], next="beta-main: read the result")
+item("ev1", owner=B, project="projects/beta", subject="[home] waits for a build", wait_kind="event", wait_event="a build ends", wake=_day(3), mover="beta-main", needs=[], next="beta-main: read the result")
+item("an1", owner=B, project="projects/beta", subject="[home] waits for a review", wait_kind="anchor", wait_anchor="https://example.org/o/r/pull/9", wait_event="the review lands", wake=_day(3), mover="beta-main", needs=[], next="beta-main: read the result")
 wrows = {re.search(r'<span class="ir-id">(a\w+)</span>', li).group(1): li for li in lis(section(home_of(), "waiting-list"))}
 check("Waiting: the event wait and the anchor wait are both on the list", {"aev1", "aan1"} <= set(wrows), sorted(wrows))
 ev = wrows.get("aev1", "")
@@ -811,9 +811,9 @@ an = wrows.get("aan1", "")
 check("Waiting: an anchor wait still reads 'On <anchor>' with its backstop day", "On <a " in an and "example.org/o/r/pull/9" in an and "· backstop" in an and "ask by" not in an, an[:400])
 
 # ---- 12b. Waiting: line one's right-hand slot is the end date the list is sorted by (home.end_of), "no end date" (dimmed) and last when there is none; the age is the hover; the other lists keep the age
-item("wk1", owner=B, project="projects/beta", subject="[home] end date with a clock", age=2 * 86400, hold=True, wake="2031-03-05T09:00", post_wake_mover="beta-main", needs=[], next="beta-main: take it")
-item("wk2", owner=B, project="projects/beta", subject="[home] end date a relay's ask-by day", age=86400, wait_kind="relay", wait_event="the supplier's reply", ask_by="2031-03-09", post_wake_mover="beta-main", needs=["external"], next="beta-main: take it")
-item("wk3", owner=B, project="projects/beta", subject="[home] end date an anchor's backstop day", age=3600, wait_kind="anchor", wait_anchor="https://example.org/o/r/pull/38", wait_event="the review lands", wake="2031-03-12", post_wake_mover="beta-main", needs=["external"], next="beta-main: take it")
+item("wk1", owner=B, project="projects/beta", subject="[home] end date with a clock", age=2 * 86400, hold=True, wake="2031-03-05T09:00", mover="beta-main", needs=[], next="beta-main: take it")
+item("wk2", owner=B, project="projects/beta", subject="[home] end date a relay's ask-by day", age=86400, wait_kind="relay", wait_event="the supplier's reply", ask_by="2031-03-09", mover="beta-main", needs=["external"], next="beta-main: take it")
+item("wk3", owner=B, project="projects/beta", subject="[home] end date an anchor's backstop day", age=3600, wait_kind="anchor", wait_anchor="https://example.org/o/r/pull/38", wait_event="the review lands", wake="2031-03-12", mover="beta-main", needs=["external"], next="beta-main: take it")
 item("wk4", owner=B, project="projects/beta", subject="[home] end date none, a hold", age=4 * 86400, hold=True, next="beta-main: someone must look")
 item("wk5", owner=B, project="projects/beta", subject="[home] end date none, an item wait", age=86400, after=["a4"], next="beta-main: continue once a4 is done")
 h12 = home_of(); w12 = lis(section(h12, "waiting-list"))
@@ -1098,9 +1098,9 @@ check("the amber (--warn) is 4.5:1 or more as small text on the page and on a ca
       (lt and lt.groups(), dk and dk.groups()))
 
 # ---- 16. a hand-edited anchors file does not fail a page; anchor waits name their anchors; no steward wording; the Closed page's script; small script and style pins
-item(81, owner=B, project="projects/beta", subject="[home] anchor wait, anchors scoped to it", age=H_, wait_kind="anchor", wait_event="the review lands", wake=_day(4), post_wake_mover="beta-main", needs=[], next="beta-main: read the thread")
-item(82, owner=B, project="projects/beta", subject="[home] anchor wait, none recorded", age=H_, wait_kind="anchor", wait_event="the supplier answers", wake=_day(4), post_wake_mover="beta-main", needs=[], next="beta-main: look again")
-item(83, owner=B, project="projects/beta", subject="[home] item wait with only a backstop", age=H_, wait_kind="item", wake=_day(5), post_wake_mover="beta-main", needs=[], next="beta-main: look at it then")
+item(81, owner=B, project="projects/beta", subject="[home] anchor wait, anchors scoped to it", age=H_, wait_kind="anchor", wait_event="the review lands", wake=_day(4), mover="beta-main", needs=[], next="beta-main: read the thread")
+item(82, owner=B, project="projects/beta", subject="[home] anchor wait, none recorded", age=H_, wait_kind="anchor", wait_event="the supplier answers", wake=_day(4), mover="beta-main", needs=[], next="beta-main: look again")
+item(83, owner=B, project="projects/beta", subject="[home] item wait with only a backstop", age=H_, wait_kind="item", wake=_day(5), mover="beta-main", needs=[], next="beta-main: look at it then")
 good = [{"url": f"https://example.invalid/t/{n}", "items": ["a81"], "added": n, "by": "t"} for n in (1, 2, 3, 4)]
 junk = ["junk", 7, None, {"url": "https://example.invalid/items-int", "items": 5, "added": "yesterday"}, {"url": ["x"], "items": ["a81"]}, {"url": 123, "items": ["a81"], "added": 6},
         {"url": "https://example.invalid/added-junk", "items": ["a83"], "added": "not a time"}, {"url": "https://example.invalid/added-huge", "items": ["a83"], "added": 1e300}]

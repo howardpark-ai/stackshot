@@ -34,7 +34,7 @@ from stackshot.service import store as _svcstore
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 
-ONE_NAME = ("mover", "then", _model.LEGACY_PICKER_KEY)      # the fields that hold one session
+ONE_NAME = ("mover", "then")      # the fields that hold one session
 HOLDS = {*ONE_NAME, "needs", "next"}                        # a change of one of these gives the new session something to do
 NOTICE_IDS = 40                                             # the most items one notice names
 

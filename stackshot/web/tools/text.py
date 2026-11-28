@@ -153,7 +153,6 @@ _WAIT_MODE_PARAM = Annotated[str, Field(description=_T.param("WAIT_MODE"))]
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=_T.param("WAIT_EVENT"))]
 _MOVER_PARAM = Annotated[str, Field(description=_T.param("MOVER"))]
 _THEN_PARAM = Annotated[str, Field(description=_T.param("THEN"))]
-_POST_WAKE_PARAM = Annotated[str, Field(description=_T.param("POST_WAKE"))]
 _CONTACT_PARAM = Annotated[str, Field(description=_T.param("CONTACT"))]
 _OUTCOME_TEXT_PARAM = Annotated[str, Field(description=_T.param("OUTCOME_TEXT"))]
 

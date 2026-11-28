@@ -194,7 +194,7 @@ def run(message: str, runner: Callable[[str], dict[str, Any]] | None = None, sta
 # hand-off call above is; the answer is data the migration validates and the server's guards judge again when it is written. A read the call cannot make is listed, never guessed.
 #
 #   back-fill     a closed item with no outcome: the item's record and its GitHub close facts → completed | dropped | superseded by another item | unrecorded (closed before the model, no outcome in the record)
-#   hidden wait   an alive item whose next reads as a wait (or a waiting item whose input or end is missing): the item's text → the wait it states (kind, input, end, post-wake mover) or none
+#   hidden wait   an alive item whose next reads as a wait (or a waiting item whose input or end is missing): the item's text → the wait it states (kind, input, end, mover) or none
 OUTCOMES = ("completed", "not_planned", "duplicate", "unrecorded")
 STORE_OUTCOME = {"completed": "done", "not_planned": "dropped", "duplicate": "superseded", "unrecorded": "unrecorded"}      # the store's own words; ghsync maps them to the close reason (unrecorded: plain completed)
 UNRECORDED_REASON = "closed before the item model: the record holds no outcome"
@@ -222,7 +222,7 @@ HIDDEN_RUBRIC = (
     "alive (someone is working it now, one mover) and waiting (nothing happens until something outside arrives). You judge from the item's own text alone and answer with exactly one JSON object, nothing else.\n\n"
     'If the item is not waiting on anything the text states (the lines are actions someone takes now, or only name a date inside an action), answer {"wait": "none", "reason": "<one line>"}.\n'
     "If it waits, answer:\n"
-    '{"wait": "yes", "kind": "time" | "anchor" | "item" | "relay", "input": {...}, "end": "YYYY-MM-DD", "post_wake_mover": "<a name copied exactly from the list given>", '
+    '{"wait": "yes", "kind": "time" | "anchor" | "item" | "relay", "input": {...}, "end": "YYYY-MM-DD", "mover": "<a name copied exactly from the list given>", '
     '"basis": "<for a time wait: the real outside date as `<what happens> YYYY-MM-DD`>", "reason": "<one line, at most 240 characters>", "confidence": "high" | "medium" | "low"}\n'
     'kind time: it waits for a date. input {"wake": "YYYY-MM-DD"} (add THH:MM only when the text gives a time of day), and basis names the real-world event of that date (a delivery, a certificate renewal). '
     'kind anchor: it waits for something to happen at a link (a pull request merging, a thread replying, a page changing). input {"anchor": "<a URL that appears in the text or in the anchors given>", "event": "<what you expect there>"}, '
@@ -256,7 +256,7 @@ def build_backfill_message(shown: str, item: dict[str, Any], gh: dict[str, Any],
 
 def build_hidden_message(shown: str, item: dict[str, Any], lines_flagged: list[str], today: dt.date, movers: list[str], anchors: list[str], why: str) -> str:
     """The hidden-wait call's message: the open item as JSON, the lines of next that read as a wait (or what is missing from the wait it already has), today's date, the names the
-    post-wake mover may be, and the anchors scoped to the item."""
+    mover may be, and the anchors scoped to the item."""
     m = item.get("metadata") or {}
     obj = {      # wait_event and ask_by stand in for a party and a chase the retire pass took out (retire_fields.py)
         "item": shown, "subject": _clip(item.get("subject"), 200), "goal": _clip(m.get("goal"), 300), "description": _clip(item.get("description"), 1200), "next": _clip(m.get("next"), 900),
@@ -266,7 +266,7 @@ def build_hidden_message(shown: str, item: dict[str, Any], lines_flagged: list[s
     out = [f"Today is {today.isoformat()} ({_cfg.get('instance', 'timezone') or 'UTC'}).", f"Why you are asked: {why}", "", "The item (data):", "<item>", json.dumps(obj, ensure_ascii=False), "</item>"]
     if lines_flagged:
         out += ["", "Lines of its next that read as a wait (data):", "<lines>", *[_clip(x, 300) for x in lines_flagged], "</lines>"]
-    out += ["", "Names the post-wake mover may be (copy one exactly):", *[f"- {x}" for x in movers]]
+    out += ["", "Names the mover may be (copy one exactly):", *[f"- {x}" for x in movers]]
     out += ["", "Anchors scoped to the item (links it already watches):", *([f"- {a}" for a in anchors] or ["- (none)"]), "", "Answer with the JSON object only."]
     return "\n".join(out)
 
@@ -345,7 +345,7 @@ def validate_hidden(answer: dict[str, Any], today: dt.date, movers: list[str], s
                     known_urls: list[str] | None = None, text: str = "") -> tuple[dict[str, Any] | None, str]:
     """(the wait the call read, "") or (None, why not). `none` → ({"wait": "none", "reason"}, ""). A wait is validated by kind: a time wait has a real wake and a basis that names a date from the wake day
     to 30 days after (waiting.basis_problem); an anchor wait a URL that stands in the item's text or among its anchors, an event and an end; an item wait items that `resolve` finds and
-    an end; a relay an event and an end. The post-wake mover is one of `movers` (copied exactly, any case). The result carries `confident` (confidence high), which is what the migration sets
+    an end; a relay an event and an end. The mover is one of `movers` (copied exactly, any case). The result carries `confident` (confidence high), which is what the migration sets
     without a person."""
     if str(answer.get("wait") or "") == "none":
         return {"wait": "none", "reason": _clip(answer.get("reason"), 240)}, ""
@@ -358,11 +358,11 @@ def validate_hidden(answer: dict[str, Any], today: dt.date, movers: list[str], s
     inp = answer.get("input") if isinstance(answer.get("input"), dict) else {}
     end = _real_date(answer.get("end"), today)
     res: dict[str, Any] = {"wait": "yes", "kind": kind, "reason": _clip(answer.get("reason"), 240), "confidence": conf, "confident": conf == "high"}
-    who = " ".join(str(answer.get("post_wake_mover") or "").split())
+    who = " ".join(str(answer.get("mover") or "").split())
     hit = next((n for n in movers if n.casefold() == who.casefold()), "")
     if not hit:
-        return None, f"post-wake mover {who!r} is not on the list given"
-    res["mover"] = hit      # the call's answer key stays `post_wake_mover` (what the model is asked for); what the plan stores is `mover`
+        return None, f"mover {who!r} is not on the list given"
+    res["mover"] = hit
     if kind == "time":
         wake = _real_date(inp.get("wake"), today)
         if not wake:

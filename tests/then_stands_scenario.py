@@ -96,7 +96,7 @@ ZONE_HOURS = 4
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 BACK, HELP, FRONT = "zed-back", "zed-helper", "zed-front"
 OWN = model.owner_display()
-LEG = model.LEGACY_PICKER_KEY
+LEG = "post_wake_mover"
 FUT = day(5)
 
 def its(**meta): return {"status": "open", "metadata": {"project": "projects/zedwork", **meta}}
@@ -124,7 +124,7 @@ check("1 an agent picking up a wait: stray", model.stray_then(its(mover=HELP, th
 check("1 the user picking up a wait: not stray", not model.stray_then(its(mover=OWN, then=HELP, wait_kind="time", hold=True, wake=FUT, needs=[BACK])), None)
 check("1 a closed item is never stray", not model.stray_then({"status": "completed", "metadata": {"project": "projects/zedwork", "mover": BACK, "then": HELP}}) and model.settle({"status": "completed", "metadata": {"mover": BACK, "then": HELP}}) is None, None)
 _old = its(mover=OWN, then=HELP, wait_kind="time", hold=True, wake=FUT, needs=[BACK], **{LEG: BACK})
-check("1 a mover change that leaves an agent picker takes the stray then with it", model.settle(_old, True, None, True) == {"mover": "", "then": ""}, model.settle(_old, True, None, True))
+check("1 a retired post_wake_mover key stored beside the owner as mover is not read: the owner picks the wait up and his then stands", not model.stray_then(_old) and model.settle(_old, True, None, False) is None, model.settle(_old, True, None, False))
 check("1 no then, nothing to drop",not model.stray_then(its(mover=BACK)) and model.settle(its(mover=BACK)) is None, None)
 
 # ================================================================ 2. create

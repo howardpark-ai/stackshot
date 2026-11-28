@@ -269,8 +269,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 meta["until"] = back
 
         def waiting_as(kind: str) -> None:
-            # The wait's picker is stored as `mover` (who picks the item up when the wait ends), never the old key: a later `clear_wait`, `clear_hold` or `clear_wake` ends the wait and leaves this agent as the live mover.
-            meta.pop("post_wake_mover", None)
+            # The wait's picker is stored as `mover` (who picks the item up when the wait ends): a later `clear_wait`, `clear_hold` or `clear_wake` ends the wait and leaves this agent as the live mover.
             meta["mover"] = mover
             meta["wait_kind"] = kind
             set_back()

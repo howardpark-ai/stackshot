@@ -221,7 +221,7 @@ def fallback_mover(project: str) -> str:
 
 def mover_of(m: dict[str, Any]) -> dict[str, str]:
     """Whose move it is by the item's own needs: {"kind": "owner" | "outside" | "session", "who"} (the items API names the owner's kind by [items_api] owner_mover_kind: see service/client_reads._wait_fields). Decision first, then external,
-    then the first session needs names, else the stored picker (model.stored_picker: the stored post_wake_mover, the old name of a waiting item's mover, which wins while it is stored, else the stored mover), else the project's builder,
+    then the first session needs names, else the stored picker (model.stored_picker: the stored mover), else the project's builder,
     else its -main agent (never the item's creator)."""
     from stackshot.model import model as _model  # noqa: PLC0415  (lazy: model imports this module)
     ns = needs_of(m)

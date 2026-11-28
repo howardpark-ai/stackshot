@@ -80,8 +80,8 @@ def item(i, status="open", **meta):
     d = {"id": str(i), "subject": f"[home] item a{i}", "description": "- A thing, finished when it works", "status": status, "updated": at, "state_updated": at, "confirmed": at,
          "written_at": at, "written_by": AGENT, "metadata": {"owner": OWNER, "project": "projects/alpha", **meta}}
     return f"a{i}", d
-def evwait(i, event="recycle", **meta): return item(i, **{"wait_kind": "event", "wait_event": event, "wake": WAKE, "post_wake_mover": AGENT, "needs": [], "next": f"{AGENT}: confirm it after the event", **meta})
-def park(i, nxt=f"{AGENT}: keep it open to see it in real life", **meta): return item(i, **{"state": "parked", "wake": WAKE, "post_wake_mover": AGENT, "needs": [], "next": nxt, **meta})
+def evwait(i, event="recycle", **meta): return item(i, **{"wait_kind": "event", "wait_event": event, "wake": WAKE, "mover": AGENT, "needs": [], "next": f"{AGENT}: confirm it after the event", **meta})
+def park(i, nxt=f"{AGENT}: keep it open to see it in real life", **meta): return item(i, **{"state": "parked", "wake": WAKE, "mover": AGENT, "needs": [], "next": nxt, **meta})
 def build(*pairs): return dict(pairs)
 ROLES = {AGENT: {"role": "background"}, "alpha-main": {"role": "front"}, "alpha-builder": {"role": "background"}}
 sent, pushed = [], []
@@ -120,10 +120,10 @@ items = build(
     item(50, status="completed", state="parked", wake=WAKE, next=f"{AGENT}: see it in real life", outcome="done"),
     park(11, wait_basis=BASIS),                                                           # a real-world date: left alone, basis named
     item(59, state="outside", needs=["external"], party="the vendor", next=f"{AGENT}: see it in real life"),     # an outside party
-    item(7, state="outside", wait_kind="relay", ask_by=local_str(now + 3 * DAY)[:10], post_wake_mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),    # news only the owner relays
-    item(52, state="blocked", after=["board#2"], post_wake_mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),   # another item's close
-    park(62, post_wake_mover="Oliver"),                                                   # the post-wake mover is the owner
-    item(51, state="outside", wait_kind="anchor", wait_anchor="https://github.com/o/r/issues/16", wait_event="a reply", wake=WAKE, post_wake_mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),   # an anchor event
+    item(7, state="outside", wait_kind="relay", ask_by=local_str(now + 3 * DAY)[:10], mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),    # news only the owner relays
+    item(52, state="blocked", after=["board#2"], mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),   # another item's close
+    park(62, mover="Oliver"),                                                   # the post-wake mover is the owner
+    item(51, state="outside", wait_kind="anchor", wait_anchor="https://github.com/o/r/issues/16", wait_event="a reply", wake=WAKE, mover=AGENT, needs=[], next=f"{AGENT}: see it in real life"),   # an anchor event
 )
 fs, left, read, skipped0 = AC.proof_wait_findings(items, {}, now, env())
 got = {f["id"]: f for f in fs}
@@ -141,7 +141,7 @@ check("3 left alone: the owner as the post-wake mover is left alone", "not a ses
 check("3 left alone: none of them is a finding", not ({f"board#{BID_05}", f"board#{BID_21}", f"board#{BID_01}", f"board#{BID_16}", f"board#{BID_23}", f"board#{BID_15}"} & set(got)), sorted(got))
 check("3 candidates read counts the findings and the items left alone", read == len(fs) + len(left), (read, len(fs), len(left)))
 # a release step still to come
-pend = item(30, state="parked", wake=WAKE, post_wake_mover=AGENT, needs=[], next=f"{AGENT}: release PR #19", released_told=[])
+pend = item(30, state="parked", wake=WAKE, mover=AGENT, needs=[], next=f"{AGENT}: release PR #19", released_told=[])
 from stackshot.model import steps as _steps
 d30 = pend[1]; d30["metadata"]["next"] = f"{AGENT}: finish the rollout and see it in real life"
 key = _steps.key(_steps.first_line(d30["metadata"]["next"]))
@@ -150,7 +150,7 @@ fs30, left30, _, _ = AC.proof_wait_findings({pend[0]: d30}, {}, now, env())
 check("3 left alone: an open step whose release has not happened keeps the item out of the findings, 'release' named", not fs30 and left30 and "release has not happened" in left30[0]["basis"], (fs30, left30))
 
 # ---- 4. the run
-base = build(evwait(1, "recycle", released_told=["o/r#5"]), evwait(2, "fleet_op many"), park(11, wait_basis=BASIS), park(62, post_wake_mover="Oliver"), item(8, state="doing", needs=[AGENT], next=f"{AGENT}: watch it in real life"))
+base = build(evwait(1, "recycle", released_told=["o/r#5"]), evwait(2, "fleet_op many"), park(11, wait_basis=BASIS), park(62, mover="Oliver"), item(8, state="doing", needs=[AGENT], next=f"{AGENT}: watch it in real life"))
 snapshot = json.dumps(base, sort_keys=True)
 real_pages = pages
 def pages_after_proof(run, deadline):

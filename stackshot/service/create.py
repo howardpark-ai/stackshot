@@ -189,7 +189,6 @@ def create_item(
     wait_anchor: str = "",
     wait_event: str = "",
     ask_by: str = "",
-    post_wake_mover: str = "",
     draft: str = "",
     step_proof: list[dict[str, Any]] | str | None = None,
     contact: str = "",
@@ -292,7 +291,7 @@ def create_item(
         fc.mark(_faults.UNTIL)          # the date was refused and blanked above: a list's backstop day is that date, so the list is not judged on its absence
     n_args = fc.count
     model_set, _ = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
-                                                 "until": until_v, "post_wake_mover": post_wake_mover}, {}, default=({}, set()))   # a "none" on a create is nothing to clear
+                                                 "until": until_v}, {}, default=({}, set()))   # a "none" on a create is nothing to clear
     args_bad = fc.count > n_args      # the model's arguments are refused (an until that is no date, a wait_kind that is none): the date is not read again for the waits list
     if args_bad and until_v:
         fc.mark(_faults.UNTIL)          # the date is kept but not trusted beside refused arguments: the list is not judged on its absence either
@@ -323,15 +322,10 @@ def create_item(
     next_bad = fc.count > n_next          # the lines were not stored: the check that an open step is left is not judged on their absence
     proof_note = fc.call(_proofs.step_proof_set, meta, _steps.view(meta, keeper=owner), step_proof, default="") if step_proof is not None else ""     # a step's proof: the event that finishes it
     fc.call(_gates.gate_step_gap, meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
-    alias_note = ""
-    if _model.clean(post_wake_mover):      # post_wake_mover is the old name of mover (model.fold_picker_alias): the picker of a wait the item is created with, else dropped with a note
-        trial = {**meta, **{k: v for k, v in model_set.items() if k != _model.LEGACY_PICKER_KEY}}
-        alias_note = _model.fold_picker_alias(model_set, set(), "none" if _model.clean(post_wake_mover).lower() in h.ask_none else _model.norm_who(_model.clean(post_wake_mover)),
-                                              _model.waits_stored(trial) or list_plan is not None, _gates.post_wake_alias_until())
     meta.update(model_set)
     if list_plan is not None:
         meta["waits"] = [dict(ln) for ln in list_plan.lines]
-    wait_note = alias_note + (_uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else "")
+    wait_note = (_uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else "")
     if list_plan is not None:
         wait_note += list_plan.note + "\n(wait list: " + _wl.summary(meta, _gh.shown) + ")"
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow

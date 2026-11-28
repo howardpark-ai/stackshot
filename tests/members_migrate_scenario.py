@@ -71,7 +71,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, wiring; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
-from stackshot.waits import watchers as WK_, stall as STALL, mover_pass as MP, members_pass as PP; from stackshot.model import model as _model, nextlines as _nl, steps as _steps
+from stackshot.waits import watchers as WK_, stall as STALL, members_pass as PP; from stackshot.model import model as _model, nextlines as _nl, steps as _steps
 from stackshot.core import members as _members
 from stackshot.tools import members_migrate as PM; from stackshot.tools import stamp_phase as SP
 from stackshot.service import stamp as stamp_svc
@@ -118,7 +118,7 @@ CASES = {
     2:  ("a decision whose mover is stored as the first person",                dict(DECIDE, mover=OWN, answers=[ANS(1)])),
     3:  ("a decision whose mover is stored as an agent",                        dict(DECIDE, mover=BACK, answers=[ANS(1)])),
     4:  ("an item waiting on an agent for a date",                              dict(needs=[BACK], wait_kind="time", until=day(3), answers=[ANS(1)])),
-    5:  ("a decision with the old picker key",                                  dict(DECIDE, post_wake_mover=BACK, answers=[ANS(1)])),
+    5:  ("a decision answered once",                                  dict(DECIDE, answers=[ANS(1)])),
     6:  ("a next that opens with `you:`",                                       dict(next=YOU)),
     7:  ("a next that opens with the first person's name, an answer with `by`", dict(next="Oliver: review it", answers=[ANS(1, by="Oliver")])),
     8:  ("answers that all carry a `by`",                                       dict(answers=[ANS(1, by="Pat")])),
@@ -143,7 +143,7 @@ WRITES = (1, 2, 3, 4, 5, 10, 11, 12)        # answers with no `by`, or a decisio
 SAMES = (7, 8, 9, 13, 14)                   # nothing stored without a name
 YOUS = (6, 15)                              # the `you:` items: rewritten or kept and listed
 KEYS = PP.KEYS
-mod_of = lambda i: MP.prepared(HOST, f"g{i}", raw(i))[1]
+mod_of = lambda i: PP._prepared(HOST, f"g{i}", raw(i))[1]
 def strip(o):
     """A dataclass as a dict, without the flag that says a mover is stored (the one thing a stored mover changes about the model's reading)."""
     if isinstance(o, dict): return {k: strip(v) for k, v in o.items() if k != "mover_explicit"}
@@ -159,7 +159,7 @@ check("1 answers with no `by` (absent or blank) get the first person; one with a
 check("1 …the form says what it writes", P[1]["form"].startswith("by = Oliver on 2 answers") and "decision's mover stored as Oliver" in P[1]["form"], P[1]["form"])
 check("1 a decision that stores no mover and reads the first person by default gets him stored as its mover", P[1]["edits"].get("mover") == "Oliver" and P[10]["edits"] == {"mover": "Oliver"}, (P[1]["edits"].get("mover"), P[10]["edits"]))
 check("1 …a stored mover (the first person or an agent) is left as it is", "mover" not in P[2]["edits"] and "mover" not in P[3]["edits"], (P[2], P[3]))
-check("1 …an item that waits, an item with the old picker key and a closed item store no mover", "mover" not in P[4]["edits"] and "mover" not in P[5]["edits"] and "mover" not in P[12]["edits"], (P[4], P[5], P[12]))
+check("1 …an item that waits, a closed item store no mover", "mover" not in P[4]["edits"] and "mover" not in P[12]["edits"], (P[4], P[12]))
 check("1 a closed item gets its answers named and nothing else", set(P[12]["edits"]) == {"answers"} and P[12]["answers"] == 2 and P[13]["edits"] == {} and P[14]["edits"] == {}, (P[12], P[13], P[14]))
 check("1 a mail tick is an answer like the others", P[11]["answers"] == 1 and P[11]["edits"]["answers"][0]["by"] == "Oliver", P[11])
 check("1 nothing stored without a name: no edits, no list, no form", all(P[i]["edits"] == {} and not P[i]["listed"] and not P[i]["form"] for i in (7, 8, 9, 13, 14)), {i: P[i] for i in (7, 8, 9, 13, 14)})
@@ -208,12 +208,12 @@ check("2 …its before and after name the keys it changes, the form and the Hist
       and "the first person was stamped" in dry[1]["history"] and dry[1]["form"].startswith("by = Oliver on 2 answers") and dry[1]["answers"] == 2 and dry[1]["sha256_before"], dry[1])
 check("2 …a closed item says its answers get a name, and its before and after hold the answers alone", dry[12]["status"] == "completed" and set(dry[12]["after"]) == {"answers"} and dry[12]["answers"] == 2, dry[12])
 check("2 …an item left as it is says so", dry[13]["why"] == "nothing stored without a name" and dry[13]["before"] == {} and dry[13]["after"] == {}, dry[13])
-check("2 …the item with a stored mover and the one that waits are told apart: no mover in what they would get", "mover" not in dry[2]["after"] and "mover" not in dry[3]["after"] and "mover" not in dry[4]["after"] and "mover" not in dry[5]["after"], (dry[2]["after"].keys(), dry[4]["after"].keys()))
+check("2 …the item with a stored mover and the one that waits are told apart: no mover in what they would get", "mover" not in dry[2]["after"] and "mover" not in dry[3]["after"] and "mover" not in dry[4]["after"], (dry[2]["after"].keys(), dry[4]["after"].keys()))
 EXPECT_WRITE = [i for i in ALL if dry[i]["action"] == "would_set"]
 EXPECT_LEFT = sorted(BOARD + str(i) for i in ALL if dry[i].get("notes"))
 
 # ---- 3. the write
-reading = lambda i: MP.reading(HOST, f"g{i}", raw(i))
+reading = lambda i: PP._reading(HOST, f"g{i}", raw(i))
 before_r = {i: reading(i) for i in OPEN}; before_m = {i: model_of(i) for i in OPEN}; before_recs = recs(); t1 = times()
 st_, d_ = call(op="members", items=[f"g{i}" for i in ALL], pass_id="20260101-000000-abcdef")
 res = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
@@ -229,9 +229,9 @@ check("3 every file keeps its modification time (a closed item is dated by its f
 check("3 every answer of an open or closed item that had no `by` now carries the first person's name, one with a `by` keeps it", all(a.get("by") for i in ALL for a in (mt(i).get("answers") or [])) and [a["by"] for a in mt(1)["answers"]] == ["Oliver", "Pat", "Oliver"]
       and [a["by"] for a in mt(12)["answers"]] == ["Oliver", "Oliver"] and [a["by"] for a in mt(14)["answers"]] == ["Pat"], [mt(1)["answers"], mt(12)["answers"]])
 check("3 …nothing else of an answer changed: the same entries with `by` added", all([{k: v for k, v in a.items() if k != "by"} for a in mt(i).get("answers", [])] == [{k: v for k, v in a.items() if k != "by"} for a in orig[i]["metadata"].get("answers", [])] for i in WRITES), None)
-check("3 the decision with no mover has the first person stored, the others keep the mover they had or none", mt(1)["mover"] == "Oliver" and mt(10)["mover"] == "Oliver" and mt(2)["mover"] == "Oliver" and mt(3)["mover"] == BACK and "mover" not in mt(4) and "mover" not in mt(5) and "mover" not in mt(12), {i: mt(i).get("mover") for i in ALL})
+check("3 the decision with no mover has the first person stored, the others keep the mover they had or none", mt(1)["mover"] == "Oliver" and mt(10)["mover"] == "Oliver" and mt(2)["mover"] == "Oliver" and mt(3)["mover"] == BACK and "mover" not in mt(4) and mt(5)["mover"] == "Oliver" and "mover" not in mt(12), {i: mt(i).get("mover") for i in ALL})
 check("3 nobody's authorship changed: every answer reads as the person it read as before", recs() == before_recs, (before_recs, recs()))
-check("3 the reading of every written open item is the same before and after (phase, kind of wait, mover, watched, held, picker, then, needs, end date)", all(MP.same(before_r[i], reading(i), "") == "" for i in OPEN), {i: MP.same(before_r[i], reading(i), "") for i in OPEN if MP.same(before_r[i], reading(i), "")})
+check("3 the reading of every written open item is the same before and after (phase, kind of wait, mover, watched, held, picker, then, needs, end date)", all(PP._same(before_r[i], reading(i)) == "" for i in OPEN), {i: PP._same(before_r[i], reading(i)) for i in OPEN if PP._same(before_r[i], reading(i))})
 logs = {i: [x["text"] for x in STALL.new_entries(orig[i]["metadata"], mt(i))] for i in CHANGED}
 check("3 each written item gets exactly one History line, which says the first person was stamped and that nothing else changed", all(len(v) == 1 and "the first person was stamped" in v[0] and "nothing else on the item changed" in v[0] for v in logs.values()), logs)
 check("3 …a closed item records it too (it does not show it)", len(STALL.log_of(mt(12))) == 1 and raw(12)["status"] == "completed", mt(12).get("stall"))

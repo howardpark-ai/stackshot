@@ -17,7 +17,7 @@ from stackshot.web import glossary_line as _glossary
 from stackshot.web.auth import oauth as _oauth
 from stackshot.model.field_gates import _fleet_tool, _when_idle
 from stackshot.web.tools.notes import _off_map_note_item, _owner_param, _sender_required
-from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_PARAM, _CONTACT_PARAM, _DESCRIPTION_PARAM, _MOVER_PARAM, _OPTIONS_PARAM, _OUTCOME_PARAM, _OUTCOME_TEXT_PARAM, _POST_WAKE_PARAM, _P_BARE, _P_EX2, _P_OLD, _P_PLACE_STEP, _REASON_PARAM, _SAID_PARAM, _SELF_WAIT_FORM, _STEP_PROOF_PARAM, _THEN_PARAM, _WAIT_EVENT_PARAM, _WAIT_KIND_PARAM, _WAIT_MODE_PARAM, _WAITS_PARAM, _lead, load_text
+from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_PARAM, _CONTACT_PARAM, _DESCRIPTION_PARAM, _MOVER_PARAM, _OPTIONS_PARAM, _OUTCOME_PARAM, _OUTCOME_TEXT_PARAM, _P_BARE, _P_EX2, _P_OLD, _P_PLACE_STEP, _REASON_PARAM, _SAID_PARAM, _SELF_WAIT_FORM, _STEP_PROOF_PARAM, _THEN_PARAM, _WAIT_EVENT_PARAM, _WAIT_KIND_PARAM, _WAIT_MODE_PARAM, _WAITS_PARAM, _lead, load_text
 
 _ask_after_write = None      # set by register: the server's own, looked up at each call
 _sender_not_owner = None      # set by register: the server's own, looked up at each call
@@ -53,7 +53,7 @@ RANK_RETIRED = _T.piece("RANK_RETIRED")
 _ASK_TEXT_PARAMS = ("subject", "description", "next", "options", "said", "work", "check", "wait_basis", "reason", "expected_reason", "step", "supplies", "goal", "wait_event", "draft", "watch_reason",
                     "outcome_text", "wait_reason", "reword", "waits",                                         # free text (a list's lines carry anchors, events and item ids)
                     "owner_name", "owner", "agent", "observers", "tell_him", "step_proof",                                # stored as written, with no check against a closed set: counted as text too
-                    "wait_anchor", "post_wake_mover", "then")                                                 # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
+                    "wait_anchor", "then")                                                                    # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
 _ASK_NONTEXT_PARAMS = (
     "item_id", "status", "priority", "outcome", "wait_kind",                                                 # a fixed word, or the item's own id
     "due", "wake", "until", "expected_by", "ask_by",                                                                  # a date or a time
@@ -163,7 +163,6 @@ def stackshot_update(
     wait_event: _WAIT_EVENT_PARAM = "",
     ask_by: _ASK_BY_PARAM = "",
     until: _UNTIL_PARAM = "",
-    post_wake_mover: _POST_WAKE_PARAM = "",
     clear_goal: bool = False,
     clear_mover: bool = False,
     clear_then: bool = False,
@@ -195,20 +194,20 @@ def stackshot_update(
     status = _close_status(status, outcome, reason, outcome_text, superseded_by)      # before every gate that reads status
     _telling.HO_STATE.handback = set()      # the front agents this write's gate keeps as a hand-back (gates.fix_front_mover); the hand-off notice reads them
     try:
-        if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
+        if _model.clean(mover) or _model.clean(then):
             try:
                 item_ = _load(_norm_id(item_id, bare=True))
                 meta_ = (item_.get("metadata") or {})
             except Exception:  # noqa: BLE001
                 item_, meta_ = None, {}      # an unknown item is _update's to refuse
             proj_ = project or str(meta_.get("project") or "")
-            vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+            vals = {"mover": mover, "then": then}
             words_ = _gates.lazy_said(said, sender)
             _marked, _ends = _gates.step_marks(meta_, done, dropped, reword, work, sender), bool(clear_next) or str(status or "").strip().lower() not in ("", "open")      # a write that ticks, drops or rewords the holder's step (any form the tool reads), closes the item or clears next leaves no step for a hand-back to reach
             for f_, v_ in list(vals.items()):
                 vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_, words_, item=item_, marked=_marked, ends=_ends)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent; a sibling front agent of the project, with the owner's words in said, is kept as sent and told
                 fix_note += n_; fixes += fx_
-            mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
+            mover, then = vals["mover"], vals["then"]
         list_in = _wlw.passed(waits) and not _wlw.clearing(waits)      # a wait on a list: its date is the backstop, read as an anchor or item wait's is, and it names its blockers (the lines)
         if list_in:
             old_ = [n for n, v in (("wake", wake), ("ask_by", ask_by), ("hold", hold)) if v and str(v).strip().lower() not in _ASK_NONE]
@@ -230,7 +229,7 @@ def stackshot_update(
                            hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, tell_him=tell_him, after=after, work=work, said=said, check=check,
                            clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
                            expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
-                           goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
+                           goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until_wait=until_wait,
                            clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
                            done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode,
                            **({"busy_note": busy_note} if busy_note is not None else {})) + fix_note + gloss_note

@@ -142,29 +142,29 @@ check("watchers: the backstop (ask_by or wake) is the only date the clock reads 
       and wk.next_moment({"wait_kind": "event", "ask_by": day(3)}) == wk.day_epoch(day(3)), None)
 
 # ================================================================ the model reads it as waiting
-item(1, wait_kind="event", wait_event=f"pr_released {PR(7)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 7's release")
+item(1, wait_kind="event", wait_event=f"pr_released {PR(7)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 7's release")
 m1 = _item_read._model_of({**rd(1), "gid": "a1"})
 check("model: a stored event wait is waiting, with no mover, the event and its post-wake mover", m1.state == model.WAITING and m1.wait is not None and m1.wait.kind == "event" and m1.wait.event == f"pr_released {PR(7)}"
-      and m1.wait.post_wake_mover == BACK and not m1.mover and not any("conflict" in str(c).lower() for c in (getattr(m1, "conflicts", None) or [])), (m1.state, m1.wait, m1.mover, getattr(m1, "conflicts", None)))
+      and m1.wait.mover == BACK and not m1.mover and not any("conflict" in str(c).lower() for c in (getattr(m1, "conflicts", None) or [])), (m1.state, m1.wait, m1.mover, getattr(m1, "conflicts", None)))
 check("clocks: the stall pass has no work to look at (not due), and the item is watched, so the idle clock skips it", S.not_due({**rd(1), "gid": "a1"}, now0) != "" and wk.watches(rd(1)), S.not_due({**rd(1), "gid": "a1"}, now0))
-check("clocks: …whereas the same item as plain work is due for the stall pass", S.not_due({**rd(1), "metadata": {k: v for k, v in mt(1).items() if k not in ("wait_kind", "wait_event", "ask_by", "post_wake_mover")} | {"mover": BACK}, "gid": "a1"}, now0) == "", None)
+check("clocks: …whereas the same item as plain work is due for the stall pass", S.not_due({**rd(1), "metadata": {k: v for k, v in mt(1).items() if k not in ("wait_kind", "wait_event", "ask_by")} | {"mover": BACK}, "gid": "a1"}, now0) == "", None)
 page = itempage.wait_what(m1.wait)
 check("display: the item page says what it waits on, who watches it and the backstop word", page == "PR #7 live (example-owner/stackshot)" and itempage.watched_by("event") == "the server" and itempage.wait_end_label(m1.wait) == "backstop", page)
 
 # ================================================================ the write
 CAN = {"example-owner/stackshot#7": "x"}
 item(10, mover=BACK, subject="[home] doing, will wait for a release")
-out = _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 7", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 7", ask_by=day(5), mover=BACK)
 check("write: an event wait is stored in its canonical form (a bare number is this repository's) and the reply says what the server watches",
       mt(10).get("wait_kind") == "event" and mt(10).get("wait_event") == f"pr_released {PR(7)}" and "event wait: the server watches for PR #7 live" in out and "The stall pass does not run for it" in out, (mt(10), out[-500:]))
 check("write: …the wait is stamped (watch.set_at), so an older reported event is not its arrival", (mt(10).get("watch") or {}).get("set_at"), mt(10))
-refused("write: a phrase that is no event is refused with the forms", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="when it is done", ask_by=day(5), post_wake_mover=BACK), "not an event the server watches", "pr_released")
-refused("write: pr_released for another repository is refused (release.sh releases this one only); pr_merged is the event", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released other/repo#3", ask_by=day(5), post_wake_mover=BACK),
+refused("write: a phrase that is no event is refused with the forms", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="when it is done", ask_by=day(5), mover=BACK), "not an event the server watches", "pr_released")
+refused("write: pr_released for another repository is refused (release.sh releases this one only); pr_merged is the event", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released other/repo#3", ask_by=day(5), mover=BACK),
         "pr_released is release.sh's event", "pr_merged other/repo#3")
 rlive_svc.released_live_base = lambda: ("goodsha", "headsha")
 rlive_svc.merged_prs = lambda head, limit=3000: {9: ("sha9", now0 - 3600)}
 rlive_svc.released_is_live = lambda sha, good, head: ""
-refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), post_wake_mover=BACK), "already merged and live")
+refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), mover=BACK), "already merged and live")
 MERGED, DEAD = {PR(9) if False else "o/r#9": True}, {"o/r#4": "its pull request was closed without being merged"}
 from stackshot.core import ghbudget as _gbud
 GH_TAGS = []
@@ -176,34 +176,34 @@ def fake_pr_merged(ref, now, gh_st):
     return rec["merged"], ""
 REAL_PR_MERGED = checks_svc.pr_merged
 checks_svc.pr_merged = fake_pr_merged
-refused("write: a PR already merged is refused for pr_merged", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK), "already merged")
-refused("write: a PR closed without merging is refused", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK), "closed without being merged")
+refused("write: a PR already merged is refused for pr_merged", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), mover=BACK), "already merged")
+refused("write: a PR closed without merging is refused", lambda: _update_svc._update("a10", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), mover=BACK), "closed without being merged")
 before = rd(10)
 out = _update_svc._update("a10", sender=BACK, next="team-back: keep going")
 check("write: an unrelated update of the item keeps the wait as stored (the gate reads only a changed wait)", mt(10).get("wait_event") == f"pr_released {PR(7)}" and mt(10).get("wait_kind") == "event", mt(10))
 cfg(guards=True)
 item(11, mover=BACK, subject="[home] doing, no backstop")
-out_ = _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="recycle", post_wake_mover=BACK, mover="none")
+out_ = _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="recycle", mover=BACK)
 check("write: an event wait with no backstop day is not refused: until is taken (the item's words, else tomorrow) and the reply says so", mt(11).get("until") and "wait_kind=event came with no date" in out_ and "ask_by" not in mt(11), (out_[-300:], mt(11)))
-refused("write: …and a phrase the guard cannot read as an event", lambda: _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="soonish", ask_by=day(4), post_wake_mover=BACK, mover="none"), "event")
+refused("write: …and a phrase the guard cannot read as an event", lambda: _update_svc._update("a11", sender=BACK, wait_kind="event", wait_event="soonish", ask_by=day(4), mover=BACK), "event")
 cfg(guards=False)
 n, g = None, None
 try:
     g, out = create_svc.create_item(subject="[home] filed waiting on a recycle", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until the recycle", goal="Done when the recycle ran.",
-                                 wait_kind="event", wait_event="recycle testbox", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-1")
+                                 wait_kind="event", wait_event="recycle testbox", ask_by=day(4), mover=BACK, request_id="evw-create-1")
 except Exception as e:
     out = f"ERR {e}"
 check("create: an item can be filed already waiting on an event, its phrase canonical and the reply saying what is watched", g and _service_store._load(g)["metadata"].get("wait_kind") == "event" and _service_store._load(g)["metadata"].get("wait_event") == "recycle testbox" and "event wait:" in out, out[-400:])
 refused("create: …and a create for an event that already happened is refused", lambda: create_svc.create_item(subject="[home] filed waiting on a live PR", description=DESC, project="projects/alpha", owner=U["home-front"],
-        next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event="pr_released 9", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-2"), "already merged and live")
+        next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event="pr_released 9", ask_by=day(4), mover=BACK, request_id="evw-create-2"), "already merged and live")
 rlive_svc.merged_prs = lambda head, limit=3000: {}
 
 # ================================================================ the wake: a release
 for i in (20, 21, 22):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
-item(20, wait_kind="event", wait_event=f"pr_released {PR(13)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 13")
-item(21, wait_kind="event", wait_event=f"pr_released {PR(14)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 14")
-item(22, wait_kind="event", wait_event=f"pr_merged {PR(13)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 13's merge")
+item(20, wait_kind="event", wait_event=f"pr_released {PR(13)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 13")
+item(21, wait_kind="event", wait_event=f"pr_released {PR(14)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 14")
+item(22, wait_kind="event", wait_event=f"pr_merged {PR(13)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 13's merge")
 reset()
 rlive_svc.git_commit = lambda ref: "f" * 40 if ref else ""
 rlive_svc.merged_prs = lambda head, limit=3000: {13: ("a" * 40, now0 - 600)}
@@ -221,10 +221,10 @@ check("release: …and the event wake records the hand-off to the post-wake move
 # ================================================================ the wake: the catch-up poll
 reset()
 rlive_svc.merged_prs = lambda head, limit=3000: {15: ("d" * 40, now0 - 300)}
-item(23, wait_kind="event", wait_event=f"pr_released {PR(15)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] missed release")
-item(24, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] merge on GitHub")
-item(25, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] PR closed unmerged")
-item(26, wait_kind="event", wait_event="pr_merged o/r#5", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] not yet")
+item(23, wait_kind="event", wait_event=f"pr_released {PR(15)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] missed release")
+item(24, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), mover=BACK, needs=[], subject="[home] merge on GitHub")
+item(25, wait_kind="event", wait_event="pr_merged o/r#4", ask_by=day(5), mover=BACK, needs=[], subject="[home] PR closed unmerged")
+item(26, wait_kind="event", wait_event="pr_merged o/r#5", ask_by=day(5), mover=BACK, needs=[], subject="[home] not yet")
 evwaits_svc.EVW_LAST[0] = 0.0
 fired = evwaits_svc.evwait_tick()
 check("poll: a release nobody was told of (the merge is in last-good and HEAD) is found; a merge GitHub reports is found; a PR closed unmerged brings the item back saying it will never merge",
@@ -234,17 +234,17 @@ check("poll: …a PR still open keeps its wait, and the poll runs at most once a
 # ================================================================ the wake: recycle, fleet op, job
 for i in (30, 31, 32, 33, 34, 35):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
-item(30, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] any recycle")
-item(31, wait_kind="event", wait_event="recycle othermachine", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] another machine's recycle")
-item(32, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a many-session op")
-item(33, wait_kind="event", wait_event="fleet_op recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a recycle op")
+item(30, wait_kind="event", wait_event="recycle", ask_by=day(5), mover=BACK, needs=[], subject="[home] any recycle")
+item(31, wait_kind="event", wait_event="recycle othermachine", ask_by=day(5), mover=BACK, needs=[], subject="[home] another machine's recycle")
+item(32, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), mover=BACK, needs=[], subject="[home] a many-session op")
+item(33, wait_kind="event", wait_event="fleet_op recycle", ask_by=day(5), mover=BACK, needs=[], subject="[home] a recycle op")
 reset()
 recycle_svc._recycled("testbox", "recycle", started=now0 - 120, result="ok", skipped=[], flag_at=now0 - 120)
 check("recycle: the end-of-recycle hook turns a recycle wait (any machine) and a fleet op wait for that verb; another machine's recycle wait and a many-session wait are not touched (the hook does not know the count)",
       mt(30).get("mover") == BACK and "a recycle finished on testbox" in mt(30)["woke"]["what"] and mt(33).get("mover") == BACK and mt(31).get("wait_kind") == "event" and mt(32).get("wait_kind") == "event", (mt(30), mt(31), mt(32), mt(33)))
 check("recycle: …each woken item's mover is told (several items in one pass are one message)", {g for x in sent("watch") for g in x[0].split(",")} >= {"a30", "a33"} and all(x[1] == UB for x in sent("watch")), sent())
 # an item whose wait was set after a reported event: not its arrival
-item(34, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] set just now", su=now0 + 60.0)
+item(34, wait_kind="event", wait_event="recycle", ask_by=day(5), mover=BACK, needs=[], subject="[home] set just now", su=now0 + 60.0)
 check("floor: a reported event older than the wait (the item was written after it) is not its arrival", evwaits_svc.evwait_report(EW.event("recycle", machine="testbox"), now=now0) == [] and mt(34).get("wait_kind") == "event", mt(34))
 check("floor: …a later one is", evwaits_svc.evwait_report(EW.event("recycle", machine="testbox"), now=now0 + 120) == ["a34"] and mt(34).get("mover") == BACK, mt(34))
 
@@ -259,15 +259,15 @@ with TestClient(server.mcp.http_app()) as c:
     res = c.post("/client/event", json={"kind": "fleet_op", "verb": "update", "sessions": 6, "text": "sala update finished on 6 sessions"}, headers=h)
     check("route: …one over six sessions does, and the item's mover is told what the report said", res.status_code == 200 and res.json()["woken"] == [_gh.shown("a32")] and mt(32).get("mover") == BACK
           and "sala update finished on 6 sessions" in mt(32)["woke"]["what"], (res.status_code, res.text, mt(32)))
-    item(35, wait_kind="event", wait_event="job_run nightly", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a job")
+    item(35, wait_kind="event", wait_event="job_run nightly", ask_by=day(5), mover=BACK, needs=[], subject="[home] a job")
     res = c.post("/client/event", json={"kind": "job_run", "name": "weekly"}, headers=h)
     check("route: another job's run does not end it", res.status_code == 200 and res.json()["woken"] == [] and mt(35).get("wait_kind") == "event", res.text)
     res = c.post("/client/event", json={"kind": "job_run", "name": "nightly"}, headers=h)
     check("route: …its own run does", res.status_code == 200 and res.json()["woken"] == [_gh.shown("a35")] and mt(35).get("mover") == BACK, res.text)
     # a provision op over four sessions, as the fleet tool reports the end of every op
-    item(80, wait_kind="event", wait_event="fleet_op provision", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a provision wait")
-    item(81, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a many wait")
-    item(82, wait_kind="event", wait_event="fleet_op lane", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] a lane wait")
+    item(80, wait_kind="event", wait_event="fleet_op provision", ask_by=day(5), mover=BACK, needs=[], subject="[home] a provision wait")
+    item(81, wait_kind="event", wait_event="fleet_op many", ask_by=day(5), mover=BACK, needs=[], subject="[home] a many wait")
+    item(82, wait_kind="event", wait_event="fleet_op lane", ask_by=day(5), mover=BACK, needs=[], subject="[home] a lane wait")
     res = c.post("/client/event", json={"kind": "fleet_op", "verb": "provision", "sessions": 4, "result": "ok", "text": "provision finished on 4 sessions"}, headers=h)
     check("route: a provision op over four sessions wakes the `fleet_op provision` wait and the `fleet_op many` wait, not the lane wait, and both are told what the report said",
           res.status_code == 200 and sorted(res.json()["woken"]) == sorted(_gh.shown(g) for g in ("a80", "a81")) and mt(80).get("mover") == BACK and mt(81).get("mover") == BACK
@@ -277,12 +277,12 @@ with TestClient(server.mcp.http_app()) as c:
         check(f"route: {body} is a 400 that says why", res.status_code == 400 and want in res.json().get("error", ""), res.text)
     res = c.post("/client/event", json={"kind": "recycle"})
     check("route: no token, no write", res.status_code == 401, res.text)
-    item(9154, wait_kind="event", wait_event="recycle testbox", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] this machine's recycle")
+    item(9154, wait_kind="event", wait_event="recycle testbox", ask_by=day(5), mover=BACK, needs=[], subject="[home] this machine's recycle")
     res = c.post("/client/event", json={"kind": "recycle"}, headers=h)
     check("route: a report names no machine: the token's machine is used", res.status_code == 200 and "a9154" in str(res.json()["woken"]) or res.json()["woken"] == [_gh.shown("a9154")], res.text)
 
 # ================================================================ the backstop
-item(40, wait_kind="event", wait_event="fleet_op many", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] the event never came")
+item(40, wait_kind="event", wait_event="fleet_op many", ask_by=day(-1), mover=BACK, needs=[], subject="[home] the event never came")
 reset()
 woke = watching_svc.watch_pass(now0)
 check("backstop: the day passes with no report: the item comes back to its post-wake mover saying the event did not come", "a40" in woke and mt(40).get("mover") == BACK and "the event did not come" in mt(40)["woke"]["what"]
@@ -290,9 +290,9 @@ check("backstop: the day passes with no report: the item comes back to its post-
 check("backstop: …told in one line", [x[0] for x in sent("watch")] == ["a40"] and "the event did not come" in sent("watch")[0][2], sent())
 
 # ================================================================ /client/recycle-wanted
-item(50, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], recycle=True, recycle_at=now0, mover=BACK, subject="[home] waits for the next recycle")
+item(50, wait_kind="event", wait_event="recycle", ask_by=day(5), needs=[], recycle=True, recycle_at=now0, mover=BACK, subject="[home] waits for the next recycle")
 item(51, mover=BACK, recycle=True, recycle_at=now0, subject="[home] asks for a recycle")
-item(52, wait_kind="event", wait_event="recycle", ask_by=day(5), post_wake_mover=BACK, needs=[], mover=BACK, recycle_at=now0, subject="[home] only waits for the next recycle")
+item(52, wait_kind="event", wait_event="recycle", ask_by=day(5), needs=[], mover=BACK, recycle_at=now0, subject="[home] only waits for the next recycle")
 wanted = recycle_svc._recycle_wanted("testbox")
 check("recycle-wanted: an item that asks for a recycle is counted, an event wait that carries the recycle flag too asks the same, one that only waits for the next recycle (no flag) is not",
       "a51" in wanted and "a50" in wanted and "a52" not in wanted, wanted)
@@ -316,8 +316,8 @@ LIVE_NOW: set[str] = set()
 rlive_svc.merged_prs = counting_merged; rlive_svc.released_is_live = counting_live
 rlive_svc.released_live_base = lambda: ("b" * 40, "c" * 40)
 rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
-item(60, wait_kind="event", wait_event=f"pr_released {PR(16)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 16")
-item(61, wait_kind="event", wait_event=f"pr_released {PR(17)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 17 (not merged)")
+item(60, wait_kind="event", wait_event=f"pr_released {PR(16)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 16")
+item(61, wait_kind="event", wait_event=f"pr_released {PR(17)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 17 (not merged)")
 reset()
 check("poll: a pass with a thousand merges in last-good looks up only the PRs the waits name (one git log, one liveness check)", evwaits_svc.evwait_poll(now0) == [] and len(GIT_LOGS) == 1 and LIVE_CALLS == [MERGES[16][0]], (len(GIT_LOGS), LIVE_CALLS))
 n_logs, n_live = len(GIT_LOGS), len(LIVE_CALLS)
@@ -329,7 +329,7 @@ check("poll: …last-good moving makes it look again, and the PR that is now liv
       and len(GIT_LOGS) == n_logs + 1, (GIT_LOGS, mt(60)))
 rlive_svc.released_live_base = lambda: ("d" * 40, "c" * 40)
 GIT_LOGS.clear(); evwaits_svc.EVW_SEEN[0] = None
-item(62, wait_kind="event", wait_event=f"pr_released {PR(18)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for PR 18 (closed unmerged)")
+item(62, wait_kind="event", wait_event=f"pr_released {PR(18)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for PR 18 (closed unmerged)")
 DEAD[checks_svc.check_ref(PR(18))] = "its pull request was closed without being merged"
 reset()
 fired = evwaits_svc.evwait_poll(now0 + 240)
@@ -339,7 +339,7 @@ rlive_svc.released_is_live = lambda sha, good, head: ""
 rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
 
 # ================================================================ review fixes: the catch-up and the early read share _EVW_GH
-item(70, wait_kind="event", wait_event="pr_merged o/r#20", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] merge not yet")
+item(70, wait_kind="event", wait_event="pr_merged o/r#20", ask_by=day(5), mover=BACK, needs=[], subject="[home] merge not yet")
 evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear()
 inner = fake_pr_merged
 def pr_merged_with_a_racing_write(ref, now, gh_st):
@@ -363,8 +363,8 @@ rlive_svc.merged_prs = lambda head, limit=3000: {90: ("9" * 40, now0 - 60)}
 rlive_svc.released_is_live = lambda sha, good, head: ""
 rlive_svc.released_live_base = lambda: ("e" * 40, "c" * 40)
 rlive_svc.PROOF_GIT.clear(); evwaits_svc.EVW_SEEN[0] = None
-item(71, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] told by a step notice just now")
-item(72, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] told by a step notice long ago")
+item(71, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] told by a step notice just now")
+item(72, wait_kind="event", wait_event=f"pr_released {PR(90)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] told by a step notice long ago")
 proofs_svc.PROOF_TOLD_SID.clear()
 proofs_svc.PROOF_TOLD_SID["a71"] = (UB, time.time())
 proofs_svc.PROOF_TOLD_SID["a72"] = (UB, time.time() - 1000.0)
@@ -382,16 +382,16 @@ def spy_pr_merged(ref, now, gh_st):
 checks_svc.pr_merged = spy_pr_merged
 item(63, mover=BACK, subject="[home] will wait for a merge")
 evwaits_svc.EVW_GH.clear()
-out = _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#11", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#11", ask_by=day(5), mover=BACK)
 check("gate: the pull request is read on GitHub before the item lock is taken, and the gate under the lock makes no GitHub call", LOCKED_CALLS == [False] and mt(63).get("wait_event") == "pr_merged o/r#11", (LOCKED_CALLS, mt(63)))
 evwaits_svc.EVW_GH.clear(); LOCKED_CALLS.clear()
 item(63, mover=BACK, subject="[home] will wait for a merged PR")
-refused("gate: …and a PR the early read found merged is still refused", lambda: _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), post_wake_mover=BACK, mover="none"), "already merged")
+refused("gate: …and a PR the early read found merged is still refused", lambda: _update_svc._update("a63", sender=BACK, wait_kind="event", wait_event="pr_merged o/r#9", ask_by=day(5), mover=BACK), "already merged")
 check("gate: …the read for that refusal was also made outside the lock", LOCKED_CALLS == [False], LOCKED_CALLS)
 LOCKED_CALLS.clear(); evwaits_svc.EVW_GH.clear()
 try:
     g2, _o = create_svc.create_item(subject="[home] filed waiting on a merge", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing", goal="Done when it merged.",
-                                 wait_kind="event", wait_event="pr_merged o/r#12", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-3")
+                                 wait_kind="event", wait_event="pr_merged o/r#12", ask_by=day(4), mover=BACK, request_id="evw-create-3")
 except Exception as e:
     g2 = None
 check("gate: a create takes the same path (the early read is the tool's, ahead of its lock; create_item (service/create.py) itself reads the cache only)", g2 is not None and all(c is False for c in LOCKED_CALLS), (g2, LOCKED_CALLS))
@@ -399,16 +399,16 @@ checks_svc.pr_merged = fake_pr_merged
 
 # ================================================================ review fixes: a backstop must be after now; which events are live
 item(64, mover=BACK, subject="[home] will wait with a past backstop")
-refused("backstop: today's date has already begun (a day falls due at 00:00 in the instance timezone), so it is refused and the reply says why", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(0), post_wake_mover=BACK, mover="none"),
+refused("backstop: today's date has already begun (a day falls due at 00:00 in the instance timezone), so it is refused and the reply says why", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(0), mover=BACK),
         "is not after now", "00:00 of that day in the instance timezone")
-refused("backstop: …a wake in the past is refused too", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", wake=day(-2), post_wake_mover=BACK, mover="none"), "future")
-out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(1), post_wake_mover=BACK, mover="none")
+refused("backstop: …a wake in the past is refused too", lambda: _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", wake=day(-2), mover=BACK), "future")
+out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="recycle", ask_by=day(1), mover=BACK)
 check("backstop: tomorrow is accepted, and a recycle wait carries no 'nothing tells the server' line", mt(64).get("wait_kind") == "event" and "Nothing tells the server" not in out, out[-400:])
 refused("backstop: …moving the stored backstop into the past later is refused as well", lambda: _update_svc._update("a64", sender=BACK, ask_by=day(-1)), "is not after now")
-out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="job_run nightly", ask_by=day(3), post_wake_mover=BACK)
+out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event="job_run nightly", ask_by=day(3), mover=BACK)
 check("live: a wait on an event nothing reports yet (a job run) says so in the reply and names its backstop", "Nothing tells the server of this event yet" in out and day(3) in out, out[-500:])
 for ph in ("fleet_op many", "fleet_op provision", "fleet_op lane box-1"):
-    out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event=ph, ask_by=day(3), post_wake_mover=BACK)
+    out = _update_svc._update("a64", sender=BACK, wait_kind="event", wait_event=ph, ask_by=day(3), mover=BACK)
     check(f"live: a `{ph}` wait is live, so the reply carries no 'nothing tells the server' line", "Nothing tells the server" not in out and "the fleet tool reports the end of each op" in out, out[-500:])
 check("live: …the pure test says which are live (PR kinds, recycle, every fleet_op form) and which are not (job_run)",
       all(EW.live(P(x)) for x in ("pr_released 7", "pr_merged o/r#7", "recycle", "recycle box-1", "fleet_op recycle", "fleet_op reboot", "fleet_op any", "fleet_op many", "fleet_op provision", "fleet_op update box-1", "fleet_op lane")) and not EW.live(P("job_run nightly")), None)
@@ -426,13 +426,13 @@ check("tool text: create and update describe the wait_kind and wait_event parame
       all("time | anchor | item | relay | event" in _params[n]["wait_kind"].get("description", "") and EW.FORMS in _params[n]["wait_event"].get("description", "") for n in ("create", "update")), {n: _params[n].get("wait_kind") for n in ("create", "update")})
 
 # ================================================================ review fixes: an event is matched again under the lock; one notice per session
-item(65, wait_kind="event", wait_event="recycle testbox", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] re-matched under the lock", su=now0 + 60.0)
+item(65, wait_kind="event", wait_event="recycle testbox", ask_by=day(5), mover=BACK, needs=[], subject="[home] re-matched under the lock", su=now0 + 60.0)
 o = {}
 check("fire: an event that does not match the wait as it stands under the lock does not turn the item", watching_svc.watch_fire("a65", "event", now0 + 10, o, {"what": "x"}, ev=EW.event("recycle", machine="elsewhere")) is False and mt(65).get("wait_kind") == "event" and not o, (mt(65), o))
 check("fire: …a reported event older than the wait is not its arrival either", watching_svc.watch_fire("a65", "event", now0 + 10, o, {"what": "x"}, ev=EW.event("recycle", machine="testbox")) is False and mt(65).get("wait_kind") == "event", mt(65))
 check("fire: …the matching one turns it", watching_svc.watch_fire("a65", "event", now0 + 120, o, {"what": "x"}, ev=EW.event("recycle", machine="testbox")) is True and mt(65).get("mover") == BACK, mt(65))
-item(66, wait_kind="event", wait_event=f"pr_released {PR(80)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] told by the release already")
-item(67, wait_kind="event", wait_event=f"pr_released {PR(80)}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] not told by the release")
+item(66, wait_kind="event", wait_event=f"pr_released {PR(80)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] told by the release already")
+item(67, wait_kind="event", wait_event=f"pr_released {PR(80)}", ask_by=day(5), mover=BACK, needs=[], subject="[home] not told by the release")
 reset()
 fired = evwaits_svc.evwait_report(EW.event("pr_released", PR(80)), told={"a66": UB})
 check("one notice: an item the release's step notice already told this session about turns without a second message; another item for the same session is told", set(fired) == {"a66", "a67"}
@@ -466,7 +466,7 @@ class _Cl:
 CL9 = _Cl(); _cg9 = checks_svc.check_gh; checks_svc.check_gh = lambda repo: CL9
 try:
     checks_svc.pr_merged = REAL_PR_MERGED; _prs.reset(); evwaits_svc.EVW_GH.clear(); evwaits_svc.EVW_POLLED.clear(); reset()
-    item(80, wait_kind="event", wait_event="pr_merged o/r#19", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a merge")
+    item(80, wait_kind="event", wait_event="pr_merged o/r#19", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for a merge")
     wait_gates_svc._evwait_preread("event", "pr_merged o/r#19")                                  # the write gate's early read (a request thread)
     t9 = time.time()
     with _gbud.tag("done_check"): ok9 = checks_svc.check_eval("pr_merged o/r#19", t9, {})   # the done check asks for the same PR inside the pace
@@ -504,8 +504,8 @@ try:
     check("foreign: a configured repository's PR that is not live yet is a wait the server stores (the reply says what is watched)", "event wait: the server watches for" in wgate(f"pr_released {SIB}#8"), wgate(f"pr_released {SIB}#8"))
     refused("foreign: …one already live (its merge is in the checkout's HEAD) is refused, as for this repository", lambda: wgate(f"pr_released {SIB}#7"), "already merged and live")
     refused("foreign: …a repository the table does not list is refused, naming the listed one", lambda: wgate("pr_released other-owner/else#3"), "pr_released is release.sh's event", SIB)
-    item(90, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a sibling PR")
-    item(91, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] waits for a sibling PR already live")
+    item(90, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for a sibling PR")
+    item(91, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), mover=BACK, needs=[], subject="[home] waits for a sibling PR already live")
     DEAD.pop(checks_svc.check_ref(f"{SIB}#8"), None); reset()
     fired = evwaits_svc.evwait_poll(now0 + 400)
     check("foreign poll: the PR merged into HEAD turns its wait, the PR whose merge is on another branch does not", "a91" in fired and "a90" not in fired and mt(90).get("wait_kind") == "event" and mt(91).get("mover") == BACK, (fired, mt(91)))
@@ -554,12 +554,12 @@ try:
         item(92, mover=BACK, subject="[home] will wait for a release on another machine")
         UNDER_LOCK.clear()
         refused("remote write: update refuses a wait for a PR already live on the other machine",
-                lambda: _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, mover="none"), "already merged and live")
-        out = _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), post_wake_mover=BACK, mover="none")
+                lambda: _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), mover=BACK), "already merged and live")
+        out = _update_svc._update("a92", sender=BACK, wait_kind="event", wait_event=f"pr_released {SIB}#8", ask_by=day(5), mover=BACK)
         check("remote write: a wait for a PR the running checkout does not hold is stored", mt(92).get("wait_event") == f"pr_released {SIB}#8" and "event wait:" in out, (mt(92), out[-300:]))
         check("remote write: every read of the other machine's checkout was made without the item lock", bool(UNDER_LOCK) and not any(UNDER_LOCK), UNDER_LOCK)
         lines = [{"kind": "event", "event": f"pr_released {SIB}#{n}"} for n in (8, 9, 10)]
-        def listed(i): return update_tool.stackshot_update(f"a{i}", sender=BACK, waits=lines, wait_mode="all", until=day(5), wait_reason="the releases come only after that day", post_wake_mover=BACK, mover="none")
+        def listed(i): return update_tool.stackshot_update(f"a{i}", sender=BACK, waits=lines, wait_mode="all", until=day(5), wait_reason="the releases come only after that day", mover=BACK)
         item(96, mover=BACK, subject="[home] will wait for three releases"); rlive_svc.PROOF_GIT.clear(); ssh.clear(); UNDER_LOCK.clear()
         listed(96)
         check("remote write: an update whose list names the repository on three lines reads it once (its HEAD and its log), without the item lock", len(mt(96).get("waits") or []) == 3
@@ -569,12 +569,12 @@ try:
         check("remote write: ...and asks a machine that gives no answer once, the waits stored", len(mt(97).get("waits") or []) == 3 and len(ssh.calls()) == 1, (mt(97).get("waits"), ssh.calls()))
         ssh.clear(); rlive_svc.PROOF_GIT.clear(); UNDER_LOCK.clear()
         GOAL_DESC = "- Goal: the releases are live\n- It lives here\n- Done when done"
-        out = create_tool.stackshot_create(subject="[home] filed waiting on three releases", description=GOAL_DESC, project="projects/alpha", sender=BACK, mover="none", next="team-back: nothing", goal="Done when they are live.",
-                                           waits=lines, wait_mode="all", until=day(5), post_wake_mover=BACK, request_id="evw-remote-list")
+        out = create_tool.stackshot_create(subject="[home] filed waiting on three releases", description=GOAL_DESC, project="projects/alpha", sender=BACK, next="team-back: nothing", goal="Done when they are live.",
+                                           waits=lines, wait_mode="all", until=day(5), mover=BACK, request_id="evw-remote-list")
         check("remote write: a create whose list names the repository on three lines reads it once too", "created " in out and len(ssh.calls()) == 2 and bool(UNDER_LOCK) and not any(UNDER_LOCK), (out[:300], ssh.calls()))
         ssh.clear()
         refused("remote write: ...and a create waiting on a PR already live there is refused", lambda: create_tool.stackshot_create(subject="[home] filed waiting on a live release", description=GOAL_DESC, project="projects/alpha",
-                sender=BACK, mover="none", next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), post_wake_mover=BACK, request_id="evw-remote-live"), "already merged and live")
+                sender=BACK, mover=BACK, next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event=f"pr_released {SIB}#7", ask_by=day(5), request_id="evw-remote-live"), "already merged and live")
         item(98, mover=BACK, subject="[home] says it waits for a release there"); ssh.clear(); UNDER_LOCK.clear()
         real_gaps = wait_fixes_svc._we.item_gaps
         wait_fixes_svc._we.item_gaps = lambda *a, **k: [types.SimpleNamespace(token="stand-in", plan={"op": "event"}, pos=1, line="")]      # finding the gap in an item's words is the wait_end suite's matter
@@ -583,7 +583,7 @@ try:
         check("remote write: the filing pass's own wait write is refused for a PR already live there, from its read before the lock", fix["fixed"] is False and "already merged and live" in fix["why"]
               and bool(UNDER_LOCK) and not any(UNDER_LOCK) and not mt(98).get("wait_event"), (fix, ssh.calls()))
         for i, n in ((93, 7), (94, 8), (95, 8)):
-            item(i, wait_kind="event", wait_event=f"pr_released {SIB}#{n}", ask_by=day(5), post_wake_mover=BACK, needs=[], subject=f"[home] waits on the other machine, {i}")
+            item(i, wait_kind="event", wait_event=f"pr_released {SIB}#{n}", ask_by=day(5), mover=BACK, needs=[], subject=f"[home] waits on the other machine, {i}")
         reset(); ssh.clear(); UNDER_LOCK.clear()
         fired = evwaits_svc.evwait_poll(now0 + 600)
         heads = [c for c in ssh.calls() if c[-1].endswith("rev-parse --verify --quiet 'HEAD^{commit}'")]

@@ -131,7 +131,7 @@ item(30, mover=BACK, subject="[home] needs box-b (one)")
 item(31, mover=BACK, subject="[home] needs box-b and box-c (two)")
 item(32, mover=BACK, subject="[home] project-wide: its step names box-b", next="team-back: run the sync on host-b once it is back")
 item(33, mover=BACK, subject="[home] project-wide: no step names a machine", next="team-back: write the report")
-item(34, mover=BACK, subject="[home] has its own box_online wait")
+item(34, subject="[home] has its own box_online wait")
 item(35, mover=BACK, subject="[home] closed", status="completed")
 item(36, mover=_core_instance.OWNER, subject="[home] his step", next=f"{_core_instance.OWNER}: plug box-b in")
 item(37, mover=BACK, subject="[home] needs box-a, which stays online")
@@ -213,7 +213,7 @@ check("project-wide: tells the open items of the project whose open step names t
 
 # an item with its own box_online wait on the machine is told by the wait, not twice
 reset()
-item(34, mover=BACK, subject="[home] has its own box_online wait", wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, needs=[])
+item(34, subject="[home] has its own box_online wait", wait_kind="event", wait_event="box_online box-b", ask_by=day(5), mover=BACK, needs=[])
 anchors(remove=["machine:box-b"]); anchors(add=["machine:box-b"], items=["a34", "a30"])
 go_offline("host-b"); tick(); reset()
 checkin("host-b")
@@ -223,7 +223,7 @@ check("own wait: the box_online wait turns the item and tells its mover; the mac
       "a34" in fired and mt(34).get("mover") == BACK and told_gids.count("a34") == 1 and told_gids.count("a30") == 1 and not any("machine anchor" in x[2] and "a34" in x[0].split(",") for x in SENT), (fired, SENT))
 # a wait that is open on another machine only skips that machine
 reset()
-item(34, mover=BACK, subject="[home] has its own box_online wait on box-c", wait_kind="event", wait_event="box_online box-c", ask_by=day(5), post_wake_mover=BACK, needs=[])
+item(34, subject="[home] has its own box_online wait on box-c", wait_kind="event", wait_event="box_online box-c", ask_by=day(5), mover=BACK, needs=[])
 go_offline("host-b"); tick(); reset()
 checkin("host-b"); tick()
 check("own wait: a wait on another machine does not stop the notice for this one", any("a34" in x[0].split(",") and "machine anchor" in x[2] for x in notices()), SENT)
@@ -232,17 +232,17 @@ check("own wait: a wait on another machine does not stop the notice for this one
 reset()
 for i in (60, 61, 62, 63):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
-item(60, mover=BACK, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=_core_instance.OWNER, needs=[])
+item(60, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), mover=_core_instance.OWNER, needs=[])
 item(63, mover=_core_instance.OWNER, then=BACK, subject="[home] waits on box-d, his by the mover", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), needs=[])
-item(61, mover=BACK, then=BACK, subject="[home] waits on box-d, then the back agent", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=BACK, needs=[])
+item(61, then=BACK, subject="[home] waits on box-d, then the back agent", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), mover=BACK, needs=[])
 anchors(add=["machine:box-b"], items=["a60", "a61", "a63"])
 go_offline("host-b"); tick(); reset()
 checkin("host-b"); tick()
 told_gids = [g for x in notices() for g in x[0].split(",")]
 check("waiting item: one whose post-wake mover is the owner gets no notice, though `then` and its stored mover are sessions; the same item with a session after the wait still does",
       "a60" not in told_gids and "a61" in told_gids, (SENT, mt(60)))
-check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("post_wake_mover") and mt(60).get("wait_kind") == "event", mt(60))
-check("waiting item: one the owner picks up by its mover (no post_wake_mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == _core_instance.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
+check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("mover") and mt(60).get("wait_kind") == "event", mt(60))
+check("waiting item: one the owner picks up by its mover (by its mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == _core_instance.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
 
 # an item that is waiting (on a wake, another item, an outside party or an event) has no step that can go ahead: for a FRONT agent its machine notice is news. It goes to the front gate as a progress notice, one
 # message per item (so an item's board line carries only its own line, and the line is short enough to keep its link), while an item that is its mover's to do now keeps the notice that asks it to go on.
@@ -289,7 +289,7 @@ check("words: the news notice is one item, within the cap whatever the subject, 
 
 # a box_online wait on machine A that turns an item and an anchor on machine B for it: A is told by the wait only, B is still told
 reset()
-item(62, mover=BACK, subject="[home] waits on box-c, anchored on box-b and box-c", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-c", ask_by=day(5), post_wake_mover=BACK, needs=[])
+item(62, subject="[home] waits on box-c, anchored on box-b and box-c", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-c", ask_by=day(5), mover=BACK, needs=[])
 anchors(add=["machine:box-b", "machine:box-c"], items=["a62"])
 go_offline("host-b"); go_offline("host-c"); tick(); reset()
 checkin("host-b"); checkin("host-c")
@@ -365,7 +365,7 @@ out = _update_svc._update("a41", sender=BACK, done=[2])
 check("note: a step marked done is no longer read (only the open ones are)", "(note: an open step of" not in out, out[-400:])
 # a box_online wait on that machine is the other way to be told
 item(42, mover=BACK, subject="[home] doing, will wait for box-b", next="team-back: run it on box-b")
-out = _update_svc._update("a42", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), post_wake_mover=BACK, mover="none")
+out = _update_svc._update("a42", sender=BACK, wait_kind="event", wait_event="box_online box-b", ask_by=day(5), mover=BACK)
 out2 = _update_svc._update("a42", sender=BACK, subject="[home] doing, will wait for box-b (reworded)")
 check("note: an item with a box_online wait on the machine needs no anchor, and gets no note", "(note: an open step of" not in out2, out2[-400:])
 out = _update_svc._update("a40", sender=BACK, next="team-back: run it on box-d")

@@ -1,14 +1,14 @@
 """Scenario test: the agent a waiting item was handed to stays its live mover when the wait or the hold ends — fixture data, no live store, no network, no server socket.
 
-A waiting item stores who picks it up when the wait ends as `mover` (an old item may still store it under the old key `post_wake_mover`). A wait or a hold never changes who moves the item: only a `mover` write or a hand-over
-does. So `clear_wait` and `clear_hold` leave the agent the item was handed to as the mover, never the default mover (the project's builder), whichever key stored it. Covered:
+A waiting item stores who picks it up when the wait ends as `mover`. A wait or a hold never changes who moves the item: only a `mover` write or a hand-over
+does. So `clear_wait` and `clear_hold` leave the agent the item was handed to as the mover, never the default mover (the project's builder),  Covered:
 
   A  hand-over       a decision's hand-over of a hold with a wake, a parked item and a wait on a date alone, then clear_hold / clear_wait, with the guards off and on
   B  wait-end fix    the filing pass's fix of an after, event and anchor wait stores the picker as `mover`; clear_wait leaves that agent as the mover
   C  snapshot        remember and restore_wait hold and put back the picker as `mover` (an old snapshot too); the server's own answers on a snapshot
-  D  old key         an item that still stores the old key: clear_wait and clear_hold keep its agent as the mover; an owner picker, a `mover=` in the same call, clear_mover; reads equal
+  D  stored picker   an item whose picker is its `mover`: clear_wait and clear_hold keep its agent as the mover; an owner picker, a `mover=` in the same call, clear_mover
   E  no fallback     none of the above makes the default mover the mover or tells it
-  F  every shape     an old plain hold, a wait that goes on beside external, a hold beside a time wait, the old key beside another mover or beside he: the picker read before the write is the mover after it
+  F  every shape     an old plain hold, a wait that goes on beside external, a hold beside a time wait, the picker read before the write is the mover after it
   F+ same call       a hand-off by needs or agent in the same call decides who moves, so no picker is kept; clear_wait beside clear_hold on a relay wait with no flag keeps it
 
     tests/run-suite picker_stored_as_mover        → exit 0 / 1"""
@@ -91,18 +91,12 @@ ZONE_HOURS = 4
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_HOURS * 3600))
 BACK, HELP, FRONT = "zed-back", "zed-helper", "zed-front"
 OWN = model.owner_display()
-LEG = model.LEGACY_PICKER_KEY
+LEG = "post_wake_mover"      # the retired key: stored data may still carry it, and nothing reads or writes it
 FUT = day(5)
 D = lambda **m: model.derive({"status": "open", "metadata": {"project": "projects/zedwork", **m}}, now0)
 def its(**meta): return {"status": "open", "metadata": {"project": "projects/zedwork", **meta}}
 def guards(on): CFG["guards"] = on
-def old_form(meta):
-    """the item as main stored it: the picker under the old key (a `mover` that was popped there is not carried over)."""
-    m = dict(meta)
-    if "mover" in m: m[LEG] = m.pop("mover")
-    return m
 def stores_mover(meta, who): return meta.get("mover") == who and LEG not in meta
-def stores_old(meta, who): return meta.get(LEG) == who and "mover" not in meta
 
 # ================================================================ 1. the wait-end fix (the filing pass)
 ROLES = {BACK: {"role": "background"}, HELP: {"role": "background"}, FRONT: {"role": "front"}}
@@ -190,7 +184,7 @@ clear_g()
 
 # ================================================================ C. remember and restore_wait: the snapshot holds the picker as `mover`, the round trip puts it back
 RW = {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), "needs": [BACK]}
-for label, meta in (("stored as mover", {**RW, "mover": HELP}), ("stored under the old key", {**RW, LEG: HELP}), ("both stored", {**RW, LEG: HELP, "mover": BACK})):
+for label, meta in (("stored as mover", {**RW, "mover": HELP}),):
     snap = remembered(meta)["watch"]["was"]
     check(f"C remember, {label}: the snapshot holds `mover`={HELP} and no old key", stores_mover(snap, HELP), snap)
     now = {"project": "projects/zedwork", "needs": ["decision"], "ask": "x", "watch": remembered(meta)["watch"]}
@@ -201,12 +195,8 @@ for label, meta in (("stored as mover", {**RW, "mover": HELP}), ("stored under t
         m_, mod_, sent = cleared({**back, "needs": [BACK]}, clear_wait=True)
         never_default(f"C round trip, {label}, clear_wait (guards {'on' if g_ else 'off'})", m_, mod_, HELP)
     guards(False)
-old_snap = {"project": "projects/zedwork", "needs": ["decision"], "ask": "x", "watch": {"asked": "relay", "was": {**{k: v for k, v in RW.items() if k != "ask_by"}, "ask_by": day(-1), LEG: HELP}, "at": now0}}
-check("C an old snapshot (the old key) is put back as `mover`", stores_mover(restored(old_snap), HELP), restored(old_snap))
-check("C was_picker reads the old key, `mover` and both, as before", wk.was_picker({LEG: HELP}) == wk.was_picker({"mover": HELP}) == HELP and wk.was_picker({LEG: BACK, "mover": HELP}) == BACK, None)
-check("C a snapshot's word none under the old key stays as stored (a session of that name there)", remembered({**RW, LEG: "none"})["watch"]["was"].get(LEG) == "none" and "mover" not in remembered({**RW, LEG: "none"})["watch"]["was"], None)
 # the server's own end of a watcher ask: "not yet" puts the wait back, "arrived" hands the item to the picker
-for n, was in ((20, {LEG: HELP}), (21, {"mover": HELP})):
+for n, was in ((21, {"mover": HELP}),):
     item(n, subject=f"[zed] was {n}", needs=["decision"], ask="Did it arrive?", options=[{"label": "Arrived"}], watch={"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "the reply", "ask_by": day(-1), **was}, "at": now0})
     m_ = dict(mt(n)); r = wait_gates_svc._watch_answer(rd(n), m_, {"do": "wait", "text": "", "date": day(9)}, now0)
     check(f"C 'not yet' on a snapshot of {sorted(was)[0]}: the wait is back with the picker stored as `mover`", stores_mover(m_, HELP) and m_.get("ask_by") == day(9), (r, m_))
@@ -214,7 +204,7 @@ for n, was in ((20, {LEG: HELP}), (21, {"mover": HELP})):
     m_ = dict(mt(n + 10)); r = wait_gates_svc._watch_answer(rd(n + 10), m_, {"do": "arrived", "text": "", "date": ""}, now0)
     check(f"C 'arrived' on a snapshot of {sorted(was)[0]}: the agent it names has the item", m_.get("mover") == HELP and m_.get("needs") == [HELP], (r, m_))
 
-# ================================================================ D. an old item that still stores the picker under the old key
+# ================================================================ D. an item whose picker is its `mover`
 OLD_WAITS = (("a relay wait", {"wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT}, "clear_wait"),
              ("an anchor wait", {"wait_kind": "anchor", "wait_anchor": "https://github.com/acme/widgets/issues/5", "wait_event": "the reply", "ask_by": FUT}, "clear_wait"),
              ("an event wait", {"wait_kind": "event", "wait_event": "pr_merged other/repo#7", "until": FUT}, "clear_wait"),
@@ -226,31 +216,23 @@ for g_ in (False, True):
     guards(g_)
     tag = f"(guards {'on' if g_ else 'off'})"
     for label, wait, clear in OLD_WAITS:
-        meta = {**BASE, **wait, LEG: HELP}
+        meta = {**BASE, **wait, "mover": HELP}
         m_, mod_, sent = cleared(meta, **{clear: True})
         never_default(f"D an old item, {label}, {clear} {tag}", m_, mod_, HELP)
         check(f"D an old item, {label}, {clear} {tag}: nothing of the wait is left stored", not any(k in m_ for k in (*model.WAIT_GROUP, "hold", "wake")), m_)
-        m2, mod2, _ = cleared({**meta, "mover": HELP}, **{clear: True})
-        never_default(f"D an item storing both keys, {label}, {clear} {tag}", m2, mod2, HELP)
 guards(False)
 # what a clear does not keep
 WAITS_ = {"wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT}
-m_, mod_, sent = cleared({**BASE, **WAITS_, LEG: OWN}, clear_wait=True)
+m_, mod_, sent = cleared({**BASE, **WAITS_, "mover": OWN}, clear_wait=True)
 check("D an old key that names he: he picked the item up when the wait ended, so no mover is kept", "mover" not in m_ and LEG not in m_ and "wait_kind" not in m_, m_)
-m_, mod_, sent = cleared({**BASE, **WAITS_, LEG: HELP}, clear_wait=True, mover=BACK)
+m_, mod_, sent = cleared({**BASE, **WAITS_, "mover": HELP}, clear_wait=True, mover=BACK)
 check("D a clear that names a mover: the mover the write names is the one (no pick-up is kept over it)", m_.get("mover") == BACK and LEG not in m_, m_)
-m_, mod_, sent = cleared({**BASE, **WAITS_, LEG: HELP}, clear_wait=True, clear_mover=True)
+m_, mod_, sent = cleared({**BASE, **WAITS_, "mover": HELP}, clear_wait=True, clear_mover=True)
 check("D a clear beside clear_mover: nobody is kept", "mover" not in m_ and LEG not in m_ and "wait_kind" not in m_, m_)
-m_, mod_, sent = cleared({**BASE, **WAITS_, LEG: HELP}, ask_by=day(8))
-check("D a write that leaves the wait standing keeps the old key as it was (no migration of stored items here)", m_.get(LEG) == HELP and "mover" not in m_, m_)
-# the reads of an item that still stores the old key are as before: the same picker, the same session told
-for label, wait in (("a relay wait", OLD_WAITS[0][1]), ("a time wait", OLD_WAITS[3][1]), ("a wait on a date alone", OLD_WAITS[4][1])):
-    a_, b_ = D(**{**BASE, **wait, LEG: HELP}), D(**{**BASE, **wait, "mover": HELP})
-    check(f"D reads: {label} stored under the old key reads as the one stored as `mover` (the picker {HELP}, the same state)", a_.state == b_.state == "waiting" and a_.wait.mover == b_.wait.mover == HELP, (a_.wait, b_.wait))
 
 # ================================================================ E. no fallback: a clear that ends a wait never hands the item to the project's builder
 for label, meta, clear in (("a hand-over (a hold with a wake)", hand({**BASE, "mover": OWN, "then": HELP, "hold": True, "wake": FUT}, OWN, HELP, waiting=True), "clear_hold"),
-                           ("an old item (a relay wait)", {**BASE, **WAITS_, LEG: HELP}, "clear_wait")):
+                           ("an old item (a relay wait)", {**BASE, **WAITS_, "mover": HELP}, "clear_wait")):
     m_, mod_, sent = cleared(meta, **{clear: True})
     check(f"E {label}, {clear}: the default mover ({BACK}) is not made the mover, and is told nothing it did not have", m_.get("mover") != BACK and waiting_who(mod_) != BACK and BACK not in sent, (m_, sent))
 
@@ -259,41 +241,26 @@ for g_ in (False, True):
     guards(g_)
     tag = f"(guards {'on' if g_ else 'off'})"
     # F1 an old plain hold (no wait_kind) with the old key: clear_hold alone releases it, and the agent stays the mover with no old key left on the alive item
-    m_, mod_, sent = cleared({**BASE, "hold": True, "wake": FUT, LEG: HELP}, clear_hold=True)
+    m_, mod_, sent = cleared({**BASE, "hold": True, "wake": FUT, "mover": HELP}, clear_hold=True)
     never_default(f"F1 an old plain hold, the old key, clear_hold {tag}", m_, mod_, HELP)
     check(f"F1 …the hold and its wake are gone {tag}", "hold" not in m_ and "wake" not in m_, m_)
     # F2 external still in needs: the wait goes on, and so does the picker (as mover); with the guards on, the model refuses clear_wait while external stays (it would leave a wait with no input), so only the guards-off write exists
     for label, wait in ((("a date alone", {"until": FUT}), ("a relay wait", {"wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT})) if not g_ else ()):
-        m_, mod_, sent = cleared({**BASE, "needs": [BACK, "external"], **wait, LEG: HELP}, clear_wait=True)
+        m_, mod_, sent = cleared({**BASE, "needs": [BACK, "external"], **wait, "mover": HELP}, clear_wait=True)
         check(f"F2 external still in needs, {label}, the old key, clear_wait: {HELP} stays as mover, the old key is gone {tag}", stores_mover(m_, HELP) and not any(k in m_ for k in model.WAIT_GROUP), m_)
         check(f"F2 …the item reads as picked up by {HELP}, never by the default mover {tag}", waiting_who(mod_) == HELP and BACK not in sent, (mod_.state, mod_.mover, waiting_who(mod_), sent))
     # F3 a hold with a time wait and the old key: clear_wait ends the wait, the hold stays, the picker stays as mover
-    m_, mod_, sent = cleared({**BASE, "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, LEG: HELP}, clear_wait=True)
+    m_, mod_, sent = cleared({**BASE, "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, "mover": HELP}, clear_wait=True)
     check(f"F3 a hold beside a time wait, the old key, clear_wait: the hold stays, {HELP} stays as mover, the old key is gone {tag}", m_.get("hold") and "wait_kind" not in m_ and stores_mover(m_, HELP), m_)
     check(f"F3 …and the item reads as picked up by {HELP} {tag}", waiting_who(mod_) == HELP and BACK not in sent, (mod_.state, mod_.mover, waiting_who(mod_), sent))
-    # F4 the old key beside a different agent mover: the reader answers the old key first, so that picker is the one kept
-    for clear, wait in (("clear_wait", {"wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT}), ("clear_hold", {"wait_kind": "time", "hold": True, "wake": FUT})):
-        m_, mod_, sent = cleared({**BASE, **wait, LEG: HELP, "mover": BACK}, **{clear: True})
-        check(f"F4 the old key {HELP} beside the mover {BACK}, {clear}: the picker read first ({HELP}) is the mover, the old key is gone {tag}", stores_mover(m_, HELP), m_)
-        check(f"F4 …and the item reads as moved by {HELP} {tag}", waiting_who(mod_) == HELP, (mod_.state, mod_.mover, waiting_who(mod_)))
-    # F5 the old key beside he as the stored mover: clear_hold leaves no mover that is he on an item that is alive
-    m_, mod_, sent = cleared({**BASE, "wait_kind": "time", "hold": True, "wake": FUT, LEG: HELP, "mover": OWN}, clear_hold=True)
-    check(f"F5 the old key beside he as the mover, clear_hold: {HELP} is the mover, nothing of his is left on the alive item {tag}", stores_mover(m_, HELP) and mod_.state == "alive" and mod_.mover == HELP and not mod_.conflicts, (m_, mod_.state, mod_.mover, mod_.conflicts))
     # F6 a hand-off in the same call decides who moves: needs or agent names another session, so the picker is not kept (the new holder moves it, as on an item with no picker)
     for how, kw in (("needs=[back]", dict(needs=[BACK])), ("agent=back", dict(agent=BACK))):
-        for shape, st in (("the old key", {LEG: HELP}), ("a stored mover", {"mover": HELP}), ("both", {LEG: HELP, "mover": HELP})):
+        for shape, st in (("a stored mover", {"mover": HELP}),):
             m_, mod_, sent = cleared({**BASE, "needs": [HELP], "wait_kind": "time", "hold": True, "wake": FUT, **st}, clear_hold=True, **kw)
             check(f"F6 clear_hold beside {how}, picker as {shape}: {BACK} moves it, no {HELP} mover is kept {tag}", m_.get("needs") == [BACK] and m_.get("mover") != HELP and mod_.state == "alive" and mod_.mover == BACK, (m_, mod_.state, mod_.mover))
     # F7 clear_wait with clear_hold on a relay wait that holds no flag: the wait ends, so the picker is kept (only a clear_hold alone changes nothing there)
-    m_, mod_, sent = cleared({**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, LEG: HELP}, clear_wait=True, clear_hold=True)
+    m_, mod_, sent = cleared({**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, "mover": HELP}, clear_wait=True, clear_hold=True)
     check(f"F7 clear_wait and clear_hold on a relay wait with no hold flag: {HELP} is kept as mover, the old key is gone {tag}", stores_mover(m_, HELP) and "wait_kind" not in m_, m_)
-    m_, mod_, sent = cleared({**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, LEG: HELP}, clear_hold=True)
-    check(f"F7 …a clear_hold alone on it changes nothing: the wait and the old key stay {tag}", m_.get("wait_kind") == "relay" and m_.get(LEG) == HELP and "mover" not in m_, m_)
-    # F8 an item that waits on his answer (decision in needs): clear_hold does not hand it to the old key's agent; he stays the mover and nobody is told (the skip guard in the update path)
-    m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, LEG: HELP}, clear_hold=True)
-    check(f"F8 decision in needs, the old key {HELP}, clear_hold: no picker is kept, {HELP} is not made the mover {tag}", m_.get("mover") != HELP, m_)
-    check(f"F8 …he stays the mover of the item {tag}", model.is_owner(model.norm_who(mod_.mover)), (mod_.state, mod_.mover, m_))
-    check(f"F8 …and no notice goes out {tag}", not sent, sent)
     # F8 again with the picker stored as `mover` (the form every item stores now): the same guard has to hold, or clear_hold hands the item from him to the agent
     if not g_:      # with the guards on, a decision beside a hold is refused whatever the write is, so the stored shape is only reachable (an older item) with them off
         m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, "mover": HELP}, clear_hold=True)
@@ -301,11 +268,20 @@ for g_ in (False, True):
         check(f"F8 …he stays the mover of the item, and no notice goes out {tag}", model.is_owner(model.norm_who(mod_.mover)) and not sent, (mod_.state, mod_.mover, m_, sent))
         m_, mod_, sent = cleared({**BASE, "needs": ["decision"], "hold": True, "wake": FUT, "wait_kind": "time", "wait_basis": {"text": f"the soak ends {FUT}", "wake": FUT, "by": BACK, "at": now0}, "mover": HELP}, clear_wait=True)
         check(f"F8 …clear_wait too {tag}", m_.get("mover") != HELP and model.is_owner(model.norm_who(mod_.mover)) and not sent, (mod_.state, mod_.mover, m_, sent))
-    # F9 an alive item that stores a stale old key (it waits on nothing): clear_wait and clear_hold keep no picker, the mover it has stays (keep_picker acts only on an item that waited before the write)
-    for clear in ("clear_wait", "clear_hold"):
-        m_, mod_, sent = cleared({**BASE, "mover": BACK, LEG: HELP}, **{clear: True})
-        check(f"F9 an alive item with a stale old key {HELP}, {clear}: the mover {BACK} stays, {HELP} is not made the mover {tag}", m_.get("mover") == BACK and mod_.mover == BACK, (m_, mod_.state, mod_.mover, sent))
 guards(False)
+
+# ================================================================ G. the retired key is nobody's picker
+legacy = {**BASE, "wait_kind": "relay", "wait_event": "the reply", "ask_by": FUT, LEG: HELP}
+check("G a stored post_wake_mover is not read: the waiting item's picker is its owner default, not that agent", D(**legacy).wait.mover != HELP and not D(**legacy).wait.post_explicit, D(**legacy).wait)
+check("G ...and it is not written: a clear_wait on it keeps no picker and stores no new copy", "mover" not in cleared(legacy, clear_wait=True)[0], cleared(legacy, clear_wait=True)[0])
+check("G the write helpers no longer name it: a snapshot of the wait carries `mover` only", LEG not in remembered({**RW, "mover": HELP})["watch"]["was"] and wk.was_picker({LEG: HELP}) == "", None)
+try:
+    upd(1, post_wake_mover=HELP); refused_ = False
+except TypeError:
+    refused_ = True
+except Exception as e:      # noqa: BLE001
+    refused_ = "unexpected keyword" in str(e)
+check("G the update tool takes no post_wake_mover parameter any more", refused_, None)
 
 clear_g()
 

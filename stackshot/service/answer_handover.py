@@ -160,9 +160,8 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
             if "external" in _needs_kinds(meta):
                 meta.pop("then", None)
             elif _item_read._after_open(meta) or (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
-                # The picker of the wait is stored as `mover` (who picks the item up when the wait ends), never the old key; a stored old key is dropped, since `mover` wins it. A later `clear_hold`,
+                # The picker of the wait is stored as `mover` (who picks the item up when the wait ends), never another key. A later `clear_hold`,
                 # `clear_wait` or `clear_wake` ends the wait and leaves this agent as the live mover: a wait never changes who moves the item.
-                meta.pop(_model.LEGACY_PICKER_KEY, None)
                 meta["mover"] = then
                 if not _item_read._after_open(meta):      # a time wait is the watcher's: stamp it as an update does (an `after` link is released by the last prerequisite's close)
                     if not _wt.stored_until(meta):

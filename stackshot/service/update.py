@@ -254,7 +254,7 @@ def _wait_is_bare(m: dict[str, Any]) -> bool:
     return _uw.is_bare(m)
 
 
-_STATE_GIVEN = frozenset({"needs", "clear_needs", "agent", "status", "mover", "then", "post_wake_mover", "clear_mover", "clear_then", "wake", "clear_wake", "hold", "clear_hold", "ask_by",
+_STATE_GIVEN = frozenset({"needs", "clear_needs", "agent", "status", "mover", "then", "clear_mover", "clear_then", "wake", "clear_wake", "hold", "clear_hold", "ask_by",
                           "wait_kind", "wait_anchor", "wait_event", "after", "clear_after", "waits", "wait_mode", "clear_wait", "wait_basis", "clear_wait_basis", "step", "supplies",
                           "recycle", "clear_recycle", "clear_ask", "clear_options", "done", "dropped", "reword", "work", "clear_next"})
 
@@ -280,20 +280,17 @@ def _old_holder_goes(meta: dict[str, Any]) -> bool:
     return bool(stored_mv and named_now and not _model.is_owner(stored_mv) and not any(x == stored_mv or _anc.canonical(x, nm_mv) == _anc.canonical(stored_mv, nm_mv) or h.render_same_ref(x, stored_mv) for x in named_now))
 
 
-def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: Any, writer: str, failed: list[bool] | None = None, picker_alias: bool = False) -> bool:
+def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: Any, writer: str, failed: list[bool] | None = None) -> bool:
     """Does this write hand the item on to a session: a hand-off line in next, or a change of the DERIVED mover (what the hand-off record reads, handoff.detect): a mover argument, needs naming a
     session, a reopen with one. The date a bare wait carries is left out of both readings (an item with it reads as waiting and has no mover), so the question is the write's own: with the date
     it gives (or already held) set aside, did the mover change to a session other than the writer? A hand-off to the owner is none here (his step with a date is a park of its own). A reading that fails counts as a hand-off (fail closed), and says so in `failed` when the caller passes a list."""
     if handed:
         return True
     try:
-        def undated(it: dict[str, Any], keep_mover_of: dict[str, Any] | None = None) -> dict[str, Any]:
+        def undated(it: dict[str, Any]) -> dict[str, Any]:
             m = it.get("metadata") or {}
-            if keep_mover_of is not None:      # the old parameter post_wake_mover stored as `mover` names the picker of a wait, never a hand-over: the mover is read as it was before the write
-                m = {k: v for k, v in m.items() if k != "mover"} | ({"mover": keep_mover_of["mover"]} if keep_mover_of.get("mover") else {})
-                it = {**it, "metadata": m}
             return {**it, "gid": gid, "metadata": {k: v for k, v in m.items() if k not in ("wake", "until", "ask_by")}} if _wait_is_bare(m) else {**it, "gid": gid}
-        to = _ho.detect(undated(was), undated(now_item, (was.get("metadata") or {}) if picker_alias else None), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", _handoff.ho_derive, _handoff.ho_same)
+        to = _ho.detect(undated(was), undated(now_item), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", _handoff.ho_derive, _handoff.ho_same)
         return bool(to) and not _model.is_owner(to)
     except Exception as e:  # noqa: BLE001  — the reading is an extra: a failure fails closed, the date stays the hand-off's backstop and the item stays active (a park that hides a hand-off costs more than a date left as a wake)
         print(f"handoff: {gid} backstop not judged: {e.__class__.__name__}: {e}; the date stays a backstop and the item stays active", file=sys.stderr, flush=True)
@@ -757,7 +754,6 @@ def update_unlocked(
     wait_anchor: str = "",
     wait_event: str = "",
     ask_by: str = "",
-    post_wake_mover: str = "",
     clear_goal: bool = False,
     clear_mover: bool = False,
     clear_then: bool = False,
@@ -914,7 +910,7 @@ def update_unlocked(
             if meta.get("wake") and len(str(meta["wake"])) > 10:
                 meta["wake"] = str(meta["wake"])[:10]
     model_set, model_drop = fc.call(_gates.gate_model_args, {"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
-                                                  "ask_by": ask_by, "post_wake_mover": post_wake_mover},
+                                                  "ask_by": ask_by},
                                     {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait}, item_was.get("metadata") or {}, default=({}, set()))   # a bad value is refused before anything is written
     wait_args_bad = fc.count > n_wait_args      # the wait's own arguments (the waits list, wait_kind, ask_by, the mover) are refused: the park's reason, which reads what they would have stored, is not judged
     model_drop |= list_drop
@@ -1374,7 +1370,7 @@ def update_unlocked(
         if meta.pop("hold", None) or (was_until and _uw.kind_of(meta) in ("", "time")):      # a hold, or a wait on the date alone (stored as until, with no hold of its own to drop)
             meta.pop("wake", None); meta.pop("until", None); h.cap_ok_drop(meta, "wake")
             if time_kind or (was_until and _uw.kind_of(meta) in ("", "time")):      # the time wait the hold stood on (a park with a then stores one) goes with it: wait_kind, the old picker key and the watcher's stamps
-                for k in (*_model.WAIT_GROUP, _model.LEGACY_PICKER_KEY, "chases", "watch"):
+                for k in (*_model.WAIT_GROUP, "chases", "watch"):
                     meta.pop(k, None)
         meta.pop("hold_set", None)
     if item.get("status") == "completed":   # completed: nothing is held or due any more
@@ -1507,26 +1503,10 @@ def update_unlocked(
         meta.pop("draft", None)
     elif draft_set:
         meta["draft"] = draft_set
-    alias_note = ""
-    alias_picker = False      # the `mover` this write sets came from post_wake_mover: it names who picks the item up when its wait ends, so it is no hand-over
-    pw_given = post_wake_mover.strip()
-    if pw_given and item.get("status") == "open":      # post_wake_mover is the old name of mover (model.fold_picker_alias): the value is the picker of a wait, else dropped with a note
-        trial = dict(meta)      # the item as this write leaves it, without the alias: whether it waits is judged by the same readings the write itself uses below
-        h.model_apply(trial, "open", {k: v for k, v in model_set.items() if k != _model.LEGACY_PICKER_KEY}, {k for k in model_drop if k != _model.LEGACY_PICKER_KEY})
-        if (needs_set or agent.strip()) and "mover" not in model_set and "mover" not in model_drop and _old_holder_goes(trial):
-            trial.pop("mover", None)
-        if "wait_kind" in model_drop and was_until and not (wake or hold):      # clear_wait drops the stored until and the working fields it stood as (below)
-            for k_ in _uw.LEGACY_FIELDS:
-                trial.pop(k_, None)
-        waits_after = _model.waits_stored(trial) or bool(until_wait) or bool(was_until and (trial.get("wake") or trial.get("ask_by")))
-        if waits_after and not _model.waits_stored(trial) and _uw.date_of(trial) and _wait_is_bare(trial) and _hands_on(gid, item_was, {**item, "metadata": trial}, handed, sender.strip() or debtor or ""):
-            waits_after = False      # a bare date beside a hand-off in this write is its backstop, and the item stays alive (the judgement of the backstop below)
-        alias_note = _model.fold_picker_alias(model_set, model_drop, "none" if pw_given.lower() in h.ask_none else _model.norm_who(pw_given), waits_after, _gates.post_wake_alias_until())
-        alias_picker = "is mover now" in alias_note and "mover" in model_set
     if (needs_set or agent.strip()) and "mover" not in model_set and "mover" not in model_drop and _old_holder_goes(meta):    # a hand-off by needs moves the item: a stored mover that is not among the sessions now named is the old holder, so it goes
         meta.pop("mover", None)
     needs_replaced: list[str] = []      # the session this write put into `needs` in place of the mover it came from: it hears the hand-off notice, not a second "now needs you"
-    if "mover" in model_set and not alias_picker and not (needs_set or agent.strip() or clear_needs):      # a hand-over by `mover=` alone: the session `needs` names for the mover it came from is replaced by the new one, so a hand-back leaves no stale entry (a write that sets `needs` itself is taken as given)
+    if "mover" in model_set and not (needs_set or agent.strip() or clear_needs):      # a hand-over by `mover=` alone: the session `needs` names for the mover it came from is replaced by the new one, so a hand-back leaves no stale entry (a write that sets `needs` itself is taken as given)
         prev_mv, new_mv = _model.norm_who(meta.get("mover")), _model.norm_who(model_set.get("mover"))
         nm_now = _anc.names()
         if prev_mv and new_mv and not _model.is_owner(prev_mv) and not _model.is_owner(new_mv) and _anc.canonical(prev_mv, nm_now) != _anc.canonical(new_mv, nm_now):
@@ -1535,21 +1515,18 @@ def update_unlocked(
             if any(is_prev(x) for x in held):
                 _needs_store(meta, _canon_needs([new_mv if is_prev(x) else x for x in held], nm_now))
                 needs_replaced.append(new_mv)
-    picker_waited = was_until or _model.waits_stored(item_was.get("metadata") or {})      # the item waited before this write: only then does the old pick-up stand for keep_picker (an alive item's mover is its live mover, a stale old key never beats it)
+    picker_waited = was_until or _model.waits_stored(item_was.get("metadata") or {})      # the item waited before this write: only then does the owner's pick-up go with a clear_wait (an alive item's mover is its live mover)
     h.model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
-    _model.settle_picker_keys(meta, model_set, model_drop, picker_waited,
-                              _model.waits_stored(meta) or bool(was_until and (meta.get("wake") or meta.get("ask_by"))), _anc.same_session)      # the one save rule (a stored until is unfolded into a wake for this write): a new mover, clear_mover and clear_wait never leave the old key or his pick-up standing
+    _model.settle_picker_keys(meta, model_set, model_drop, picker_waited)      # the one save rule: a clear_wait never leaves his pick-up standing as the mover
     if item.get("status") == "open" and picker_waited and (clear_wait or clear_hold) and not (relay_clear_hold and not clear_wait) and not (needs_set or clear_needs or agent.strip()):
-        if not any(x.lower() == "decision" or _model.is_owner(x) for x in _needs_of(meta)):
-            _model.keep_picker(meta, _model.stored_picker(item_was.get("metadata") or {}), model_set, model_drop)      # clear_wait and clear_hold end the wait, never the hand-over: the picker the item read as before the write stays the mover, whichever key stored it
-        elif "mover" not in model_set and "mover" not in model_drop and not _model.is_owner(_model.norm_who(meta.get("mover"))):
+        if any(x.lower() == "decision" or _model.is_owner(x) for x in _needs_of(meta)) and "mover" not in model_set and "mover" not in model_drop and not _model.is_owner(_model.norm_who(meta.get("mover"))):
             meta.pop("mover", None)      # an item that waits on his answer is his move, whoever picked it up: the agent stored as the picker goes with the wait, so it is no second mover beside him
     if "wait_kind" in model_drop:
         h.wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
         if was_until and not (wake or hold):
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
-    wait_note = alias_note
+    wait_note = ""
     if list_plan is not None:
         wait_note += list_plan.note + _list_note(list_plan, meta, item.get("status") == "open")
     elif _wlw.clearing(waits) and not _wl.stored(item_was.get("metadata") or {}):
@@ -1759,7 +1736,7 @@ def update_unlocked(
         keep_hold = bool(meta.get("hold")) and bool(_wt.wake_value(meta)) and bool({"anchor", "recycle"} & set(h.hold_held_by(gid, meta)))      # a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag and record (the anchor release, the backstop gate and the recycle read them); the date is its backstop
         kept_hold_set = meta.get("hold_set")
         read_failed: list[bool] = []
-        backstop = bool(_uw.date_of(meta)) and _wait_is_bare(meta) and _hands_on(gid, item_was, {**item, "metadata": meta}, handed, sender.strip() or debtor or "", read_failed, picker_alias=alias_picker)
+        backstop = bool(_uw.date_of(meta)) and _wait_is_bare(meta) and _hands_on(gid, item_was, {**item, "metadata": meta}, handed, sender.strip() or debtor or "", read_failed)
         could_hand_on = bool(wake or hold or ask_by.strip() or until_wait or next_touch or needs_set or clear_needs or "mover" in model_set or "mover" in model_drop or agent.strip())      # a write that names a date or could hand the item on (next, needs, the mover, an agent); a write of anything else (a description, a contact) cannot, so a failed reading changes nothing it must say
         if backstop and read_failed and was_until and _wait_is_bare(item_was.get("metadata") or {}):
             backstop = False               # the reading failed on an item a bare until already parks: that wait is left untouched (not ended by a hand-off nobody could read), and the reply says so

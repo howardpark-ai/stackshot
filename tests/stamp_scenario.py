@@ -596,7 +596,7 @@ from stackshot.service import retire_passes as retire_svc
 from stackshot.service import merge_progress as mprog_svc
 _HOST = stamp_svc.PassHost(server, stamp_svc, retire_svc, mprog_svc, wiring.PASS_NAMES)
 def _reads(rel): return sorted(set(re.findall(r"\bS\.([A-Za-z_][A-Za-z_0-9]*)", open(f"{STACK}/stackshot/{rel}", encoding="utf-8").read())))
-for _rel in ("waits/until_pass.py", "model/last_activity_pass.py", "waits/mover_pass.py", "waits/members_pass.py"):
+for _rel in ("waits/until_pass.py", "model/last_activity_pass.py", "waits/members_pass.py"):
     _gone = [n for n in _reads(_rel) if not hasattr(_HOST, n)]
     check(f"the names {_rel} reads off S all resolve on the host (stamp.PassHost over the server, the stamp and the retire modules)", not _gone and len(_reads(_rel)) >= 7, _gone)
 _gone = [n for n in _reads("model/item_project_pass.py") if not hasattr(stamp_svc, n)]

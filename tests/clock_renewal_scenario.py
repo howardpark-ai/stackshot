@@ -10,7 +10,7 @@ item keeps being re-dated and nobody sees it sit. The write is refused, and the 
   * ask_by of an event wait: the same rule; its first setting (the event-wait form itself) is accepted.
   * the owner's words in the same write count as a reason only as a checked, recent Acked-by entry whose message is new on the write (unchecked, Reported-by and an already stored msg, whatever its quote, are refused).
   * a change to what the wait stands on (wait_kind, wait_event, wait_anchor, after) to a shape the item never held is progress; a flip back (A, B, A), the removal of after, and a changed
-    post_wake_mover (the holder rules cover hand-offs) are not; a recycle wait aimed at another machine is the same shape (told by its verb); a new shape alone lets a clock push through
+    a waiting item's mover (the holder rules cover hand-offs) are not; a recycle wait aimed at another machine is the same shape (told by its verb); a new shape alone lets a clock push through
     twice in a row (metadata.clock_struct_n) and the third is refused, also for seven different real waits and for a return to a shape older than the five kept; a step change resets the count; an event wait's refusal does not advise the event-wait form it already uses; needs moved to decision is no hand-off.
   * a real hand-off (the effective holder, the stored mover else needs[0], resolved through the registry, becomes a session that is not the sender) is no renewal; setting the holder it already
     has, flipping it back, or writing the same session as a name and as an id (mover or needs) is refused.
@@ -222,7 +222,7 @@ except Exception as e:
     check("text: a parked item is told to lead with a new wait_basis, and not to park it again", "clock pushed out" in m and "Change something real in the same write: a new wait_basis" in m and "park it (" not in m, m)
 
 # ================================================================ ask_by of an event wait
-item(20, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
+item(20, wait_kind="event", wait_event="recycle", ask_by=day(3), mover=BACK, needs=[], next="team-back: wait for the recycle\nteam-back: then check it")
 refused_nw("ask_by: pushing the backstop out with nothing else changed is refused", 20, lambda: upd(20, ask_by=day(6)), "clock pushed out", "ask_by")
 upd(20, ask_by=day(6), done=[1])
 check("ask_by: …with a step marked done accepted", ab_(mt(20)) == day(6), mt(20))
@@ -230,12 +230,12 @@ try:
     upd(20, ask_by=day(6))
 except Exception as e:
     check("text: an event wait is told to change what it stands on, not to use the event-wait form again", "a different wait_event or wait_anchor" in str(e) and "park it (" not in str(e), str(e))
-item(22, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
+item(22, wait_kind="event", wait_event="recycle", ask_by=day(3), mover=BACK, needs=[], next="team-back: wait for the recycle\nteam-back: then check it")
 upd(22, wait_event="fleet_op any", ask_by=day(6))
 check("wait structure: a changed wait_event with a later ask_by is accepted", ab_(mt(22)) == day(6) and mt(22)["wait_event"] == "fleet_op any", mt(22))
-item(23, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
-upd(23, post_wake_mover="home-other", ask_by=day(6))
-check("wait structure: post_wake_mover is the old name of mover, so a changed one with a later ask_by is a hand-over like mover=, and passes as one", ab_(mt(23)) == day(6) and mt(23).get("mover") == "home-other" and "post_wake_mover" not in mt(23), mt(23))
+item(23, wait_kind="event", wait_event="recycle", ask_by=day(3), mover=BACK, needs=[], next="team-back: wait for the recycle\nteam-back: then check it")
+upd(23, mover="home-other", ask_by=day(6))
+check("wait structure: a changed mover with a later ask_by is a hand-over, and passes as one", ab_(mt(23)) == day(6) and mt(23).get("mover") == "home-other", mt(23))
 refused_nw("wait structure: …the wait_event flipped back to the first one (A, B, A) with a later ask_by is refused", 22, lambda: upd(22, wait_event="recycle", ask_by=day(8)), "clock pushed out")
 check("wait structure: …the item still holds B, and the record keeps both shapes", mt(22)["wait_event"] == "fleet_op any" and len(mt(22).get("clock_struct") or []) == 2, mt(22))
 item(26, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
@@ -250,7 +250,7 @@ refused_nw("wait structure: …clearing after with a later wake is refused (a re
 W = lambda k: f"{day(3)}T{k:02d}:00"      # a later wake each time within the same day (a wake may be at most 7 days out)
 # the count of pushes a new wait shape alone lets through: at most two in a row
 for n_ in range(70, 77): item(n_, needs=[BACK], next=f"team-back: blocker {n_}")
-item(60, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
+item(60, wait_kind="event", wait_event="recycle", ask_by=day(3), mover=BACK, needs=[], next="team-back: wait for the recycle\nteam-back: then check it")
 for k_, m_ in enumerate(("far-host", "far-host-2", "far-host-3")):
     refused_nw(f"count: a recycle wait aimed at another machine ({m_}) is the same shape (told by its verb): refused", 60, lambda m_=m_, k_=k_: upd(60, wait_event=f"recycle {m_}", ask_by=day(4 + k_)), "clock pushed out")
 item(61, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
@@ -281,7 +281,7 @@ check("wait structure: an added after with a later wake is accepted", wk_(mt(25)
 item(46, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("holder: needs moved to decision is no hand-off (it holds no session)", 46, lambda: upd(46, wake=day(5), needs=["decision"], ask="Decide: keep it parked or drop it · Recommend: yes · Stakes: low · By: tomorrow"), "clock pushed out")
 item(21, mover=BACK, next="team-back: do the thing")
-upd(21, wait_kind="event", wait_event="recycle", ask_by=day(4), post_wake_mover=BACK, mover="none")
+upd(21, wait_kind="event", wait_event="recycle", ask_by=day(4), mover=BACK)
 check("ask_by: the event-wait form itself (a first ask_by) is accepted", ab_(mt(21)) == day(4) and mt(21)["wait_kind"] == "event", mt(21))
 
 # ================================================================ what is not judged
