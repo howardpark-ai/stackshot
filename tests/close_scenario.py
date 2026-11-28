@@ -52,6 +52,19 @@ import _scratch, _instance
 _made = []      # the scratch folder of the part this process runs, removed in the finally of _run_part (and by _scratch at exit, whatever ends the process)
 
 
+def _settle(limit=150.0):
+    """Wait until no child process of this one is left. The scenario's closes tell their movers through tell_woken, whose daemon thread runs push.py (it writes state/anchor-hub/queue-msg); the part ends in os._exit, which
+    stops those threads but not their children, and a child that still writes into the folder races the removal of it (rm: Directory not empty). Called before every exit of a part, pass or fail."""
+    end = time.time() + limit
+    def kids():
+        out = []
+        for t in os.listdir("/proc/self/task"):
+            try: out += open(f"/proc/self/task/{t}/children").read().split()
+            except OSError: pass
+        return out
+    while kids() and time.time() < end: time.sleep(0.05)
+
+
 def _fixture(prefix, dirs, transcripts=False, marks_off=False, owner=None):
     """The part's scratch folder, its stackshot.toml (a copy of the base instance with every path in the folder), RULES.md, the environment the server reads and the folders in `dirs`; returns (tmp, T).
     transcripts: the transcripts roots point into the folder; marks_off: require_marks = false; owner: a named owner (instead of "the owner")."""
@@ -456,7 +469,7 @@ def part_marks():
     g9186 = _get_tool._fmt({**rd(9186), "gid": "g9186"})
     check("get on a backfilled item shows no open step", "checklist:" in g9186 and "[open" not in g9186, g9186[-400:])
 
-    print(("ok" if not fails else "FAILED") + f": close marks scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
+    print(("ok" if not fails else "FAILED") + f": close marks scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); _settle(); os._exit(1 if fails else 0)
 
 
 # ================================================================ part 3: a close keeps the description (formerly close_keeps_description_scenario)
@@ -833,6 +846,7 @@ def part_own_steps():
     check("text: the rule a refused close appends says it too", "ticks only the steps that are still open and are yours" in _web_tools_text._CLOSE_REFUSAL and "marks every step" not in _web_tools_text._CLOSE_REFUSAL, None)
     check("text: complete tells where to mark another session's step (update, done or dropped with the close)", "mark it in the closing call with update" in desc_["complete"] and "dropped=[n]" in desc_["complete"], None)
 
+    _settle()      # the pushes the closes started finish before the folder goes
     print(("ok" if not fails else "FAILED") + f": complete own steps scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
 
 
@@ -843,6 +857,7 @@ def _run_part(name):
     try:
         PARTS[name]()      # ends the process itself (sys.exit or os._exit) with the part's summary line and its exit code
     finally:      # the folder goes whatever happened (a failing check, an exception, sys.exit); _scratch removes it at exit as well (os._exit included)
+        _settle()
         for d in _made: shutil.rmtree(d, ignore_errors=True)
 
 
