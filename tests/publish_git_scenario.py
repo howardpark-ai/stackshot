@@ -29,7 +29,7 @@ and the same conflicting run through the old `rebase --autostash` step (kept bel
 The suite gives git a global config of its own (user.useConfigOnly, no identity): no commit of it may lean on the host's own git identity.
 
     tests/run-suite publish_git        -> exit 0 / 1"""
-import contextlib, fcntl, io, os, pathlib, re, shlex, shutil, signal, subprocess, sys, threading, time, logging
+import contextlib, fcntl, io, os, pathlib, re, shlex, shutil, signal, subprocess, sys, tempfile, threading, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="pubgit-"); T = pathlib.Path(tmp)
@@ -588,10 +588,14 @@ check("pages: a board with no committer address git accepts (none in the environ
 write(store, "secret.txt", "outside\n"); write(store, "board.md", "board, dirty\n"); write(store, ITEM, DIRTY); write(store, PG, "# note, ninth\n")
 before = porcelain(store)
 for bad in ("../secret.txt", "..", "../board.md", "../board-data", "../board-data/item-1.json", ".", "./ada-note.md", "x/../ada-note.md", "/ada-note.md",
-            "x//ada-note.md", "ada-note.md/", "", "ada\x00note.md", "ada\nnote.md", "ada\x7fnote.md", "caf\udce9.md"):
+            "x//ada-note.md", "ada-note.md/", "", "ada\x00note.md", "ada\nnote.md", "ada\x7fnote.md", "ada\x85note.md", "ada\x9fnote.md", "caf\udce9.md"):
     for paths in ([bad], ["ada-note.md", bad]):
         got, calls, moved, st = refused_early(paths)
         check(f"pages: the path list {paths!r} is refused before git is asked to stage anything, nothing moved, nothing staged", got[0] == "failed" and not calls and not moved and st == "", (got, calls, st))
+head_c1 = git(store, "rev-parse", "HEAD")
+for c1 in ("\x85", "\x9f"):          # a name that exists on disk (the loop above names files that are not there) and holds a C1 control character
+    write(store, f"pages/ada{c1}note.md", "c1\n"); got = put([f"ada{c1}note.md"]); (store / f"pages/ada{c1}note.md").unlink()
+    check(f"pages: a path holding the C1 control character U+{ord(c1):04X} that exists on disk is refused, nothing committed", got[0] == "failed" and git(store, "rev-parse", "HEAD") == head_c1 and staged(store) == "", got)
 check("pages: after every refusal the working tree is exactly as it was (the outside files untouched, the named page uncommitted)", porcelain(store) == before, (porcelain(store), before))
 for whole in ("ada-note.md", b"ada-note.md", pathlib.PurePosixPath("ada-note.md")):
     got, calls, moved, st = refused_early(whole)
@@ -907,18 +911,18 @@ def own_child(proc):
     """Whether `proc` (this test's own Popen child, not yet waited for) is still the python this test started: only then is it signalled, by its PID."""
     try: return proc.poll() is None and os.path.realpath(f"/proc/{proc.pid}/exe") == os.path.realpath(sys.executable)
     except OSError: return False
-def interrupted(store, code):
+def interrupted(store, code, hook_name="pre-commit", group=False):
     """publish_pages() of PG in a child process of this test's own, sent SIGINT by its PID while git runs the pre-commit hook, which waits 2 s and exits
-    `code`. (the child's exit code, its stdout and stderr, what its TMPDIR holds after it, whether the hook ran)."""
-    ready = T / f"ready-{code}"; tmpd = T / f"child-tmp-{code}"; tmpd.mkdir()
-    hook = store / ".git/hooks/pre-commit"; hook.write_text(f"#!/bin/sh\n: > {shlex.quote(str(ready))}\nsleep 2\nexit {code}\n"); hook.chmod(0o755)
+    `code`. `group`: the signal goes to the child's whole process group, as a terminal's Ctrl-C does (the child leads its own group). (the child's exit code, its stdout and stderr, what its TMPDIR holds after it, whether the hook ran)."""
+    ready = T / f"ready-{hook_name}-{code}"; tmpd = T / f"child-tmp-{hook_name}-{code}"; tmpd.mkdir()
+    hook = store / ".git/hooks" / hook_name; hook.write_text(f"#!/bin/sh\n: > {shlex.quote(str(ready))}\nsleep 2\nexit {code}\n"); hook.chmod(0o755)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
     env.update(GIT_COMMITTER_NAME=BOT, GIT_COMMITTER_EMAIL="bot@x", TMPDIR=str(tmpd), PYTHONDONTWRITEBYTECODE="1")
-    proc = subprocess.Popen([sys.executable, "-c", CHILD, STACK, str(store), "ada-note.md"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, cwd=STACK)
+    proc = subprocess.Popen([sys.executable, "-c", CHILD, STACK, str(store), "ada-note.md"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, cwd=STACK, start_new_session=group)
     try:
         t0 = time.monotonic()
         while proc.poll() is None and not ready.exists() and time.monotonic() - t0 < 120: time.sleep(0.02)
-        if ready.exists() and own_child(proc): os.kill(proc.pid, signal.SIGINT)
+        if ready.exists() and own_child(proc): (os.killpg if group else os.kill)(proc.pid, signal.SIGINT)
         out, err = proc.communicate(timeout=300)
     finally:
         if own_child(proc): os.kill(proc.pid, signal.SIGKILL)
@@ -939,6 +943,53 @@ check("pages, interrupt: SIGINT while git commits (its hook refuses): KeyboardIn
       ran_hook and rc == 3 and "interrupted; no page commit made" in err and "git commit failed" in err and git(store, "rev-parse", "HEAD") == head and idx(store) == i0 and git_left(store) == [] and left == [], (rc, out[-300:], err[-600:], git_left(store), left))
 got = put(["ada-note.md"])
 check("pages, interrupt: ...and the same author's next put commits and pushes it", got == ("ok", True) and who(store)[0] == "Ada Example" and holds(origin, "main", PG), got)
+
+# Ctrl-C of a terminal goes to the whole process group, git and its hooks included: a slow post-commit hook runs on, the commit made is reported as made
+write(store, PG, "# interrupted by the group\n"); head = git(store, "rev-parse", "HEAD")
+rc, out, err, left, ran_hook = interrupted(store, 0, "post-commit", group=True)
+check("pages, interrupt: SIGINT to the whole group while a post-commit hook runs: git is not stopped, the commit is made, the index brought to it, KeyboardInterrupt saying so",
+      ran_hook and rc == 3 and "interrupted; the page commit is made" in err and git(store, "rev-parse", "HEAD") != head and names(store) == [PG] and staged(store) == "" and git_left(store) == [] and left == [], (rc, out[-300:], err[-600:], git_left(store), left))
+
+# git's commit ends non-zero after the ref moved (a killed git can do that): the commit is made, not "nothing committed"
+real_git = P._git
+def moved_then_fails(*a, **k):
+    r = real_git(*a, **k)
+    if "commit" in a and "--only" in a and r.returncode == 0:
+        return subprocess.CompletedProcess(r.args, 1, r.stdout, "fatal: killed after the ref moved\n")
+    return r
+write(store, PG, "# killed after the ref moved\n"); head = git(store, "rev-parse", "HEAD")
+P._git = moved_then_fails
+try: got = put(["ada-note.md"])
+finally: P._git = real_git
+check("pages: a git commit that fails after HEAD moved is a commit made: True, the index brought to it, no page left staged", got == ("ok", True) and git(store, "rev-parse", "HEAD") != head and staged(store) == "" and git(store, "show", f"HEAD:{PG}") == "# killed after the ref moved", (got, staged(store)))
+
+# no room for the call's own folder: CommitFailed, never a bare OSError
+real_mkdtemp = tempfile.mkdtemp
+def no_room(*a, **k): raise OSError(28, "No space left on device")
+write(store, PG, "# no room\n"); head = git(store, "rev-parse", "HEAD"); tempfile.mkdtemp = no_room
+try: got = put(["ada-note.md"])
+finally: tempfile.mkdtemp = real_mkdtemp
+check("pages: no room for the temporary folder raises CommitFailed saying nothing was committed", got[0] == "failed" and "nothing" in got[1] and git(store, "rev-parse", "HEAD") == head and staged(store) == "", got)
+
+# git cannot be started right after the commit (the first git call once the index is brought to it): the commit is made, the call returns True, said on stderr
+def gone_after(*a, **k):
+    if a[:2] == ("rev-parse", "HEAD") and gone_after.armed: raise BlockingIOError(11, "Resource temporarily unavailable")
+    return real_git(*a, **k)
+gone_after.armed = False
+orig_bring = P._bring_index
+def bring_then_arm(*a, **k): r = orig_bring(*a, **k); gone_after.armed = True; return r
+write(store, PG, "# git gone after\n"); errbuf = io.StringIO()
+P._git = gone_after; P._bring_index = bring_then_arm
+try:
+    with contextlib.redirect_stderr(errbuf): got = put(["ada-note.md"])
+finally: P._git = real_git; P._bring_index = orig_bring; gone_after.armed = False
+check("pages: git failing to start after the commit is said, and the commit made is True", got == ("ok", True) and "push step after it failed" in errbuf.getvalue() and git(store, "show", f"HEAD:{PG}") == "# git gone after", (got, errbuf.getvalue()[-300:]))
+
+# a clone on another branch: the note says the push is of main only
+git(store, "checkout", "-q", "-b", "side"); write(store, PG, "# on a side branch\n"); errbuf = io.StringIO()
+with contextlib.redirect_stderr(errbuf): got = put(["ada-note.md"])
+git(store, "checkout", "-q", "main")
+check("pages: a page committed on a branch other than main is True, and the note names the branch and says the push is of main only", got == ("ok", True) and "on side" in errbuf.getvalue() and "main only" in errbuf.getvalue(), (got, errbuf.getvalue()[-400:]))
 
 # the board's merge with the mirror after a page commit, on a clone with no configured identity: the board's own, never the page's author
 origin, store, other = world(bulk=2); use(store)
