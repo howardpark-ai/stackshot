@@ -344,4 +344,4 @@ already parked, on a time wait or verifying (a wait_basis does there): to check 
 wait_reason with no wait_kind. A date after by, due or before is a deadline, not a wait.
 
 ## description update
-{{UPDATE_DESC}}{{CONTACT_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{WAIT_FORM}}
+{{UPDATE_DESC}}{{CONTACT_FORM}}{{GLOSSARY_FORM}}{{MODEL_FORM}}{{CHECKLIST_FORM}}{{STEP_PROOF_FORM}}{{DRAFT_FORM}}{{STEP_FORM}}{{STALL_SHORT}}{{SELF_WAIT_FORM}}{{WAIT_FORM}}

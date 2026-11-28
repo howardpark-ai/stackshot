@@ -1,0 +1,17 @@
+{
+ "stackshot.example.toml": 300,
+ "stackshot/core/behind_door.py": 294,
+ "stackshot/core/config.py": 303,
+ "stackshot/core/filecache.py": 260,
+ "stackshot/core/members.py": 303,
+ "stackshot/core/readonly.py": 296,
+ "stackshot/core/xlock.py": 289,
+ "stackshot/fleet/sessions_registry.py": 291,
+ "stackshot/model/option_labels.py": 271,
+ "stackshot/paths.py": 283,
+ "stackshot/projects/project_registry.py": 262,
+ "stackshot/projects/projects.py": 280,
+ "stackshot/web/render.py": 265,
+ "tests/_instance.py": 262,
+ "tests/_scratch.py": 315
+}

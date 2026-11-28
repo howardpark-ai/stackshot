@@ -25,6 +25,8 @@ import re
 import time
 from typing import Any, Callable
 
+from stackshot.model import member_gates as _mgates
+
 REC = "ask_rec"
 LEFT = "ask_left"
 NOTE_DAYS = 3.0        # an ask written on an item with no earlier ask looks back this many days for the owner's notes
@@ -145,17 +147,18 @@ def dropped_line(found: list[tuple[str, float, str]], when: Callable[[float], st
             + "; if the ask is moot withdraw it now (clear_ask=true), otherwise it stands")
 
 
-def notes_since(meta: dict[str, Any], since: float) -> list[dict[str, Any]]:
-    """The owner's comments and notes on his step made after `since` (an epoch), oldest first: [{ts, kind, text}]. His answers to a decision are no notes (they closed the ask)."""
+def notes_since(meta: dict[str, Any], since: float, member: str) -> list[dict[str, Any]]:
+    """The comments and step notes of `member` (the one the ask is asked of) made after `since` (an epoch), oldest first: [{ts, kind, text}]. Their answers to a decision are no notes (they closed the
+    ask). On a board of several members another member's note is none of these (member_gates.said_by)."""
     out = []
     for a in meta.get("answers") if isinstance(meta.get("answers"), list) else []:
-        if isinstance(a, dict) and a.get("kind") in ("comment", "step-reply") and float(a.get("ts") or 0) > since and str(a.get("text") or "").strip():
+        if isinstance(a, dict) and a.get("kind") in ("comment", "step-reply") and float(a.get("ts") or 0) > since and str(a.get("text") or "").strip() and _mgates.said_by(a, member):
             out.append({"ts": float(a["ts"]), "kind": a["kind"], "text": " ".join(str(a["text"]).split())})
     return sorted(out, key=lambda x: x["ts"])
 
 
 def look_back(meta: dict[str, Any], now: float | None = None) -> float:
-    """Where the owner's notes are looked for when an ask is written: after the item's earlier ask was written (or taken off his move), else the last NOTE_DAYS."""
+    """Where the notes of the member asked are looked for when an ask is written: after the item's earlier ask was written (or taken off his move), else the last NOTE_DAYS."""
     now = time.time() if now is None else now
     prior = max([float((meta.get(REC) or {}).get("at") or 0) if isinstance(meta.get(REC), dict) else 0.0,
                  float((meta.get(LEFT) or {}).get("at") or 0) if isinstance(meta.get(LEFT), dict) else 0.0])
@@ -163,17 +166,17 @@ def look_back(meta: dict[str, Any], now: float | None = None) -> float:
 
 
 def notes_line(notes: list[dict[str, Any]], clip: Callable[[str, int], str], when: Callable[[float], str], limit: int = 3) -> str:
-    """His notes as one clause: “text” (when), the newest `limit`."""
+    """The notes (notes_since) as one clause: “text” (when), the newest `limit`."""
     return "; ".join(f"“{clip(n['text'], 160)}” ({when(n['ts'])})" for n in notes[-limit:])
 
 
-def reminder(shown_id: str, owner: str, notes_clause: str = "", dropped_clause: str = "") -> str:
+def reminder(shown_id: str, owner: str, notes_clause: str = "", dropped_clause: str = "", notes_head: str = "His notes since the ask") -> str:
     """The one line a write gets while an ask stands on an item its author moves or wrote. `dropped_clause` (`dropped_line`) is added for the ask's author only."""
     return (f"\n(reminder: an ask stands on {shown_id} for {owner}; if it is wrong or moot, withdraw it now: update(clear_ask=true) and name who has the item in needs"
-            + (f". {dropped_clause}" if dropped_clause else "") + (f". His notes since the ask: {notes_clause}" if notes_clause else "") + ")")
+            + (f". {dropped_clause}" if dropped_clause else "") + (f". {notes_head}: {notes_clause}" if notes_clause else "") + ")")
 
 
 def check_line(owner: str, notes_clause: str) -> str:
-    """The ask-time check's line: the owner's notes on the item that may already answer the ask being written."""
+    """The ask-time check's line: `owner`'s (the member asked) notes on the item that may already answer the ask being written."""
     return (f"\n(check: {owner} has written on this item since its last ask: {notes_clause}. If a note already answers the ask, apply it and withdraw the ask "
             f"(update(clear_ask=true)) instead of asking again.)")

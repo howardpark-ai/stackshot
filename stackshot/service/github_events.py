@@ -17,6 +17,8 @@ from stackshot.core.instance import OWNER
 from stackshot.fleet import sessions_registry as _sr
 from stackshot.github import ghsync as _gh
 from stackshot.model import activity as _activity
+from stackshot.model import member_gates as _mgates
+from stackshot.model import model as _model
 from stackshot.service import answer as _answer
 from stackshot.service import handoff as _handoff
 from stackshot.service import store as _svcstore
@@ -44,7 +46,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     is recorded on the item under metadata.answers, the list the board's answer buttons write too (the board's
     answer box): {ts, kind: "comment", text, via: "github", url, comment_id} (no `by` while one person is served: the comment's login is the first person's, and a record with none reads as theirs), `via` being the flag that it was written
     on GitHub. The save is the server's own (no author): the mirror carries no answers, so the owner's comment is never posted back to the issue. Then the mover and the sessions named in
-    its needs are told one line each (tell_comment). Reading only: needs, status and the page stay as they are. → False when
+    its needs are told one line each (tell_comment). Reading only: needs, status and the page stay as they are, and on a board of several members a hand-off to another member stays open. → False when
     no item has the id (the reader skips the comment); True when it is on the item (a second call for the same comment, after
     a restart between the save and the reader's mark, tells nobody again)."""
     with _writes.ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
@@ -65,7 +67,8 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         meta["answers"] = answers
         try:
             r_ = _ho.pending_his(item)
-            if _handoff.handoff_on() and r_ and float(c.get("ts") or time.time()) >= float(r_.get("at") or 0):      # his comment, made after the hand-off, ends his hand-off record
+            mine = r_ is not None and (not _mgates.many() or _model.names_member(r_.get("to"), OWNER))      # several members: only a hand-off to the commenter, the first member
+            if _handoff.handoff_on() and r_ and mine and float(c.get("ts") or time.time()) >= float(r_.get("at") or 0):      # his comment, made after the hand-off, ends his hand-off record
                 _ho.answered(item, time.time(), f"{OWNER} commented on GitHub", at=float(c.get("ts") or time.time()))
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

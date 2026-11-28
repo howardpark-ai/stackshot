@@ -36,6 +36,7 @@ from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
 from stackshot.model import close_repair as _cr
 from stackshot.model import last_activity_pass as _lact_pass
+from stackshot.model import member_gates as _mgates
 from stackshot.model import migration as _mig
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -92,6 +93,7 @@ def migrate_owner_mover() -> list[str]:
     him with a session stored as its mover gets him as mover and the session in `then`; one that stores him as mover while no longer in his state, with an answer of his newer than the change of mover to him
     (his hand-off record's time; else the item's last write) as the proof he let it go, gets its `then` agent back as mover (an older answer followed by a deliberate mover=the owner is left); a hand-off record to him that nobody took is ended when an answer of his is on the item after it (a board answer, a comment, a Done) or when the
     item is no longer his to move (some kept a stale hand-over marker after he answered). `updated` and the clocks stay as they were.
+    On a board of several members only the answers of the member concerned are that proof (member_gates.said_by): of the member handed to for a hand-off record, of the member stored as mover for the way back.
     One stderr line per item; nothing is posted to GitHub (mirror off). [model] guards = false skips the mover part, [model] handoff = false the record part. → the gids rewritten."""
     out = []
     after = lambda i_: _hooks().after_open(i_.get("metadata") or {})
@@ -110,8 +112,9 @@ def migrate_owner_mover() -> list[str]:
                     rec_ = _ho.record_of(it)
                     # the proof that he held it and has let go: an answer of his NEWER than the change of mover to him (his hand-off record's time; with no record, the item's last write, a second before it).
                     # An old answer followed by a mover=the owner a writer set later is a deliberate hand-over, not a hand-back to make.
-                    since = float(rec_.get("at") or 0) if rec_ and _model.is_owner(rec_.get("to")) else float(it.get("updated") or 0) - 1
-                    his = any(isinstance(a, dict) and float(a.get("ts") or 0) >= since for a in (it["metadata"].get("answers") or []))
+                    held_by = _model.item_person(it["metadata"]).name      # the member stored as mover (item_person reads it first): with several, only their answer shows they let it go
+                    since = float(rec_.get("at") or 0) if rec_ and _model.is_owner(rec_.get("to")) and (not _mgates.many() or _model.names_member(rec_.get("to"), held_by)) else float(it.get("updated") or 0) - 1
+                    his = any(isinstance(a, dict) and float(a.get("ts") or 0) >= since and _mgates.said_by(a, held_by) for a in (it["metadata"].get("answers") or []))
                     ch = _model.settle(it, his, after)
                     if ch:
                         was_mover = _model.norm_who(it["metadata"].get("mover"))
@@ -122,14 +125,15 @@ def migrate_owner_mover() -> list[str]:
                             did.append("then dropped (it stands only while he moves the item)")
                 r = _ho.pending_his(it) if _handoff.handoff_on() else None
                 if r is not None:
-                    answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
+                    to = _model.norm_who(r.get("to")) if _mgates.many() else OWNER      # whom it went to: their answer ends it, nobody else's
+                    answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0) and _mgates.said_by(a, to)]
                     if answers:
-                        _ho.answered(it, time.time(), f"{OWNER}'s answer was already on the item", at=min(answers))
+                        _ho.answered(it, time.time(), f"{to}'s answer was already on the item", at=min(answers))
                         did.append("his hand-off ended (answered)")
                     else:
                         mod = _hooks().model_of({**it, "gid": gid})
                         if not (mod.state == _model.ALIVE and _model.is_owner(mod.mover)):
-                            _ho.answered(it, time.time(), f"it is no longer {OWNER}'s to move")
+                            _ho.answered(it, time.time(), f"it is no longer {to}'s to move")
                             did.append("his hand-off ended (not his to move)")
             except Exception as e:  # noqa: BLE001  — one unreadable item never stops the start
                 print(f"migrate: {gid} his mover not settled: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

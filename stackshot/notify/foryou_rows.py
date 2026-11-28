@@ -17,6 +17,7 @@ import datetime as dt
 from typing import Any, Callable
 
 from stackshot.model.bullet_text import _clip_line
+from stackshot.model import member_gates as _mgates
 from stackshot.model.needs import _waits_decision
 from stackshot.model.said import _owner_words
 from stackshot.waits import waiting as _wt
@@ -37,7 +38,7 @@ def watched(mode: str, item: dict[str, Any]) -> tuple[bool, str]:
         return True, "it needs his decision"
     if _owner_words(item):
         return True, "his words are on it"
-    if any(isinstance(a, dict) and a.get("via") != "mail" for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])):      # a step the server ticked on a mail is not an answer of his
+    if any(isinstance(a, dict) and a.get("via") != "mail" and _mgates.owners(a) for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])):      # a step the server ticked on a mail is not an answer of his
         return True, "he answered on it"
     return False, "not watched"
 

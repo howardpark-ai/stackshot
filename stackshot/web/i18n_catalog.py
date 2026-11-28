@@ -18,6 +18,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     search.*   the search page: its filters, summary lines, notes and result rows
     runners.*  the CI runners page: its cards, table, machine lines, switch buttons and as-of lines (js.runners.* are the words its script says)
     page.*     small words several pages share (Archived, none)
+    glossary.* the reply line of a save whose text holds a word that stands for several glossary terms (model/glossary_words.py)
     explain.*  the "?" control that holds a page's explainer text (ui/explain.py): its button's name
     sessions.* the sessions list: its group headings, the session flags and their hovers
     join.*     the setup page an invite's link names (routes/join.py), open to anyone
@@ -66,6 +67,11 @@ CATALOG: dict[str, str] = {
     # ------------------------------------------------------------------ the pages after the item page: sessions, for you, sent notices, said tags (stage 3b)
     "page.archived": "Archived",
     "page.none": "none",
+    "glossary.unclear": "glossary: \"{word}\" in the {where} could mean {terms}; use the exact term next time",
+    "glossary.in.subject": "subject",
+    "glossary.in.description": "description",
+    "glossary.in.both": "subject and description",
+    "glossary.or": " or ",
     "explain.about": "Help: {what}",
     "sessions.agents": "Agents",
     "sessions.background": "Background agents",
@@ -99,6 +105,10 @@ CATALOG: dict[str, str] = {
     "sent.stepreply": "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question.",
     "sent.stepreply_by": "Sent: {who} has your note and decides whether the step is done.",
     "sent.partdone": "Done: your step is ticked. The item stays where it is for the steps still open.",
+    "sent.notyours": "Nothing sent: this is asked of another member. Write a note below to comment.",
+    "sent.notyours_home": "Nothing sent: this is asked of another member; open the item to leave a note.",
+    "sent.askwaits": "Nothing sent: a question on this item is still open, so Done cannot be recorded yet. Press Done again once it is answered, or write a note below and send it now.",
+    "sent.askwaits_home": "Nothing sent: a question on this item is still open, so Done cannot be recorded yet; open the item to leave a note.",
     "sent.nomover": "Nobody is set to take this item next, so nothing was recorded. Write a comment instead.",
     "sent.nostep": "Nothing sent: the item has no step for you any more. Read it again below.",
     "sent.nostep_home": "Nothing sent: the item has no step for you any more; open the item to read it again.",
@@ -423,6 +433,7 @@ CATALOG: dict[str, str] = {
     "home.no_end": "no end date",
     "home.picks_up": "{who} picks it up",
     "home.theirs": "{who} picks it up · on {name}'s move",
+    "home.waits_pick": "waiting on {name}'s pick",
     "home.shared_step": "More than one member has a part in this step: open the item for yours.",
     "home.acts_for": "acts for {name}",
     "home.owner_then": "{who}, then {then}",
@@ -759,6 +770,7 @@ CATALOG: dict[str, str] = {
     "wait.watched_by": "Watched by",
     "wait.picks_up": "Picks it up",
     "wait.his_words": "His words",
+    "wait.words_behind": "Words behind the date",
     "wait.chases": "Chases",
     "wait.none_yet": "none yet",
     "wait.chase_help": "After {n} chases with no reply, this comes to {owner} as \"drop it?\".",

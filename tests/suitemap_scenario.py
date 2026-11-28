@@ -3088,6 +3088,45 @@ check("LAUNCH 6 with no launcher configured nothing is fetched", rc == 0 and out
 rc, out, err, gh, far = lrun("list")
 check("LAUNCH 7 no other subcommand fetches", rc == 0 and out == "far\n" and gh == [], (rc, out, err, gh, far))
 
+# ---- the ceiling lock (`lock`): a file's fan-out, by the map alone, against the number in tests/suitemap_ceilings.json
+LK = T / "lockroot"; (LK / "pkg").mkdir(parents=True)
+for rel in ("pkg/hot.py", "pkg/cold.py", "ex.toml", "base.toml"): (LK / rel).write_text("x = 1\n", encoding="utf-8")
+def lk_entry(py=None, files=(), whole=()): return {"ok": True, "seconds": 1.0, "py": py or {}, "files": list(files), "whole": list(whole), "dirs": [], "globs": [], "unmeasured": 0, "traced": "x"}
+LKMAP = T / "lockmap.json"
+LKMAP.write_text(json.dumps({"format": 1, "commit": "a" * 40, "strace": True, "measured": "x", "suites": {
+    "s1": lk_entry({"pkg/hot.py": ["", "f", "g"], "pkg/cold.py": [""]}, ["ex.toml"]),
+    "s2": lk_entry({"pkg/hot.py": ["", "f"], "pkg/cold.py": [""]}, ["base.toml"]),
+    "s3": lk_entry({"pkg/hot.py": ["", "f"]}, ["base.toml"], whole=["pkg/cold.py"]),
+    "s4": lk_entry({"pkg/hot.py": ["h"]})}}), encoding="utf-8")
+def lk(table, *extra):
+    (LK / "tests").mkdir(exist_ok=True)
+    (LK / "tests" / "suitemap_ceilings.json").write_text(table if isinstance(table, str) else json.dumps(table), encoding="utf-8")
+    return tool("lock", "--map", str(LKMAP), *extra, env={"SUITEMAP_ROOT": str(LK)})
+r = lk({"pkg/hot.py": 3, "pkg/cold.py": 1})
+check("lock: a file at its ceiling passes (the most suites that ran one function, the module level not counted: f ran in three; cold: the module level of two suites is no function, the one that read it whole counts), and says what it measured",
+      r.returncode == 0 and "pkg/hot.py: 3 (ceiling 3)" in r.stdout and "pkg/cold.py: 1 (ceiling 1)" in r.stdout, (r.returncode, r.stdout, r.stderr))
+r = lk({"pkg/hot.py": 2})
+check("lock: a file above its ceiling fails, naming the file, both numbers and that a raise says why",
+      r.returncode == 1 and "::error::pkg/hot.py picks 3 suite(s)" in r.stdout and "ceiling 2" in r.stdout and "says why" in r.stdout, (r.returncode, r.stdout, r.stderr))
+r = lk({"pkg/hot.py": 4, "pkg/cold.py": 1})
+check("lock: a ceiling above the fan-out passes and says to lower it", r.returncode == 0 and "pkg/hot.py: 3 (ceiling 4, lower it)" in r.stdout, (r.returncode, r.stdout))
+r = lk({"ex.toml": 1, "base.toml": 2})
+check("lock: a data file counts the suites that opened it; with a fixture link (DATA) the link's readers too", r.returncode == 0 and "ex.toml: 1 (ceiling 1)" in r.stdout and "base.toml: 2 (ceiling 2)" in r.stdout, (r.returncode, r.stdout))
+r = lk({"pkg/gone.py": 5})
+check("lock: a ceiling for a file the checkout lacks fails (a rename leaves no stale line)", r.returncode == 1 and "pkg/gone.py is no file of this checkout" in r.stdout, (r.returncode, r.stdout))
+for what, table in (("zero", {"pkg/hot.py": 0}), ("a string", {"pkg/hot.py": "3"}), ("a bool", {"pkg/hot.py": True}), ("an empty table", {}), ("a list", ["pkg/hot.py"]), ("not JSON", "{")):
+    r = lk(table)
+    check(f"lock: a ceiling file with {what} fails", r.returncode == 1 and "::error::" in r.stdout, (r.returncode, r.stdout, r.stderr))
+r = tool("lock", "--map", str(T / "nomap.json"), env={"SUITEMAP_ROOT": str(LK)})
+check("lock: no map is a failure naming it, never a pass", r.returncode == 1 and "no map to measure" in r.stderr, (r.returncode, r.stdout, r.stderr))
+REAL_CEIL = json.loads((pathlib.Path(SCR) / "suitemap_ceilings.json").read_text(encoding="utf-8"))
+check("lock: the repo's own table holds the 15 hottest files with whole-number ceilings, each a file of the checkout",
+      len(REAL_CEIL) == 15 and all(type(v) is int and v > 0 for v in REAL_CEIL.values()) and all((pathlib.Path(SCR).parent / k).exists() for k in REAL_CEIL), REAL_CEIL)
+REAL_MAP = pathlib.Path(SCR).parent / ".suitemap-ci" / "map.json"   # a copy of the tree that fetched CI's map checks the real table against it; CI's refresh does it on every new map
+if REAL_MAP.exists():
+    r = tool("lock", "--map", str(REAL_MAP), env={"SUITEMAP_ROOT": str(pathlib.Path(SCR).parent)})
+    check("lock: the repo's own ceilings hold against the fetched CI map", r.returncode == 0, (r.returncode, r.stdout[-800:], r.stderr))
+
 # [final]
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

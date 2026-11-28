@@ -51,6 +51,7 @@ from stackshot.core.store import _item_files
 from stackshot.fleet import caller_keys as _keys
 from stackshot.github import ghsync as _gh
 from stackshot.model import bullet_text as _bt
+from stackshot.model import member_gates as _mgates
 from stackshot.model.field_gates import _description_limits, _fit, _subject_max
 from stackshot.projects import projects as _prj
 from stackshot.projects.project_registry import _registry
@@ -338,7 +339,7 @@ def _settle_waiting() -> None:
 def _decision_of(it: dict[str, Any], since: float = 0.0) -> tuple[str, float] | None:
     """The owner's newest decision on an item -> (the label he chose, when), None when he has decided nothing, or (with `since`) nothing since that time."""
     ans = _ah._hooks().answers_of(it)
-    a = next((x for x in reversed(ans or []) if x.get("kind") != "comment"), None)
+    a = next((x for x in reversed(ans or []) if x.get("kind") != "comment" and _mgates.owners(x)), None)      # another member's decision approves and rejects nothing
     if not a:
         return None
     try:
