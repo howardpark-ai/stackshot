@@ -991,6 +991,7 @@ EX = '''
     digest_hour = 6
 
     [pages]
+    # every 5 minutes, see [model]
     rules = "~/a/RULES.md"
 
     [audit]
@@ -1044,6 +1045,18 @@ for what, line in (("a word of a key (digest)", "# the digest count"), ("a table
                    ("a bracket", "# see [model] above")):
     out, err = ex_sel(lambda: ex_sub("[runners]\n", line + "\n[runners]\n"), f"comment: {what}")
     check(f"example config: a comment with {what} is not plain: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# Nothing special here, just prose.\n", "# Nothing special here, just prose.  \n"), "blanks after a plain comment")
+check("example config: blanks added at the end of a plain comment line: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# every 5 minutes, see [model]\n", "# every 5 minutes, see [model] \t\n"), "blanks after a comment that is not plain")
+check("example config: blanks added at the end of a comment line that is not plain (digit, bracket) are no change of it: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", "   \n[runners]\n"), "blank line of blanks")
+check("example config: a blank line made of blanks: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# every 5 minutes, see [model]\n", "# every 6 minutes, see [model]\n"), "comment that is not plain edited")
+check("example config: a comment that is not plain, edited in its words, selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5\n", "digest = 5 \n"), "blank after a code line")
+check("example config: a blank at the end of a code line selects the fixture readers (a suite's pattern may end on the line)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", "[runners] \n"), "blank after a header")
+check("example config: a blank at the end of a table header selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("guards = true            # a comment", "guards = true            # another comment"), "trailing comment edited")
 check("example config: a trailing comment edited on a code line selects the fixture readers (a suite's regex takes the whole line)", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5  # x"), "trailing comment added")
@@ -1168,6 +1181,9 @@ def e8():
     ls[i:i + 3] = ["[registries]", "projects.key = " + ls[i + 1].split("=", 1)[1].split("#")[0].strip(), "projects.match = " + ls[i + 2].split("=", 1)[1].strip()]
     put("\n".join(ls))
 REAL_PLAIN = "# Some plain prose about nothing in particular."
+out, err = real_sel(lambda: swap("[router]  ", "# This is for one thing at a time.\n[router]  "), "real: comment with function words of names")
+check("real example: a plain comment holding only English function words of compound names (for, one, at, the) selects the direct readers only", out.split() == ["direct"], (out, err))
+check("name_words: the function words of a compound name are no name, its content words are", smod.name_words({"zone.no_such_file", "zone.ssh_for_one"}, set()) == {"zone", "such", "file", "ssh"})
 for word in ("git", "ssh", "cap"):
     out, err = real_sel(lambda: swap("[router]  ", f"# the {word} thing\n[router]  "), f"real: comment with {word}")
     check(f"real example: a plain comment holding the short key word {word!r} selects the fixture readers (whole-word test, not only the 4-letter substring)", out.split() == FIX, (out, err))

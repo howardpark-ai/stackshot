@@ -165,7 +165,8 @@ and that is narrow on purpose:
     name inside a longer word) that is a name the fixtures patch, read or grep: the table and key names of the file itself (old and new)
     and the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py. A comment with `=`, `[`, a quote,
     a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
-    replaces text without anchoring it). → the direct readers
+    replaces text without anchoring it). A blank at the end of a whole-line comment or of a blank line is no change (the line is compared without it);
+    a blank at the end of a code line is one (a suite's pattern may end on the line). → the direct readers
   * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
     takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is a change at, or directly
     after, the first line of the file (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it for the configs it writes; the
@@ -3133,13 +3134,18 @@ def code_lines(text):
 PLAIN_COMMENT = re.compile(r"[A-Za-z .,;:!?()'-]*")
 
 
+# English function words that a compound name holds (`no_such_file`, `max_age_for_one`): a suite patches or greps a name by its whole text, with an
+# underscore, which a plain comment has none of, so these never tell a comment that names a setting from prose. A content word of a name (ssh, cap, git) is not here.
+FUNCTION_WORDS = frozenset("a an and are as at be by do for from if in into is it no not of on one or per the to up was when with".split())
+
+
 def name_words(paths, items):
     """the lowercase words of every name a fixture suite may patch, read or grep: the dotted paths of the constants of tests/_instance.py and
     of every table and key of the example (old and new)"""
     words = set()
     for p in list(paths) + [p for p, _ in items]:
         words |= set(re.findall(r"[a-z]+", p.lower()))
-    return words
+    return words - FUNCTION_WORDS
 
 
 def plain_comment(line, words):
@@ -3157,11 +3163,17 @@ def plain_comment(line, words):
 
 
 def layout_only(ot, nt, pinned, words):
-    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), the lines from a
-    pinned table's header to its first code line are as they were, and no change starts at, or directly after, the first line (stackshot/cli.py anchors
-    `\\A(# stackshot\\.example\\.toml)` on it; the test is wider than that line on purpose). Every other line is equal and in order, so the code is untouched."""
+    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string) or in the blanks at the end of
+    a whole-line comment or a blank line, the lines from a pinned table's header to its first code line are as they were, and no change starts at, or directly
+    after, the first line (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it; the test is wider than that line on purpose). Every other line is equal and
+    in order, so the code is untouched. A blank at the end of a code line is a change: a suite's pattern may end on the line (`^\\[server\\]\\n`)."""
     oraw, oc = code_lines(ot)
     nraw, nc = code_lines(nt)
+    ofree = set(range(len(oraw))) - {n for n, _ in oc}
+    nfree = set(range(len(nraw))) - {n for n, _ in nc}
+    # a free line (a comment or a blank line outside a string) is compared without the blanks at its end; a code line, and any line of a string, as it is
+    oraw = [l.rstrip(" \t") if n in ofree else l for n, l in enumerate(oraw)]
+    nraw = [l.rstrip(" \t") if n in nfree else l for n, l in enumerate(nraw)]
 
     def anchors(raw, cl):
         found = {}
@@ -3173,8 +3185,6 @@ def layout_only(ot, nt, pinned, words):
         return found
     if anchors(oraw, oc) != anchors(nraw, nc) or oraw[:1] != nraw[:1]:
         return False
-    ofree = set(range(len(oraw))) - {n for n, _ in oc}
-    nfree = set(range(len(nraw))) - {n for n, _ in nc}
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, oraw, nraw, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
