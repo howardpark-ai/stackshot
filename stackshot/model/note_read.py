@@ -1,4 +1,4 @@
-"""note_read.py — what the owner's note on his step says, read by the server so it can apply it (a pure module, no config and no store).
+"""note_read.py — what the owner's typed words say, read by the server so it can apply them (a pure module, no config and no store).
 
 The owner's note box on a step (the Send note button) takes a note. Two kinds of note say what the owner did or will do, and the server applies them itself instead of leaving the session that takes the item to
 read them:
@@ -12,12 +12,23 @@ read them:
 
 `read(text, now, parse_date)` answers {"done": bool, "until": ""}; `until` is YYYY-MM-DDTHH:MM (a day alone gets 09:00, a part of the day its hour). `parse_date(text, today)` is
 watchers.parse_date, passed in so this module needs no config. In doubt nothing is found: a note the server does not read is a note the session judges, which is today's behaviour.
+
+A question. Words he typed with no option picked (an answer in the box, a comment) that are nothing but a question are no call of his (`is_question`): the answer path records them as a comment marked
+`question`, and the decision is not asked again until the item's description has been rewritten (`question_fields`, `answered_on_item`; service/gates.py `gate_decision_again`). Only the server writes that
+mark, on a record only the server writes (metadata.answers). In doubt the words are no question: they stay the decision they would otherwise be.
 """
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
+
+ASK_MARKS = ("?", chr(0xFF1F))      # the question mark and its full-width form (the router reads a notice that asks something by the same two)
+_CLOSERS = "\"')]}*_`" + chr(0x201D) + chr(0x2019) + chr(0xFF09) + chr(0x300D)      # what may follow a sentence's last mark
+_EA_MARKS = chr(0x3002) + chr(0xFF01) + chr(0xFF1F)      # the East Asian full stop, exclamation and question marks: a sentence ends at one with no space after
+_SENTENCE_RX = re.compile(rf"(?<=[.!?])[\"'{chr(0x201D)}{chr(0x2019)})\]]*\s+|(?<=[{_EA_MARKS}])|\n+")      # where one sentence ends: a mark and a space, an East Asian mark, a line end
+_JOINED_RX = re.compile(r";|\s--?\s|\s–\s|—")      # a semicolon or a dash may join a statement to a question inside one sentence
 
 _DONE_VERBS = r"(?:ran|did|done|finished|completed|executed|applied|deleted|merged|pasted|posted|sent)"      # no bare "run": "run it" asks for the step, it does not say it was done
 _DONE_RX = re.compile(
@@ -39,6 +50,34 @@ _COND_RX = re.compile(r"\b(?:if|unless|maybe|perhaps|might|depends?|assuming|pro
 _PAST_RX = re.compile(r"\b(?:yesterday|last night|last week|earlier|already|ago)\b", re.I)
 _PARTS = (("morning", "09:00"), ("afternoon", "14:00"), ("evening", "19:00"), ("night", "21:00"), ("noon", "12:00"))
 _TEXT_MAX = 240          # a longer note is a message to read, not a one-line statement of when
+
+
+def is_question(text: str, takes_stance: Callable[[str], bool], option_names: Iterable[str] = ()) -> bool:
+    """The words are nothing but a question: every sentence ends in a question mark. They are not when they open with a yes or a no (`takes_stance`, ask_read.recommend_stance, passed in so this module
+    needs no config) or with one of `option_names` set off by a comma, a colon or a bracket, or when a semicolon or a dash joins two parts: each of these may say what he decided beside what he asks."""
+    t = str(text or "").strip()
+    if not t or takes_stance(t) or _JOINED_RX.search(t):
+        return False
+    names = "|".join(re.escape(n.strip()) for n in option_names if n and n.strip())
+    if names and re.match(rf"\W*(?:option\s+)?(?:{names})\s*[,:)]", t, re.I):
+        return False
+    parts = [p for p in (x.strip().rstrip(_CLOSERS) for x in _SENTENCE_RX.split(t)) if p]
+    return bool(parts) and all(p.endswith(ASK_MARKS) for p in parts)
+
+
+def _description_mark(description: Any) -> str:
+    """A short digest of a description's words (a change of spacing or line breaks alone changes nothing)."""
+    return hashlib.sha256(" ".join(str(description or "").split()).encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def question_fields(description: Any) -> dict[str, Any]:
+    """What an answer record that is a question carries beside his words: the mark, and the item's description as it stood when he asked (its digest)."""
+    return {"question": True, "description_at": _description_mark(description)}
+
+
+def answered_on_item(rec: dict[str, Any], description: Any) -> bool:
+    """Has the question on this record been answered on the item: is the description another one than the one he asked under?"""
+    return rec.get("description_at") != _description_mark(description)
 
 
 def is_done(text: str) -> bool:
