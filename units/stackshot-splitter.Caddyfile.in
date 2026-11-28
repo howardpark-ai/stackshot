@@ -32,6 +32,15 @@ http://:@LISTEN_PORT@ {
 			copy_headers X-Verified-User>@IDENTITY_HEADER@
 		}
 		reverse_proxy @mcp @DOOR_ADDR@
-		reverse_proxy @BOARD_ADDR@
+		# the machines' own calls (/client/*: the puller's held poll, the hooks) keep a plain proxy: each has its own timeout and its own way
+		# to treat a refused connection, and a retry here would hold a 50 s poll for up to 15 s more before it starts
+		@client path /client /client/*
+		reverse_proxy @client @BOARD_ADDR@
+		# the board and its pages: while the board restarts, a request whose connection is refused is tried again for up to 15 s (every 250 ms)
+		# instead of answering with a connect error. Only a failed connect is retried, never a request the board has taken.
+		reverse_proxy @BOARD_ADDR@ {
+			lb_try_duration 15s
+			lb_try_interval 250ms
+		}
 	}
 }
