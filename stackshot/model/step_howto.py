@@ -21,8 +21,10 @@ _LABEL = re.compile(r"^[^:→>]{1,24}:(?:\s|$)")                              # 
 _DATE = re.compile(r"(?i)\d{4}-\d{2}-\d{2}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}\b|\b(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?\b")
 _WARNING = re.compile(r"(?i)\b(?:warning|caution|careful|beware|danger|note|important|avoid|mind)\b")
 _NEGATION = re.compile(r"(?i)\b(?:not|no|never|none|nothing|nor|cannot|without)\b|n't\b")
-_FACT = re.compile(r"(?i)\b(?:is|are|was|were|be|been|being|has|have|had|did|does|shows?|showed|removes?|removed|returns?|means|gives?|because|since|already|when|if|which|that)\b")
-_PAST = re.compile(r"(?i)^\w+ed\b")                                         # a line that opens with a past-tense verb tells what happened
+_FACT = re.compile(r"(?i)\b(?:is|are|was|were|be|been|being|has|have|had|did|does|shows?|showed|removes?|removed|returns?|means|gives?|because|since|already|which|that)\b")
+_COND = re.compile(r"(?i)\b(?:when|if)\b")                                    # a fact word unless the line opens with an imperative verb ("Upload [the drive](...) when ready")
+_IMPERATIVE = re.compile(r"(?i)^(?:attach|upload|open|click|select|choose|press|tap|go|navigate|visit)\b")
+_PAST = re.compile(r"(?i)^(?:\w+ed|went|ran|sent|got|made|took|did|found|wrote|built|came|saw|gave|left)\b")   # a line that opens with a past-tense verb tells what happened
 
 
 def _norm(text: Any) -> str:
@@ -32,6 +34,8 @@ def _norm(text: Any) -> str:
 def is_howto(text: str) -> bool:
     """Is this one bullet's text (no dash) a how-to bullet? The two shapes above, and none of the shapes that tell something else."""
     if _LABEL.match(text) or _DATE.search(text) or _WARNING.search(text) or _NEGATION.search(text) or _FACT.search(text) or _PAST.match(text):
+        return False
+    if _COND.search(text) and not _IMPERATIVE.match(text):
         return False
     if len(_ARROW.findall(text)) >= 2:
         return True
@@ -54,4 +58,6 @@ def howto_bullets(description: Any, step: Any) -> list[str]:
         text = m.group(1).strip()
         if is_howto(text) and _norm(text) not in said and text not in out:
             out.append(text)
-    return out[:MAX_BULLETS]
+            if len(out) >= MAX_BULLETS:
+                break
+    return out

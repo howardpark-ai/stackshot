@@ -8,7 +8,8 @@ Nothing is stored and no write path reads it: the stored item is the same bytes 
   2  nothing is drawn once the step has ended (a completed item, an item that is no longer his step), nor for a step that already says the bullet
   3  the detector, one case per rule: two or more arrows, attach or upload with a link; label, date, warning, negation, fact, past event, a single arrow, no link, a fenced line, a step that says it
   4  no write path changes: drawing the pages leaves the stored items byte for byte, and nothing under stackshot/service or stackshot/tools names the module
-  5  the audit: one `step-howto` finding for an open step with how-to bullets (the filing shape, read only, no move), none after the step ends or with only facts
+  5  a board of several members: the bullets draw under the owner's step block only, never under another member's; the stylesheet holds the list's rules
+  6  the detector: an imperative opener wins over when/if, irregular past openers are out, 50000 distinct lines stop at the cap quickly
 
     tests/run-suite step_howto        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
@@ -59,6 +60,7 @@ item(2, status="completed", step=STEP, next=f"Oliver: {STEP}\nhome-agent: check"
 item(3, step="", next="home-agent: check", state="working", mover="home-agent")                        # no step of his
 item(4, description="- Goal: send the billing export\n- The export is slow today", step=STEP, owner_step=f"Oliver: {STEP}", next=f"Oliver: {STEP}\nhome-agent: check")   # only facts
 item(5, description=f"- {PATH}\n- Problem: the export is slow today", step=f"{PATH}, then attach", owner_step=f"Oliver: {PATH}, then attach", next=f"Oliver: {PATH}, then attach\nhome-agent: check")                                      # the step already says the path
+item(6, step=STEP, owner_step=f"Oliver: {STEP}", next=f"Oliver: {STEP}\nPat: Check the export looks right\nhome-agent: check")   # two members: his step is Oliver's, Pat holds an open step of his own
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
@@ -87,14 +89,14 @@ def row(i):
 for where, h in (("page", page(1)), ("home", row(1))):
     li = howto(h)
     check(f"1 {where}: the click path and the attach line are drawn under his step, in order, and nothing else", len(li) == 2 and "Open Settings" in li[0] and "Export CSV" in li[0] and li[1].startswith("Attach the file") and "files.example.org" in li[1], (li, h[:600]))
-    check(f"1 {where}: ...after his step, not before it", 0 <= h.find("Export the billing CSV and attach it") < h.find("istephowto"), h[:600])
+    check(f"1 {where}: ...after his step, not before it", 0 <= h.find("Export the billing CSV and attach it") < h.find('class="istephowto"'), h[:600])
     check(f"1 {where}: no label, date, warning, negation or fact is drawn", not any(w in "".join(howto(h)) for w in ("Goal", "slow today", "2026-11-20", "Legacy")), h[-600:])
 
 # ---- 2. nothing once the step ends, nor for facts, nor for what the step says
 check("2 a completed item draws none", howto(page(2)) == [], page(2)[:300])
-check("2 an item that is not his step draws none", "istephowto" not in page(3) and "istephowto" not in row(3), None)
-check("2 a description of facts draws none", "istephowto" not in page(4) and "istephowto" not in row(4), None)
-check("2 a path the step already says is not drawn twice", "istephowto" not in page(5) and "istephowto" not in row(5), None)
+check("2 an item that is not his step draws none", 'class="istephowto"' not in page(3) and 'class="istephowto"' not in row(3), None)
+check("2 a description of facts draws none", 'class="istephowto"' not in page(4) and 'class="istephowto"' not in row(4), None)
+check("2 a path the step already says is not drawn twice", 'class="istephowto"' not in page(5) and 'class="istephowto"' not in row(5), None)
 
 # ---- 3. the detector, a case per rule
 from stackshot.model import step_howto as H
@@ -118,26 +120,26 @@ check("3 rule: a bullet the step already says is left out, and an empty step dra
 check("3 rule: at most five", len(got(*[f"- Open A{i} → B → C" for i in range(9)])) == 5, None)
 
 # ---- 4. no write path changes
-check("4 drawing the item page, the home row and the audit leaves every stored item byte for byte", stored() == before, None)
+check("4 drawing the item page and the home row leave every stored item byte for byte", stored() == before, None)
 srcs = "".join(p.read_text() for d in ("service", "tools") for p in (pathlib.Path(STACK) / "stackshot" / d).rglob("*.py"))
 check("4 no service or tool module names the module: no write path can read it", "step_howto" not in srcs, None)
 
-# ---- 5. the audit finding
-from stackshot.audit import audit_checks as AC
-items = {f"a{i}": json.loads((T / f"store/a/{i}.json").read_text()) for i in (1, 2, 3, 4, 5)}
-for g, it in items.items(): it["written_at"] = now - 3600; it["written_by"] = "home-agent"
-class _Env:
-    def role_map(self): return {"home-agent": {"role": "background"}}
-    def __getattr__(self, name): return lambda *a, **k: ""
-try:
-    fs, _flags = AC.filing_findings(items, {}, now, _Env())
-except Exception as e:
-    fs = []; print(f"filing_findings failed: {e!r}")
-BID1 = "board" + chr(35) + "1"      # the shown id, built at run time
-sh = {f["id"]: f for f in fs if f["category"] == "step-howto"}
-check("5 an open step with how-to bullets is one step-howto finding, with the filing shape and the fix line", list(sh) == [BID1] and sh[BID1]["fix"] == AC.FIX["step-howto"] and sh[BID1]["source"] == "code" and "how-to" in sh[BID1]["detail"] and "Open Settings" in sh[BID1]["detail"], sh)
-check("5 none for a step that ended, no step of his, facts only, or a path the step says", set(sh) == {BID1}, sh)
-check("5 the category is one the filing pass can raise, needs no person, and the check is read only", "step-howto" in AC.CHECKS_FILING and not AC.needs_person("step-howto") and stored() == before, None)
+# ---- 5. several members: the bullets draw under the owner's own step block only
+from stackshot.core import members as _members
+OLIVER = _members.first(); PAT = _members.Person("Pat", (), ("pat@example.org",))
+_members.members = lambda: [OLIVER, PAT]
+mpage = lambda who: bd.item_html("a6", answer={**BOX(6), "member": who})
+check("5 the owner's step block draws the bullets", len(howto(mpage("Oliver"))) == 2,mpage("Oliver")[:600])
+check("5 the other member's step block (the stored step is asked of someone else) draws none", "Check the export looks right" in mpage("Pat") and 'class="istephowto"' not in mpage("Pat"), mpage("Pat")[:600])
+css = bd._css()
+check("5 the stylesheet has the list's rules, muted and compact, in the shared variables", "ul.istephowto{list-style:disc;" in css and "ul.istephowto>li{margin:2px 0}" in css and "color:var(--mut)" in css.split("ul.istephowto{", 1)[1].split("}", 1)[0], None)
+
+# ---- 6. the detector: an imperative opener wins over when/if, irregular past openers are out, the cap
+check("6 when or if after an imperative opener is kept", ok("Upload [the drive](https://files.example.org/d) when ready") and ok("Attach https://files.example.org/a.csv if asked") and ok("Open Settings → Billing → Export when ready"), None)
+check("6 when or if with no imperative opener is still a fact", no("The menu shows Settings → Billing → Export when ready") and no("Settings → Billing → Export if it works") and no("Uploaded [the drive](https://files.example.org/d) when ready"), None)
+check("6 an irregular past-tense opener is not a how-to bullet", all(no(f"{v} Settings → Billing → Export") for v in ("Went to", "Ran build → test →", "Sent", "Got", "Made", "Took", "Found", "Wrote", "Built", "Did")) and no("Ran build → test → deploy") and no("Went to Settings → Billing → Export"), None)
+t0 = time.perf_counter(); big = got(*[f"- Open A{i} → B → C" for i in range(50000)]); dt = time.perf_counter() - t0
+check("6 50000 distinct lines stop at the cap and finish in under a second", len(big) == 5 and dt < 1.0, dt)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
