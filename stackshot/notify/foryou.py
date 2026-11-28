@@ -17,6 +17,7 @@ What is stored, in one small JSON file in the state dir (<state>/for-you.json), 
             urgent   true for a due date within 24 h of an item that is the owner's move: also posted once to Slack (the due row of any other item is made without it, and raised when the item turns to him)
             slacked  when the Slack post was made (epoch), 0 = not posted
             slack_tries  how many times the post was tried (a failed one is tried again on a later pass, SLACK_TRIES in all)
+            member   the member the row is for, written only when it is not the first member (a row with none is the first member's, as every row was before several members)
 A file that does not parse is moved aside to for-you.json.bad-<epoch> and the list starts empty (ids go on growing).
 A row whose kind is no longer in KINDS (a `release_failed` row of before an earlier change) is dropped when the file is read, so it leaves the list
 and the next write removes it from the file.
@@ -81,7 +82,7 @@ def newest_first(d: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def add(d: dict[str, Any], *, key: str, kind: str, gid: str = "", item: str = "", project: str = "", what: str, url: str = "", urgent: bool = False,
-        ts: float, now: float) -> dict[str, Any] | None:
+        member: str = "", ts: float, now: float) -> dict[str, Any] | None:
     """Make a row for an event, at the time `ts`, in `d` → the row, or None when this key already made one (a row marked seen included: it stays seen). `now` is the clock the keys' 30 days are counted from.
     ValueError for a kind that is not one of KINDS."""
     if kind not in KINDS:
@@ -91,6 +92,8 @@ def add(d: dict[str, Any], *, key: str, kind: str, gid: str = "", item: str = ""
     d["seq"] += 1
     row = {"id": d["seq"], "key": key, "ts": ts, "kind": kind, "gid": gid, "item": item, "project": project, "what": str(what),
            "url": url, "urgent": bool(urgent), "slacked": 0, "slack_tries": 0}
+    if member:
+        row["member"] = str(member)
     d["rows"].append(row)
     d["rows"] = sorted(d["rows"], key=lambda r: (float(r.get("ts") or 0), int(r["id"])))[-MAX_ROWS:]
     d["keys"][key] = ts
@@ -195,6 +198,6 @@ def payload(rows: list[dict[str, Any]], flags: dict[str, str], tz: Any, now: flo
     out = []
     for r in rows:
         out.append({**{k: r.get(k) for k in ("id", "kind", "item", "project", "what", "url", "urgent", "ts")},
-                    "when": stamp(r.get("ts") or 0), "slacked": bool(r.get("slacked"))})
+                    "when": stamp(r.get("ts") or 0), "slacked": bool(r.get("slacked")), **({"member": r["member"]} if r.get("member") else {})})
     fl = {(shown_of(g) if shown_of else g): m for g, m in flags.items()}
     return {"generated": stamp(now), "rows": out, "flags": fl}

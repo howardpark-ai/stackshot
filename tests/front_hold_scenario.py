@@ -1488,5 +1488,17 @@ fresh(); no_log()
 fresh()
 
 fresh()
+# ---- 9. a board of several members: a front agent takes the mark of any member
+_members_before = _cfg.CFG.get("members")
+_cfg.CFG["members"] = [{"name": "Oliver"}, {"name": "Dana"}]
+try:
+    fresh(); n0 = len(pushes()); out = msg(FRONT, "[for Dana]\nFYI the build is done, no action needed.", BACK); settle()
+    check("9a: with several members a second member's mark is a mark: the note is held for the next turn, as a marked note is", out.startswith("held for work-osprey-main's next turn") and held.count(A) == 1 and reach(A, n0) == [], out)
+    fresh(); n0 = len(pushes()); out = msg(FRONT, "can you look at the export page when you have a minute?", "home-beta"); settle()
+    check("9b: …and an unmarked message is still sent on to the background agent, the reply naming every member's mark", "[for Oliver]" in out and "[for Dana]" in out, out)
+finally:
+    if _members_before is None: _cfg.CFG.pop("members", None)
+    else: _cfg.CFG["members"] = _members_before
+fresh()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

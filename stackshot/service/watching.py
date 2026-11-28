@@ -18,10 +18,12 @@ from typing import Any, Callable
 from stackshot.anchors import anchor_scope as _ascope
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
+from stackshot.core import members as _members
 from stackshot.core.instance import OWNER
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label
 from stackshot.github import ghsync as _gh
+from stackshot.model import member_gates as _mgates
 from stackshot.model import model as _model
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.needs import _after_of, _waits_decision
@@ -36,7 +38,6 @@ from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
 
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)
 
 
 def anchor_key(url: str) -> str:
@@ -230,8 +231,8 @@ def watch_text(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> tuple[s
     if not rows:
         return None
     msg_rows = [(_gh.shown(g), what, f"{it.get('subject') or ''} ({(it.get('metadata') or {}).get('project') or 'no project'})", _telling.notice_link(g)) for g, it, what in rows]
-    marked = any(_telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and _waits_decision(m) for _g, it, _w in rows)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): the mark is for what he has to decide; a wake that is the agent's own move is not marked
-    return _watch.message(msg_rows), (_FOR_OWNER if marked else ""), [g for g, *_ in rows]
+    marked = next((it for _g, it, _w in rows if _telling.front_keeper(sid, str((m := it.get("metadata") or {}).get("project") or ""))[0] and _waits_decision(m)), None)      # per row, as each row's project reads the recipient (a keeper of one project is a front agent of another): the mark is for what he has to decide; a wake that is the agent's own move is not marked
+    return _watch.message(msg_rows), (_members.for_mark(_members.person_of(_mgates.asked_member(marked.get("metadata") or {}))) if marked is not None else ""), [g for g, *_ in rows]
 
 
 def watch_tell(sid: str, rows: list[tuple[str, dict[str, Any], str]]) -> None:

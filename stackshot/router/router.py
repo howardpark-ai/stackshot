@@ -380,9 +380,10 @@ def _rx(kind: str) -> "re.Pattern[str]":
     own = _cfg.owner()
     names = tuple(_cfg.owner_names())
     dec = _cfg.kw_alt("router", "decision")      # the instance's own words for a decision (empty: the English ones only)
-    key = (kind, own, names, dec)
+    marks = tuple(_members.for_mark(p) for p in _members.members())      # every member's mark: a notice for any member is for a person
+    key = (kind, own, names, dec, marks)
     if key not in _RX:
-        for_owner = r"\[for " + re.escape(own) + r"\]"
+        for_owner = "|".join(re.escape(m).replace("\\ ", " ") for m in marks)
         if kind == "any":         # any case: [for <owner>], needs: decision, decision(s), the configured decision words, a name in another script
             other = [re.escape(n) for n in names if not n.isascii()]
             _RX[key] = re.compile("|".join([for_owner, r"needs:\s*decision", r"\bdecisions?\b", *other, *([dec] if dec else [])]), re.I)
@@ -527,7 +528,7 @@ def _owner_target(t: dict[str, Any] | None, root: str, cx: Context) -> str:
 
 
 def _owner_logins() -> set[str]:
-    """The names the owner writes on GitHub as, lower-cased: [github] owner_login (set it, so that a missing token login never turns his own notice into
+    """The names the members write on GitHub as, lower-cased: each member's `github` login and [github] owner_login (set it, so that a missing token login never turns his own notice into
     build-side news, and anchor-hub's process and the server judge alike: a false keep costs a turn, a false divert hides what he wrote) and the login the
     mirror's token belongs to when this process has read it (ghsync.known_login, never a request)."""
     lg = ""
@@ -537,7 +538,7 @@ def _owner_logins() -> set[str]:
     except Exception:  # noqa: BLE001
         pass
     cfg = str(_cfg.get("github", "owner_login", default="") or "").strip().lower()
-    return {lg, cfg} - {""}
+    return {lg, cfg, *(login.lower() for login, _p in _members.logins())} - {""}      # every member's own login: what any member writes is not news to them
 
 
 def _is_owner_name(who: Any) -> bool:
@@ -1117,7 +1118,9 @@ def machine_reason(n: dict[str, Any]) -> str:
     if types and all(t.startswith(_STATE_ETYPE) for t in types):
         return f"a routine pull request or issue event ({'+'.join(types)})"
     if not message_like(n) and _is_owner_name(n.get("who")):
-        return f"{_cfg.owner()}'s own edit"
+        w = next((x.strip() for x in str(n.get("who") or "").split(",") if _is_owner_name(x.strip())), "")      # the member who wrote it (by name or by their GitHub login), the first member's name when none is told apart
+        who = _members.person_of(w) or _members.person_of_login(w)
+        return f"{who.name if who else _cfg.owner()}'s own edit"
     return ""
 
 

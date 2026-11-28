@@ -1645,6 +1645,22 @@ check("the setting back, the comment missed under it is read at the next poll (n
       and all("as the token's login" in t[2] for t in told), (r, told))
 n_ans = len(rd(g_c[0], gn)["metadata"]["answers"])
 
+# ---- 6d2. a board of several members: each member's own login is read, and the comment is stored `by` that member
+_had_members = "members" in _cfg.CFG; _was_members = _cfg.CFG.get("members")
+_cfg.CFG["members"] = [{"name": "Pat"}, {"name": "Sam", "github": "Sam-GH"}]
+try:
+    g_m = mk("[home] two members comment"); n_m = G.issue_of(g_m, STORE); gm = num(g_m)
+    c_sam = F.comment(n_m, "Sam says yes", login="sam-gh"); c_pat = F.comment(n_m, "Pat says no"); c_x = F.comment(n_m, "a stranger's word", login="someone-else"); told.clear()
+    r = G.poll_comments(GH, STORE, say=lambda s: None); ans_m = rd(g_m[0], gm)["metadata"].get("answers") or []
+    by_id = {a_["comment_id"]: a_ for a_ in ans_m}
+    check("a comment from a member's own login (any letter case) is stored `by` that member; the first member's (the token's login) carries no `by`; a stranger's is not read",
+          r["new"] == 2 and len(ans_m) == 2 and by_id[c_sam["id"]].get("by") == "Sam" and "by" not in by_id[c_pat["id"]] and c_x["id"] not in by_id, (r, ans_m))
+    check("the notice to the mover names the member who commented", any("Sam commented on" in t[2] and "Sam says yes" in t[2] for t in told) and any("Pat commented on" in t[2] for t in told), told)
+    check("the state keeps the first member's login", G.comments_state().get("login") == "example-owner", G.comments_state())
+finally:
+    if _had_members: _cfg.CFG["members"] = _was_members
+    else: _cfg.CFG.pop("members", None)
+
 # ---- 6e. the body is slim, BODY_FORM 3, and the one-time rewrite goes through the paced queue, behind live writes, only when asked for
 n_first, n_aft = G.issue_of(g_first, STORE), G.issue_of(g_aft, STORE)
 check("ref: an issue-numbered item is #<n>, an alias resolves to its issue, an item with no issue yet keeps its shown form board-tmp-<machine>#<n> (the server's notes still use it)",

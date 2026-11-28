@@ -204,6 +204,8 @@ NOT_TEXT = [
 for label, members, expect in NOT_TEXT:
     refused(f"not-text-{label}", members, expect)
 refused("not-text-two-faults", [{"name": 5, "aliases": [1], "emails": [2]}], ["entry 1: name is not text (a number)", "entry 1: aliases item 1 is not text (a number)", "entry 1: emails item 1 is not text (a number)"])
+refused("dup-github", [{"name": "Pat", "github": "Pat-GH"}, {"name": "Lee", "github": "pat-gh"}], ['the GitHub login "pat-gh" is already entry 1\'s'])
+refused("github-number", [{"name": "Pat", "github": 5}], ["entry 1: github is not text (a number)"])
 PROBE_PROBLEMS = r"""
 import json, sys
 from stackshot.core import members

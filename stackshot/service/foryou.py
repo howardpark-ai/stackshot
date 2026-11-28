@@ -85,14 +85,14 @@ def rows() -> list[dict[str, Any]]:
 
 
 def add(*, key: str, kind: str, gid: str = "", item: str = "", project: str = "", what: str, url: str = "", urgent: bool = False,
-        ts: float | None = None) -> dict[str, Any] | None:
+        member: str = "", ts: float | None = None) -> dict[str, Any] | None:
     """Make a row for an event → the row, or None when this key already made one (a row marked seen included: it stays seen)."""
     if kind not in _fy.KINDS:
         raise ValueError(f"for-you: no such kind {kind!r}")
     when = time.time() if ts is None else float(ts)
     with _LOCK:
         d = _load()
-        row = _fy.add(d, key=key, kind=kind, gid=gid, item=item, project=project, what=what, url=url, urgent=urgent, ts=when, now=time.time())
+        row = _fy.add(d, key=key, kind=kind, gid=gid, item=item, project=project, what=what, url=url, urgent=urgent, member=member, ts=when, now=time.time())
         if row is not None:
             _save(d)
         return row

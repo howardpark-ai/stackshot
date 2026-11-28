@@ -413,7 +413,7 @@ SERVER_SRC = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="
 stree = ast.parse(SERVER_SRC)
 defined = {n.name for n in stree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))} | {t.id for n in stree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)} | {n.target.id for n in stree.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)}
 moved_defs = {n.name for n in tree.body if isinstance(n, ast.FunctionDef) and n.name not in ("install", "_hooks")} | {t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name) and t.id != "_hooks_"} | {n.target.id for n in tree.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.target.id != "_hooks_"}
-check("6 every name that moved is in the table of this suite (MOVED), so the checks below see all of them", {n for n in moved_defs if n != "_FOR_OWNER"} == set(MOVED), sorted(({n for n in moved_defs if n != "_FOR_OWNER"} ^ set(MOVED))))
+check("6 every name that moved is in the table of this suite (MOVED), so the checks below see all of them", {n for n in moved_defs if n not in ("_FOR_OWNER", "_mark_of", "_unmark")} == set(MOVED), sorted(({n for n in moved_defs if n not in ("_FOR_OWNER", "_mark_of", "_unmark")} ^ set(MOVED))))
 old_names = set(MOVED.values())
 check("6 server.py defines none of the bodies and constants that moved", not (defined & old_names), sorted(defined & old_names))
 rebound = [a.asname or a.name for n in ast.walk(stree) if isinstance(n, ast.ImportFrom) and n.module == "stackshot.service.telling" for a in n.names]

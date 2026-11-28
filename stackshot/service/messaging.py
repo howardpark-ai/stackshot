@@ -35,6 +35,7 @@ from stackshot.core import agentbox as _ab
 from stackshot.core import call_log as _calls
 from stackshot.core import config as _cfg
 from stackshot.core import interp as _interp
+from stackshot.core import members as _members
 from stackshot.core.instance import NAME, OWNER
 from stackshot.fleet import fleet as _fleetstate   # publisher(): the box that runs this server
 from stackshot.fleet import liveness as _lv
@@ -65,6 +66,11 @@ from stackshot.waits import quiet as _quiet
 from stackshot.waits import reports as _reports
 
 _FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as web/tools/text.py holds it
+def _marks_said() -> str:
+    """The mark a refusal tells a sender to put on the first line: the first member's, and with several members each member's (`[for A] or [for B]`)."""
+    return " or ".join(_members.for_mark(p) for p in _members.members())
+
+
 _NOTE_TAIL = (f"A done or no-action note is better written on the board item it concerns (update, complete). "
               f"If it does ask something of {OWNER}, put {_FOR_OWNER} on its first line and name an open item of his.")      # what the reply of a held note says to do next
 _MARKED_NOTE_TAIL = (f"A done or no-action note is better written on the board item it concerns (update, complete). If it does ask something of {OWNER}, take the no-action phrase out, or name the open item of his it is about "
@@ -903,10 +909,11 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
     goes = (f"the project's background agent, {back} (message(to={back!r}, …))" if back and not same else f"the project, where the router rules it (to={project!r})")
     if sender.strip() and result_turn(name, sender, text, idx, roles, fyi):          # the work the agent handed over comes back: a turn, however late (off unless the agent is listed in [front] result_turn_agents)
         return _Turn()
-    if _FOR_OWNER not in first:
+    mark = _members.mark_in(first) or _FOR_OWNER      # any member's mark counts: the one this message carries, the first member's when none
+    if mark not in first:
         if (sender.strip() and _model.is_owner(sender)) or _held._owner_mark().search(text):
-            raise Refused("mark-not-first-line", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_FOR_OWNER} on the message's first line. "
-                            f"Put {_FOR_OWNER} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
+            raise Refused("mark-not-first-line", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and it takes what is for {OWNER} only with {_marks_said()} on the message's first line. "
+                            f"Put {_marks_said()} on the first line if this is for {OWNER}; anything else goes to {goes} instead.")
         front = tuple(n for n, r in roles.items() if r.get("role") == "front")
         done_note = (f"Refused: {name} is a front agent of {project} and takes no done, taken or no-action note: write it on the board item it concerns (update or complete), or say nothing.")      # with the hold switched off nothing can hold a note
         own = _own_no_action(text)          # a fixed no-action phrase as the text's own statement: a word of the list inside a sentence is no note
@@ -942,11 +949,11 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                 return _Hold(f"{project} has no background agent", project)
         if back and not same:          # not for the owner, so the project's background agent takes it: `_message` sends it there and says so
             return _Pass(back, name, project, Refused("unmarked-not-for-owner", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "
-                                                                                 f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here."))
+                                                                                 f"Put {_marks_said()} on the first line only if {OWNER} has something to do here."))
         raise Refused("unmarked-not-for-owner", f"Refused: {name} is a front agent of {project}, a session {OWNER} talks to, and this message is not for {OWNER}, so it goes to {goes}. "      # with the hold switched off nothing can hold it
-                        f"Put {_FOR_OWNER} on the first line only if {OWNER} has something to do here.")
+                        f"Put {_marks_said()} on the first line only if {OWNER} has something to do here.")
     # The mark is for what he has to do; a marked message that says nothing is needed from him, in a fixed phrase (_NOT_FOR_OWNER) that is its own statement in the text after the mark, is a note
-    marked = "\n".join([first.split(_FOR_OWNER, 1)[1], *lines[at + 1:]])
+    marked = "\n".join([first.split(mark, 1)[1], *lines[at + 1:]])
     m = _own_no_action(marked)
     ignored, his = None, []
     if m is not None and not (sender.strip() and _model.is_owner(sender)):
@@ -961,8 +968,8 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
                     _handled("marked-no-action-phrase", "written-on-item")
                     return rep_
             if _held.enabled():          # a note is nobody's turn: it is handed over with the agent's next one
-                return _Hold(f"{_FOR_OWNER} marks only what {OWNER} has to do, and this says nothing is needed from him ({m.group(0)!r}) and names no open item of his", project, _MARKED_NOTE_TAIL, "marked-no-action-phrase")
-        raise Refused("marked-no-action-phrase", f"Refused: {name} is a front agent of {project} and {_FOR_OWNER} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
+                return _Hold(f"{mark} marks only what {OWNER} has to do, and this says nothing is needed from him ({m.group(0)!r}) and names no open item of his", project, _MARKED_NOTE_TAIL, "marked-no-action-phrase")
+        raise Refused("marked-no-action-phrase", f"Refused: {name} is a front agent of {project} and {mark} marks only what {OWNER} has to do; this says nothing is needed from him ({m.group(0)!r}): write it on the board item it concerns, or say nothing. "
                         f"If {OWNER} does have something to do here, name the open item of his it is about by its plain id (a message that names one is delivered), or leave that phrase out.")
     if ignored is not None:
         _handled("marked-no-action-phrase", "judged-on-items", f"Its text also says {ignored.group(0)!r}, which was left out because the message names {', '.join(_gh.shown(g) for g in his)}, an open item of {OWNER}'s, so it was taken as a request.")
@@ -975,9 +982,9 @@ def _gate_front(to: str, text: str, idx: dict[str, dict[str, Any]], sender: str 
         if _held.enabled():
             handing = (f"Name the item you are handing over (an open item of his) by its plain id, or put his step on an item (update: needs=decision with an ask, or mover={OWNER}) and name that. "
                        if sname and _sibling_words.held_words(sender, name, text) else "")      # his quoted words are valid: the message is a hand-off, and the one thing missing is the item handed over
-            return _Hold(f"{_FOR_OWNER} must name an open item of his (a board item whose needs hold decision, or whose step is his), and this names none", project,
+            return _Hold(f"{mark} must name an open item of his (a board item whose needs hold decision, or whose step is his), and this names none", project,
                          handing or f"Put his step on an item (update: needs=decision with an ask, or mover={OWNER}), and name that item in the message by its plain id; a plain report goes on the item it concerns.")
-        raise Refused("marked-no-item-of-his", f"Refused: {name} is a front agent of {project}, and {_FOR_OWNER} must name an open item of {OWNER}'s (a board item whose needs hold decision, or whose step is his); this names none, so it starts no turn there. "
+        raise Refused("marked-no-item-of-his", f"Refused: {name} is a front agent of {project}, and {mark} must name an open item of {OWNER}'s (a board item whose needs hold decision, or whose step is his); this names none, so it starts no turn there. "
                         "Put his step on an item (update: needs=decision with an ask) and name it by its plain id, or put what happened on the item it concerns.")
     if not (sender.strip() and _model.is_owner(sender)) and not _turn_warranted(name, text):      # the mark needs him, but a turn is warranted only when he is talking with this agent now or asked it to tell him about the subject
         if sname and _sibling_words.held_words(sender, name, text):      # a sibling front agent quoting his words (an Acked-by line, checked as the wake cap checks): held for the next turn, no turn started
@@ -1189,7 +1196,7 @@ def _front_fyi_name(to: str, raw: str, idx: dict[str, dict[str, Any]]) -> str:
         if not name or roles[name]["role"] != "front" or not _held.enabled():
             return ""
         first = next((ln for ln in raw.splitlines() if ln.strip()), "")
-        if _FOR_OWNER in first or _held._owner_mark().search(raw):
+        if _members.mark_in(first) or _held._owner_mark().search(raw):
             return ""
         return name
     except Exception:  # noqa: BLE001  — an extra: a failure in it leaves the message as it was
@@ -1378,10 +1385,10 @@ def _message_body(to: str, text: str, sender: str, auth: str = "", origin: str =
             if moved:          # the agent is retired: the push reached no live agent, the router has the message (held for it), and the reply says no more than that
                 _handled("unmarked-not-for-owner", "held")
                 return (f"Not for {OWNER}, so {reported.front}, which takes only what {OWNER} has to do, did not get it, and the project's background agent {reported.to} could not take it: {got.rstrip().rstrip('.')}. "
-                        f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
+                        f"To reach {reported.front}, put {_marks_said()} on the first line and name an open item of his.")
             _handled("unmarked-not-for-owner", "passed-on")
             return (f"Not for {OWNER}, so it went to {reported.to}, the project's background agent, instead of {reported.front}, which takes only what {OWNER} has to do and did not get it: {got.rstrip().rstrip('.')}. "
-                    f"To reach {reported.front}, put {_FOR_OWNER} on the first line and name an open item of his.")
+                    f"To reach {reported.front}, put {_marks_said()} on the first line and name an open item of his.")
         finally:
             _NO_REDIRECT.reset(stay_token)
             _REDIRECTED.reset(moved_token)

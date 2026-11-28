@@ -202,9 +202,9 @@ def cut_whole(text: str, n: int = WHOLE_MAX, where: str = REST_IN) -> str:
 
 # ----------------------------------------------------------------------------- the decision
 def _owner_mark() -> "re.Pattern[str]":
-    """The mark that makes a notice the owner's: "[for <owner>]" with the instance's [instance] owner, or "needs: decision"."""
-    owner = _members.first().name
-    return re.compile(r"\[for " + re.escape(owner) + r"\]|needs:\s*decision", re.I)
+    """The mark that makes a notice a member's: "[for <member>]" for any member of the board (the first member's alone on a board of one), or "needs: decision"."""
+    marks = "|".join(re.escape(_members.for_mark(p)) for p in _members.members())
+    return re.compile(marks + r"|needs:\s*decision", re.I)
 
 
 def clients_file() -> Path:

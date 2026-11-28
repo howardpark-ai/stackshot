@@ -40,7 +40,7 @@ from fastmcp.exceptions import ToolError
 
 from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
-from stackshot.core import agentbox as _ab, config as _cfg, interp as _interp, store as _store, xlock as _xlock
+from stackshot.core import agentbox as _ab, config as _cfg, interp as _interp, members as _members, store as _store, xlock as _xlock
 from stackshot.core.instance import NAME, OWNER
 from stackshot.core.store import _item_files
 from stackshot.fleet.sessions_registry import _session_label, _sessions_index
@@ -102,7 +102,21 @@ def _hooks() -> Hooks:
     return _hooks_
 
 
-_FOR_OWNER = f"[for {OWNER}]"      # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance), as server.py holds it
+_FOR_OWNER = f"[for {OWNER}]"      # the first member's mark, kept for the suites and the advice texts that name no item; what an item's notice carries is `_mark_of(item)`
+
+
+def _mark_of(item: dict[str, Any]) -> str:
+    """The mark a message to a front agent about `item` carries on its first line: `[for <member>]` for the item's member (the first member's on a board of one: "[for <owner>]" as it has always been)."""
+    return _members.for_mark(_fyev.item_member(item))
+
+
+def _unmark(text: str) -> str:
+    """`text` without any member's mark (the mark is for the pane, not for the board)."""
+    for p in _members.members():
+        text = text.replace(_members.for_mark(p), " ")
+    return text
+
+
 ON_ITEM = "An answer or result asked for belongs on the item, not only in your own pane."
 
 
@@ -117,19 +131,20 @@ def on_item(line: str) -> str:
 _FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board shows it)"
 
 
-def tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
+def tell_comment(gid: str, item: dict[str, Any], text: str, who: str = "") -> list[str]:
     """the owner's comment on GitHub, one line to the item's mover (holder) and to every session named in its needs, each
-    once. A front agent mover hears it marked for the owner (_FOR_OWNER), since it is the owner's own words (the mark is for the agent to read; delivery reads the tag, not the mark). The text is clipped
+    once. `who` is the member who commented (the first member when none). A front agent mover hears it marked for that member (`_members.for_mark`), since it is the member's own words (the mark is for the agent to read; delivery reads the tag, not the mark). The text is clipped
     to one line; the whole comment is on the item and its issue. Each line then says an answer or result belongs on the item (ON_ITEM). → the session ids told."""
     h = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
     said = _clip_line(text)
-    note = f"[stackshot] {OWNER} commented on {_gh.shown(gid)} on GitHub: {said}{on_item(said)} → {notice_link(gid)}"
+    by = _members.person_of(who) or _members.first()
+    note = f"[stackshot] {by.name} commented on {_gh.shown(gid)} on GitHub: {said}{on_item(said)} → {notice_link(gid)}"
     told: list[str] = []
     oid = h.session_id(owner) if owner else ""
     if oid:
-        tell_woken(gid, oid, f"{_FOR_OWNER} {note}" if front_keeper(owner, project)[0] else note, tag="comment")
+        tell_woken(gid, oid, f"{_members.for_mark(by)} {note}" if front_keeper(owner, project)[0] else note, tag="comment")
         told.append(oid)
     for s in _needs_sessions(meta):
         sid = h.session_id(s)
@@ -745,7 +760,7 @@ def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> 
         label = _session_label(owner) or str(owner)
         own = getattr(FRONT_HINT, "news", None) or {}      # tell_news: an item's own line, not the summary of them all
         for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)][:5]:
-            text = _frontq.line(label, told, why, str(own.get(g) or note).replace(_FOR_OWNER, " "))      # the owner mark is for the pane, not for the board
+            text = _frontq.line(label, told, why, _unmark(str(own.get(g) or note)))      # the member's mark is for the pane, not for the board
             with _writes.ITEM_LOCK:
                 it = _load(g)
                 if it.get("status") != "open":
@@ -863,7 +878,7 @@ _FORYOU_FELL: set[str] = set()          # keys of closes told to the mover the o
 
 def close_owner_notice(gid: str, item: dict[str, Any], owner: str, project: str, writer: str, by: str, signal: str) -> bool:
     """The way a close with his words was told to a front agent mover before the For you list, kept as the fallback for a row that could
-    not be written. It is delivered at once with the mark (_FOR_OWNER), router live or not: the router's close-words rule now rules a
+    not be written. It is delivered at once with the mark (the member's mark), router live or not: the router's close-words rule now rules a
     recorded close merged, so a notice left to the router would reach nobody. → True when it was sent."""
     h = _hooks()
     meta = item.get("metadata") or {}
@@ -872,7 +887,7 @@ def close_owner_notice(gid: str, item: dict[str, Any], owner: str, project: str,
     line = (f"[stackshot] {_gh.shown(gid)} closed by {who} ({outcome}{' by ' + _gh.shown(sup) if sup else ''}): {subject}"
             + (f" — {reason}" if reason else "") + f" → {notice_link(gid)}")
     try:
-        tell_kind("close", gid, h.session_id(owner), f"{_FOR_OWNER} {line}", tag="owner")      # a close takes a turn only under presence plus touched; held, its news is the close revision
+        tell_kind("close", gid, h.session_id(owner), f"{_mark_of(item)} {line}", tag="owner")      # a close takes a turn only under presence plus touched; held, its news is the close revision
         return True
     except Exception as e:  # noqa: BLE001
         print(f"for-you: {gid} fallback notice to {olabel} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -885,7 +900,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
     these itself; a completion or a reopen goes unmarked to the project's keeper instead, which passes it on only if it needs
     the owner. One the keeper made itself is told to nobody (an earlier rule used to tell
     the mover plainly, which woke its pane for nothing he had to do); the board shows it. A move to
-    decision (`decision`) is told to nobody either, neither the front agent mover (it used to hear it marked with _FOR_OWNER)
+    decision (`decision`) is told to nobody either, neither the front agent mover (it used to hear it marked with the member's mark)
     nor its keeper: the board's "Waiting on you" (now Need your call (agents)) view is where he reads it. `heard`, when given, gets the mover's id appended
     when the mover itself was told (not its keeper instead), and when a front agent mover is passed by on a move to decision,
     so a "now needs you" or quiet line in the same write does not double it. → the writer's reply line, or "" (no mover, or the
@@ -912,7 +927,7 @@ def tell_owner(gid: str, item: dict[str, Any], what: str, writer: str, decision:
         words = tell_close_owner(gid, item, owner, project, writer) if close else ""       # a close with his words on it is the one thing a front agent mover hears
         row_note = f"{OWNER}'s words are on it ({words}), so it is a row on his For you list"     # no "not told;" in it: the mover's part is settled (owner_reached); the mover itself is told by tell_owner_close
         if words and _fyev._foryou_key(gid, "closed", item) in _FORYOU_FELL:
-            row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_FOR_OWNER} was sent to {_session_label(owner)} instead"
+            row_note = f"{OWNER}'s words are on it ({words}), but the For you list could not be written, so the old notice marked {_mark_of(item)} was sent to {_session_label(owner)} instead"
         if not stew or h.session_id(stew) == h.session_id(writer):
             return f"\n(its {word} {_session_label(owner)} is a front agent: {row_note})" if words else quiet_line(item, owner)
         tell_kind("close" if close else "progress", gid, h.session_id(stew), f"[stackshot] {_gh.shown(gid)} ({word} {_session_label(owner)}, a front agent) {what} by {who}: {item.get('subject') or ''} → {notice_link(gid)}", tag="owner")
@@ -1177,7 +1192,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     silence), tells that front agent mover one short line, with the first line of `next`. Not on a close or a reopen, not when the mover
     wrote it, not when [board] tell_owner is off. A project the router is live for records it for the router, whose hand-back rule
     passes it straight to the mover (router.py), marked as every delivery to a front agent is; any other project delivers it at once with
-    the mark (_FOR_OWNER), as tell_close_owner does. The mover is added to `heard` and to OWNER_HEARD, so the write's other notices
+    the mark (the member's mark), as tell_close_owner does. The mover is added to `heard` and to OWNER_HEARD, so the write's other notices
     (tell_needed, tell_decided, tell_owner_change) leave it out: it hears the write once. There is no pilot gate, on purpose: a project outside the pilot gets the marked push.
     A front-only project (anchors.front_only) lists no builder to tell instead, so there the front mover itself is told, marked (handback_send); a project that lists a builder is as above. → the writer's reply line, or ""."""
     h = _hooks()
@@ -1195,7 +1210,7 @@ def tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer: 
     who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
     nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
     line = f"[stackshot] {_gh.shown(gid)} is back with you alone (handed back by {who}): {subject}" + (f"; next: {nxt}" if nxt else "") + f" → {notice_link(gid)}"
-    rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line}
+    rec = {"gid": gid, "oid": oid, "olabel": olabel, "project": project, "who": who, "wid": wid, "subject": subject, "line": line, **({"mark": _mark_of(item)} if _mark_of(item) != _members.for_mark() else {})}      # the mark is kept only when it is not the first member's
     hold = handback_hold_s()
     dest = no_front(oid, project) if front_sender(oid) else oid      # a front agent mover is not handed the item by stackshot: its builder is told, else nobody (except a front-only project: no builder to tell instead, so its front mover is told itself, below)
     if not dest and front_sender(oid) and _anc.front_only(project):
@@ -1339,7 +1354,7 @@ def handback_send(rec: dict[str, Any]) -> bool:
         except Exception:
             pass       # not recorded: told at once below, never lost
     if not delivered:
-        tell_kind("exempt", gid, oid, f"{_FOR_OWNER} {rec['line']}", tag="owner")      # exempt: "it is back with you" asks its mover to act, so a front agent of a front-only project is not held by the presence gate (as a hand-off notice is not)
+        tell_kind("exempt", gid, oid, f"{rec.get('mark') or _members.for_mark()} {rec['line']}", tag="owner")      # exempt: "it is back with you" asks its mover to act, so a front agent of a front-only project is not held by the presence gate (as a hand-off notice is not)
     return True
 
 
