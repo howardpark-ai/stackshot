@@ -19,6 +19,7 @@ import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="pilottest-"); T = pathlib.Path(tmp)
 toml = _instance.apply(_instance.base_toml(), keywords=True)
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
+toml = toml.replace('pattern_review = "off"', 'pattern_review = "shadow"', 1)      # this suite reads the findings log, which only a pattern review other than off keeps
 toml = toml.replace('lanes_file = ""', f'lanes_file = "{tmp}/sala/lanes.tsv"', 1); assert f'lanes_file = "{tmp}/sala/lanes.tsv"' in toml   # a lane record in the temp dir (the example has none)
 toml = toml.replace('limit_file = ""', f'limit_file = "{tmp}/sala/limit.json"', 1); assert f'limit_file = "{tmp}/sala/limit.json"' in toml   # and a limit watch
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),

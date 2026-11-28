@@ -91,7 +91,7 @@ def reset():
 def summary(): return [s for s in sent if s[0] == "projects/example"][0][1]
 def log_rows(): return AR.read_log(0.0)
 def pr_of(rec): return rec["pattern_review"]
-_cfg.CFG["audit"].pop("pattern_review", None)
+_cfg.CFG["audit"]["pattern_review"] = "shadow"      # the review is off by default: this suite runs it
 
 # ---- 1. grouping
 rows = [AC.log_row(f, now, "run") for f in [fnd(1), fnd(2), fnd(3), fnd(4, project=BETA), fnd(5, mover=OTHER), fnd(6, kind="stale"),
@@ -139,9 +139,9 @@ _cfg.CFG["audit"]["pattern_review"] = "off"; reset()
 AR.write_pass_record(P, {"started": now, "finished": now + 1, "findings": [fnd(1)]})
 check("3 log: with the review off no log is kept, the record is written", not (T / "state/audit/findings-log.jsonl").exists() and P.exists(), None)
 _cfg.CFG["audit"].pop("pattern_review", None)
-check("3 config: shadow is the default, off is off, anything else reads as the default", _cfg.audit_pattern_review() == "shadow" and (_cfg.CFG["audit"].__setitem__("pattern_review", " OFF ") or _cfg.audit_pattern_review() == "off")
-      and (_cfg.CFG["audit"].__setitem__("pattern_review", "live") or _cfg.audit_pattern_review() == "shadow") and (_cfg.CFG["audit"].__setitem__("pattern_review", 3) or _cfg.audit_pattern_review() == "shadow"), None)
-_cfg.CFG["audit"].pop("pattern_review", None)
+check("3 config: off is the default, shadow is on, anything else reads as the default", _cfg.audit_pattern_review() == "off" and (_cfg.CFG["audit"].__setitem__("pattern_review", " SHADOW ") or _cfg.audit_pattern_review() == "shadow")
+      and (_cfg.CFG["audit"].__setitem__("pattern_review", "live") or _cfg.audit_pattern_review() == "off") and (_cfg.CFG["audit"].__setitem__("pattern_review", 3) or _cfg.audit_pattern_review() == "off"), None)
+_cfg.CFG["audit"]["pattern_review"] = "shadow"
 
 # ---- 4. the run, in shadow by default
 reset()
@@ -224,7 +224,7 @@ import types
 reset(); _cfg.CFG["audit"]["max_calls"] = 5
 n_picked = []
 real_suspects, real_judge = AR.suspects, AR.judge
-AR.suspects = lambda items, at, e, judged=None, live=None, goal_seen=None: ([{"id": f"board#{k}", "gid": f"a{k}", "project": ALPHA, "checks": ["next-done"], "evidence": {"next-done": "x"}, "write": 0.0, "priority": 0, "sig": "", "context": []} for k in range(1, 11)], 0)
+AR.suspects = lambda items, at, e, judged=None, goal_seen=None, page_seen=None: ([{"id": f"board#{k}", "gid": f"a{k}", "project": ALPHA, "checks": ["next-done"], "evidence": {"next-done": "x"}, "write": 0.0, "priority": 0} for k in range(1, 11)], 0)
 def fake_judge(items, picked, at, e, rubric, t0=None): n_picked.append(len(picked)); return [], {}, {"made": len(picked), "failed": 0, "timed_out": False, "notes": []}
 AR.judge = fake_judge
 try:
@@ -238,7 +238,7 @@ try:
     check("8 budget: with the review off the suspects have all 5", n_picked == [5], n_picked)
 finally:
     AR.suspects, AR.judge = real_suspects, real_judge
-_cfg.CFG["audit"]["max_calls"] = 0; _cfg.CFG["audit"].pop("pattern_review", None); reset()
+_cfg.CFG["audit"]["max_calls"] = 0; _cfg.CFG["audit"]["pattern_review"] = "shadow"; reset()
 rec = go(f4)
 check("8 budget: a cap of 0 leaves no call for the review", CALLS == [] and pr_of(rec)["called"] == 0 and "leaves no model call" in pr_of(rec)["note"], pr_of(rec))
 _cfg.CFG["audit"]["max_calls"] = 40; reset()
@@ -272,7 +272,7 @@ check("9 failure: a stage that raises is a stage not made: the run finishes, the
 _cfg.CFG["audit"]["pattern_review"] = "off"; reset()
 rec = go(f4)
 check("10 off: no call, nothing on the record, no log", CALLS == [] and "pattern_review" not in rec and not (T / "state/audit/findings-log.jsonl").exists() and "pattern review" not in summary(), list(rec))
-_cfg.CFG["audit"].pop("pattern_review", None); reset()
+_cfg.CFG["audit"]["pattern_review"] = "shadow"; reset()
 AR.write_pass_record(P, {"started": now, "finished": now + 1, "findings": [fnd(1), fnd(2), fnd(3)]})
 log_before = (T / "state/audit/findings-log.jsonl").read_text()
 sent.clear(); CALLS.clear(); lines = []

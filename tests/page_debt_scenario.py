@@ -117,7 +117,7 @@ _web_publish._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 _cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
 DAY = lambda h, m=0, d=16: dt.datetime(2026, 10, d, h, m, tzinfo=ZONE).timestamp()
-def rcfg(**kw): _cfg.CFG["router"] = {"command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, **kw}
+def rcfg(**kw): _cfg.CFG["router"] = {"command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, "page_debt_call": True, **kw}      # the call is off by default: this suite pins it on (the default is the last section)
 def brain(k): return (T / f"brain/{k}.md").read_bytes()
 def routing_bytes(): return {p.name: p.read_bytes() for p in sorted(routing.DIR.glob("*.jsonl"))}
 def reset(): _pdebts._owed_save({}); page_debt.write_days({})
@@ -513,6 +513,13 @@ for old in asides(): old.unlink()
 LEDGER.unlink(missing_ok=True); sentence = _io2.StringIO()
 with _cl2.redirect_stderr(sentence): got = _pdebts._owed_load()
 check("no ledger at all is no damage: nothing aside, nothing said", got == {} and asides() == [] and sentence.getvalue() == "", (asides(), sentence.getvalue()))
+# ---- the model call is off by default: the keeper writes the page, the fallback message is the only output
+reset(); rcfg(page_debt=True, page_debt_shadow=False); _cfg.CFG["router"].pop("page_debt_call")
+check("[router] page_debt_call is off unless set", page_debt.model_call() is False)
+owe("projects/alpha", A, "a1", "changed (description)"); pdebt_svc._pilot_fallback_tick(); time.sleep(0.3)
+nc = len(calls()); out = pdebt_svc.page_debt_pass(now=DAY(5), run="r-nocall", io=FakeIO(**{"projects/alpha": alpha_page()}))
+check("default: no model call is made and the page is counted as a fallback", len(calls()) == nc and out.get("pages") == 1 and not out.get("applied") and not out.get("proposed"), out)
+check("the reason names the switch", "page_debt_call" in page_debt.NO_CALL_WHY, page_debt.NO_CALL_WHY)
 reset()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

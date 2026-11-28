@@ -218,7 +218,7 @@ with stderr() as err:
 check("3 pages owed keep the debt (not settled, not dropped)", "projects/beta-one" in d and "projects/beta-one" in _web_page_debts._owed_load(), d)
 check("3 pages owed neither nag nor say a write's line for the unreadable brain", "beta-one" not in nag and not refused, (nag, refused))
 check("3 pages owed report it once", err.getvalue().count("pages owed and the audit's page call skip") == 1, err.getvalue())
-_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=True)
+_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_call=True, page_debt_shadow=True)
 _web_page_debts._owed_save({"projects/beta-one": {OWNER: {"ts": time.time() - 3 * 3600, "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": OWNER}]}}})
 page_debt.write_days({})
 r = pdebt_svc.page_debt_pass(runner=lambda msg: (_ for _ in ()).throw(AssertionError("no call for a skipped brain")))
@@ -387,7 +387,7 @@ check("11 a default-brain page keeps the default mirror", "(https://github.com/e
 
 # ---- 12. the audit's page call: a failed CLI read of a second-brain page leaves no mark for the run, so the next run tries again
 set_brains(SECOND)
-_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=False)
+_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_call=True, page_debt_shadow=False)
 OWNER2 = "cccccccc-0000-4000-8000-000000000005"
 os.utime(T / "second/projects/beta-one.md", (old, old))     # the page was last written before the debt, so the debt stays owed
 _web_page_debts._owed_save({"projects/beta-one": {OWNER2: {"ts": time.time(), "item": "s1", "moved": True, "debts": [{"item": "s1", "what": "changed", "writer": OWNER2}]}}})
@@ -729,7 +729,7 @@ check("17 synced again: exactly one line saying the brain is back, then nothing"
 
 # a page that is no longer visited cannot hold the brain in an outage: settled debts, a renamed or deleted page
 set_brains(SECOND)
-_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_shadow=False)
+_cfg.CFG.setdefault("router", {}).update(page_debt=True, page_debt_call=True, page_debt_shadow=False)
 page_debt.write_days({})
 with stderr() as err:
     for _ in range(2): pdebt_svc.page_debt_project("projects/beta-one", mv16, time.time(), "live", runner=lambda m: {"status": "spawn"}, io=Gone())

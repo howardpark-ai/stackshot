@@ -12,9 +12,8 @@ a run is in progress, when the audit is not enabled and in agent mode (a dry run
 message fails goes to the project's -main agent; the cue's check and the running record are written under an exclusive flock.
 Follow-up: stuck-elsewhere on a waiting item compares the first open step with the post-wake mover (a session's step, or Oliver's while the wait is on him, is no finding; Oliver's step on a wait that is not
 on him and a session's step beside a named post-wake mover still are); a message refused because the recipient is a front agent goes unmarked to the project's page key (`kind: project`).
-obsolete-wait: a waiting item (held, parked, outside, after another item) is a suspect when an item its wait cites is closed, or when its project page, written after both the wait and the item's last write, names it
-or an item it cites; a replay of a hold whose premise was dropped is caught (one call, the finding on its mover); a wait on an open item, a closed item cited as background (judged no) and an alive item are not
-flagged; a verdict stands until the evidence's signature changes; the cap holds.
+Retired kinds: ask-missing as a model kind, unneeded-escalation, obsolete-wait and why-not-now are out of CHECKS_MODEL and the rubric: no suspect, no call, an old verdict that lists one still stands, an old yes is dropped, the code check
+for a decision item with no ask is untouched. older-than-page is picked only for page lines that name the item (whole id) or one of its open steps, and the same lines are judged once (`page_judged`).
 
 Two runs a day ([audit] at with two times): a second run on one date keeps the first one's record and is not refused, names itself in its messages (`<date> 20:00`), sends nothing the first sent, chases an unmoved item against the
 run 9 hours before it once, and the tightening history counts days, not runs; the rulebook scan is none of the run's business.
@@ -90,7 +89,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 
 from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
-from stackshot.model import model_cuts as _MC; _MC_DEFAULT = _MC.AUDIT_MODEL_OFF; _MC.AUDIT_MODEL_OFF = ()      # this suite pins the judgment kinds as they were: the cut's own checks are the last section of this file
+from stackshot.model import model_cuts as _MC
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
@@ -541,6 +540,10 @@ rec_clear(); rec = go(ip)
 check("an item the idle pass poked, past its wake, is no finding and no message of the daily run (the dates pass counts it as idle-pass)", rec["findings"] == [] and not rec["by_category"].get("idle-pass")
       and all("board#2" not in t for to, t, fy in sent if not fy), (rec["findings"], rec["by_category"], sent))
 
+def yesterday_record():
+    prev = json.loads(AR._record_path(now).read_text())
+    (T / "state/audit" / f"run-{dt.datetime.fromtimestamp(now - 2 * 86400, ZONE).date().isoformat()}.json").write_text(json.dumps(dict(prev, started=now - 2 * 86400, finished=now - 2 * 86400 + 60)))
+    AR._record_path(now).unlink()
 # ---- 13. an older-than-page suspect
 rec_clear()
 pg = lambda p: (f"- board#{BID_11} landed on the page today: the vendor said yes\n- other line", now - H) if p == "projects/alpha" else ("", None)
@@ -549,6 +552,28 @@ fake(answers={f"board#{BID_11}": YES("older-than-page", "the page says the vendo
 rec = go(op, env_=env(page_of=pg))
 check("older-than-page: the page is newer than the item's write and mentions it: one call, a finding", len(calls()) == 1 and "the project page" in calls()[0]["stdin"] and ids(rec, "older-than-page") == [f"board#{BID_11}"], (calls(), rec["findings"]))
 fake()
+check("older-than-page: the lines judged are kept on the record (page_judged), one stamp for the item", list(rec["page_judged"]) == [f"board#{BID_11}"] and rec["judged"][f"board#{BID_11}"]["psig"] == rec["page_judged"][f"board#{BID_11}"], (rec.get("page_judged"), rec["judged"]))
+# slim: a newer page that names the item only by a longer id, or not at all, is no suspect; the same lines are not judged twice; changed lines are
+pg_long = lambda p: (f"- board#{BID_11}0 landed on the page today\n- other line", now - H) if p == "projects/alpha" else ("", None)
+pg_none = lambda p: ("- a line about nothing here\n", now - H) if p == "projects/alpha" else ("", None)
+check("older-than-page: a page naming only a longer id (whole numbers only), or naming nothing of the item, is no suspect", AR.suspects(op, now, env(page_of=pg_long))[0] == [] and AR.suspects(op, now, env(page_of=pg_none))[0] == [], None)
+step_text = "build the vendor handoff package for the second site"
+op_steps = build(doing(21, 3, nxt=f"home-agent: {step_text}", expected_by=local(now + 30 * H), expected_reason="the build"), clean(121))
+pg_step = lambda p: (f"- the team will {step_text} on Friday\n- other line", now - H) if p == "projects/alpha" else ("", None)
+sus_step = AR.suspects(op_steps, now, env(page_of=pg_step))[0]
+check("older-than-page: a page line that carries the text of an open step of the item names it, with no id on the line", [(s["id"], s["checks"]) for s in sus_step] == [(f"board#{BID_11}", ["older-than-page"])] and step_text in sus_step[0]["evidence"]["older-than-page"], sus_step)
+sus_a = AR.suspects(op, now, env(page_of=pg))[0]
+seen = {s["id"]: s["psig"] for s in sus_a}
+check("older-than-page: the same lines already judged are no suspect again, whatever else was written (an item written later, a page rewritten elsewhere)", sus_a and AR.suspects(op, now, env(page_of=pg), {}, {}, seen)[0] == []
+      and AR.suspects(op, now, env(page_of=lambda p: (f"- board#{BID_11} landed on the page today: the vendor said yes\n- a new unrelated line", now - H) if p == "projects/alpha" else ("", None)), {}, {}, seen)[0] == [], (sus_a, seen))
+pg_new = lambda p: (f"- board#{BID_11} landed on the page today: the vendor changed the date\n- other line", now - H) if p == "projects/alpha" else ("", None)
+check("older-than-page: lines that changed are judged again", [s["id"] for s in AR.suspects(op, now, env(page_of=pg_new), {}, {}, seen)[0]] == [f"board#{BID_11}"], None)
+rec_clear(); fake()
+rec = go(op, env_=env(page_of=pg))
+yesterday_record()
+rec = go(op, env_=env(page_of=pg))
+check("older-than-page: a second run on the same page lines makes no call and keeps the stamp", calls() == [] and rec["page_judged"] == {f"board#{BID_11}": seen[f"board#{BID_11}"]}, (len(calls()), rec.get("page_judged")))
+rec_clear(); fake()
 
 # ---- 14. the shared engine: the stall pass reads the pane through mover_state (the board check no longer does: quiet time is the hourly audit line's)
 rows = T / "home/.claude/sessions"
@@ -910,7 +935,7 @@ rec = fil(f25p)
 check("a parked or held item with a wake ahead (or none) is no stuck-elsewhere finding, whoever the post-wake mover is and whichever step is first", not {f"board#{BID_22}", f"board#{BID_60}", f"board#{BID_07}"} & set(ids(rec, "stuck-elsewhere")), rec["findings"])
 check("…the owner's step dated for after the item's wake is none either", f"board#{BID_08}" not in ids(rec, "stuck-elsewhere"), rec["findings"])
 check("…while the same shapes with the wake come, or the step undated, still are", {f"board#{BID_39}", f"board#{BID_00}"} <= set(ids(rec, "stuck-elsewhere")), rec["findings"])
-step_day = AR._dw.step_wait_day
+step_day = __import__("stackshot.waits.dated_wait", fromlist=["x"]).step_wait_day
 check("dated_wait.step_wait_day reads the day a step waits for, and None for a deadline or an undated step",
       step_day("Oliver: sign off after 2026-12-01", dt.date(2026, 11, 1)) == dt.date(2026, 12, 1) and step_day("Oliver: sign off, due 2026-12-01", dt.date(2026, 11, 1)) is None and step_day("Oliver: sign off", dt.date(2026, 11, 1)) is None)
 
@@ -1225,9 +1250,7 @@ finally:
     ROLES.pop("falcon-main", None)
 rec_clear()
 
-# ---- 27. obsolete-wait: a waiting item whose premise a later change overtook
-# The replay: an item parked on a wake (a script parked it from doing) whose wait rests on the first run of another item's nightly sync; that other item is closed as dropped, "overtaken" by a new
-# feature. The item is shown as it stood while it waited: hold, wake, wait basis, next citing the dropped item.
+# ---- 27. the retired judgment kinds (ask-missing as a model kind, unneeded-escalation, obsolete-wait, why-not-now): no suspect, no call, no rubric text; a record that names them still reads
 def hold_at(i, ago, nxt, text, cites_state="parked", **kw):
     k, d = item(i, wrote=now - ago * H, state=cites_state, needs=["home-agent"], hold=True, wake=WAKE, hold_set={"at": now - ago * H, "by": "a script"},
                 wait_basis={"text": text, "wake": WAKE, "by": "a script", "at": now - ago * H}, next=nxt, **kw)
@@ -1237,186 +1260,6 @@ def closed(i, outcome, reason, ago, subject):
     d["subject"] = subject; d["state_updated"] = now - ago * H
     return k, d
 OBS = "obsolete-wait"
-replay = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", f"the done line needs a daily run and board#{BID_65}'s first sync runs on the wake (parked from doing)"),
-               closed(75, "dropped", "Oliver: close as overtaken; the new live-update feature made the nightly sync unneeded", 21, "[home] Add a nightly sync"))
-rec_clear(); fake(answers={f"board#{BID_80}": YES(OBS, f"board#{BID_65} was dropped as overtaken by the new live-update feature; the nightly sync this waits for will never run", f"drop the item, citing board#{BID_65}")})
-sus, _skip = AR.suspects(replay, now, env())
-check("the replay: the held item is a suspect, for next-done and obsolete-wait in one call, with the dropped item as evidence",
-      [(s["id"], s["checks"]) for s in sus] == [(f"board#{BID_80}", ["next-done", OBS])] and f"board#{BID_65} is closed as dropped" in sus[0]["evidence"][OBS] and "overtaken" in sus[0]["evidence"][OBS], sus)
-rec = go(replay)
-fnd = [f for f in rec["findings"] if f["category"] == OBS]
-check("the replay is caught: one finding under obsolete-wait, source model, on the item's mover, with the reason the call gave", len(fnd) == 1 and fnd[0]["id"] == f"board#{BID_80}" and fnd[0]["source"] == "model"
-      and fnd[0]["mover"] == "home-agent" and "dropped as overtaken" in fnd[0]["detail"], rec["findings"])
-check("…with exactly one model call, whose message names the check, when the wait began, the wait's basis and how the cited item closed", len(calls()) == 1 and rec["calls"]["made"] == 1
-      and f"- {OBS}: an item the wait cites is closed" in calls()[0]["stdin"] and "The wait began" in calls()[0]["stdin"] and "first sync runs on the wake" in calls()[0]["stdin"]
-      and f"board#{BID_65} is closed as dropped (Oliver: close as overtaken" in calls()[0]["stdin"], calls())
-check("the rubric (the system prompt) carries the check, so the call can answer under it", "obsolete-wait" in RUBRIC_TEXT and "--system-prompt" in calls()[0]["argv"] and RUBRIC_TEXT in calls()[0]["argv"], RUBRIC_TEXT[-300:])
-check("the finding goes to the mover as one line '<id> · obsolete-wait · <evidence> · <fix>', through the usual delivery", any(to == "home-agent" and f"board#{BID_80} · obsolete-wait · board#{BID_65} was dropped" in t and f"drop the item, citing board#{BID_65}" in t for to, t, fy in sent), sent)
-check("the verdict is kept with a signature of its evidence", rec["judged"][f"board#{BID_80}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_80}"]["check"] == OBS and rec["judged"][f"board#{BID_80}"]["sig"], rec["judged"])
-
-# still-valid waits are not flagged: the item it waits for is open (no suspect, no call); a closed item that is only background (the model says no: a suspect, a call, no finding)
-valid = build(hold_at(74, 20, f"home-agent: then check board#{BID_41}'s rollout", f"board#{BID_41}'s rollout ends on the wake"), item(51, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: roll it out", expected_by=local(now + 30 * H), expected_reason="the rollout"),
-              hold_at(54, 20, "home-agent: after the visit, check the result", f"a booked visit; board#{BID_15} only set the date"), closed(25, "done", "the date is set", 21, "[home] Book the visit"))
-rec_clear(); fake()
-sus, _skip = AR.suspects(valid, now, env())
-check("a wait on an open item is no suspect; one that cites a closed item only as background is (the call decides)", [s["id"] for s in sus] == [f"board#{BID_44}"], [(s["id"], s["checks"]) for s in sus])
-rec = go(valid)
-check("a still-valid wait: no finding, one call (for the background citation only), judged 'no'", not [f for f in rec["findings"] if f["category"] == OBS] and len(calls()) == 1 and rec["judged"][f"board#{BID_44}"]["verdict"] == "no"
-      and f"board#{BID_64}" not in rec["judged"], (rec["findings"], len(calls())))
-check("an alive item that cites a closed item is not an obsolete-wait suspect", [s["id"] for s in AR.suspects(build(*replay.items(), doing(19, 1, nxt="home-agent: build it", expected_by=local(now + 30 * H), expected_reason="x", description=f"- see board#{BID_65}")),
-      now, env())[0]] == [f"board#{BID_80}"], "")
-check("a closed item is never a suspect", AR.suspects(build(closed(20, "dropped", "x", 5, "[home] done")), now, env())[0] == [], "")
-
-# a verdict stands until the evidence changes; a 'yes' is carried; a changed evidence is judged again
-rec_clear(); fake(answers={f"board#{BID_80}": YES(OBS)})
-go(replay)
-prev = json.loads(AR._record_path(now).read_text())
-(T / "state/audit" / f"run-{dt.datetime.fromtimestamp(now - 2 * 86400, ZONE).date().isoformat()}.json").write_text(json.dumps(dict(prev, started=now - 2 * 86400, finished=now - 2 * 86400 + 60)))
-AR._record_path(now).unlink()
-rec = go(replay)
-check("unchanged evidence: no new call, the 'yes' is carried as a finding", calls() == [] and [f["id"] for f in rec["findings"] if f["category"] == OBS] == [f"board#{BID_80}"] and rec["calls"]["unchanged"] == 1, (len(calls()), rec["calls"]))
-replay3 = build(*replay.items()); replay3["a9265"] = dict(replay["a9265"], subject="[home] Add a nightly sync (edited)", state_updated=now - H, updated=now - H)
-AR._record_path(now).unlink()
-rec = go(replay3)
-check("a later edit to the closed item (subject, timestamps) leaves the signature alone: no new call, the 'yes' carried", calls() == [] and rec["calls"]["unchanged"] == 1 and [f["id"] for f in rec["findings"] if f["category"] == OBS] == [f"board#{BID_80}"], (len(calls()), rec["calls"]))
-replay4 = build(*replay.items()); replay4["a9265"] = dict(replay["a9265"], status="open")
-AR._record_path(now).unlink()
-rec = go(replay4)
-check("a cited item that was reopened: no suspect, no call, the old 'yes' is not sent again and not kept", calls() == [] and not [f for f in rec["findings"] if f["category"] == OBS] and f"board#{BID_80}" not in rec["judged"] and not [1 for to, t, fy in sent if "obsolete-wait" in t], (rec["findings"], rec["judged"], sent))
-replay2 = build(*replay.items()); replay2["a9265"] = dict(replay["a9265"], metadata={**replay["a9265"]["metadata"], "reason": "Oliver: close as overtaken and replaced by a different plan"})
-AR._record_path(now).unlink()
-rec = go(replay2)
-check("evidence that changed (the cited item's reason) is judged again, though the held item was not written", len(calls()) == 1 and f"Item board#{BID_80}:" in calls()[0]["stdin"], [c["stdin"][:30] for c in calls()])
-rec_clear()
-
-# the page signal: a page written after the wait began and after the item's last write, naming an item the wait cites, makes it a suspect; a page older than the wait, an item written since the page, a line that names only the item itself, or another project's page does not
-PAGE_TS = now - 2 * H
-PAGE = f"Current state\n- board#{BID_25} is replaced by the new plan\n- board#{BID_38} holds the build\n- board#{BID_50} waits on the visit\n- board#{BID_42} was parked with a visit booked\n"
-pg = build(hold_at(52, 30, f"home-agent: after the wake, check board#{BID_25}", "a booked visit"), hold_at(48, 1, f"home-agent: after the wake, check board#{BID_25}", "a booked visit"), hold_at(60, 30, f"home-agent: after the wake, check board#{BID_25}", "a booked visit"),
-           hold_at(92, 30, "home-agent: after the wake, check", "a booked visit"), item(35, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x"))
-pg["a9250"]["metadata"]["project"] = "projects/other"                                                         # a page of another project, written before the wait
-def page_of(p): return (PAGE, PAGE_TS) if p == "projects/alpha" else (f"- board#{BID_25} waits\n", now - 40 * H)
-sus, _skip = AR.suspects(pg, now, env(page_of=page_of))
-check("the page signal: written after the wait and after the item's last write and naming an item it cites: a suspect; the page older than the wait, the item written after the page, or a line naming only the item itself: not",
-      [s["id"] for s in sus] == [f"board#{BID_42}"] and "is newer than the wait" in sus[0]["evidence"][OBS] and "replaced by the new plan" in sus[0]["evidence"][OBS] and "was parked with a visit" not in sus[0]["evidence"][OBS], [(s["id"], s["checks"]) for s in sus])
-check("the page lines are in the call's message, as the wait's context", f"page: - board#{BID_25} is replaced by the new plan" in AR.prompt(pg["a9242"], sus[0], "home-agent", now), AR.prompt(pg["a9242"], sus[0], "home-agent", now))
-check("a page-only suspect ranks after the other checks (priority 3)", sus[0]["priority"] == 3, sus[0]["priority"])
-pn = build(("a2", item(2, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x")[1]), hold_at(16, 30, "home-agent: after the wake, check board#2", "a booked visit"))
-check("a page line that names a longer id does not name the shorter id it starts with (whole numbers only)", AR.obsolete_wait_evidence("a9206", pn, {"2": ["a2"], "9206": ["a9206"]}, env(page_of=lambda p: (f"- board#{BID_42} something else\n", PAGE_TS)), {}, 0.0)[0] == "", "")
-
-# page-only suspects are capped per run: eight holds cite one open item the page names, five are suspects
-cap_pg = build(*[hold_at(80 + k, 30, f"home-agent: after the wake, check board#{BID_22}", "a booked visit") for k in range(8)],
-               item(32, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x"))
-sus, _skip = AR.suspects(cap_pg, now, env(page_of=lambda p: (f"- board#{BID_22} is replaced by the new plan\n", PAGE_TS)))
-check("at most five suspects a run rest on a page line alone", [s["id"] for s in sus] == [f"board#{9266 + k}" for k in range(5)], [s["id"] for s in sus])
-
-# a relay wait (an outside item that waits on news only the owner relays) is no wait for this check, though it cites a closed item; the same item parked is
-relay_o = outside(57, f"home-agent: then check board#{BID_01}'s result")
-relay_o[1]["metadata"]["wait_basis"] = {"text": f"board#{BID_01}'s result", "wake": WAKE, "by": "a script", "at": now - 20 * H}
-rl = build(relay_o, closed(11, "dropped", "overtaken", 21, "[home] dropped"), hold_at(36, 20, f"home-agent: then check board#{BID_01}'s result", f"board#{BID_01}'s result"))
-check("a relay wait is not an obsolete-wait suspect; a parked one that cites the same closed item is", [s["id"] for s in AR.suspects(rl, now, env())[0] if OBS in s["checks"]] == [f"board#{BID_26}"], [(s["id"], s["checks"]) for s in AR.suspects(rl, now, env())[0]])
-
-# a closed item named only in the description counts when it was dropped or superseded, not when it was done
-dsc = build(hold_at(38, 20, "home-agent: after the wake, check", "a booked visit"), closed(23, "done", "the date is set", 21, "[home] done"), closed(94, "superseded", "replaced", 21, "[home] replaced"))
-dsc["a9228"]["description"] = f"- see board#{BID_13} and board#{BID_78}"
-check("a closed item named only in the description counts only when it was dropped or superseded", [s["id"] for s in AR.suspects(dsc, now, env())[0]] == [f"board#{BID_28}"] and f"board#{BID_78}" in AR.suspects(dsc, now, env())[0][0]["evidence"][OBS]
-      and f"board#{BID_13}" not in AR.suspects(dsc, now, env())[0][0]["evidence"][OBS], [(s["id"], s["evidence"]) for s in AR.suspects(dsc, now, env())[0]])
-
-# no 1970: a wait whose start is unknown has no "The wait began" clause
-nos = build(hold_at(34, 20, f"home-agent: then check board#{BID_74}", f"board#{BID_74} runs on the wake"), closed(90, "dropped", "overtaken", 21, "[home] dropped"))
-nos["a9224"]["metadata"].pop("hold_set"); nos["a9224"]["metadata"].pop("wait_basis"); nos["a9224"]["state_updated"] = 0; nos["a9224"]["updated"] = 0
-sus, _skip = AR.suspects(nos, now, env())
-msg = AR.prompt(nos["a9224"], sus[0], "home-agent", now) if sus else ""
-check("an unknown wait start leaves out the 'The wait began' clause and any 1970 date", sus and "The wait" in msg and f"board#{BID_74} is closed as dropped" in msg and "The wait began" not in msg and "1970" not in msg, msg)
-
-# the counts the run adds: one call per suspect, at most the cap, none for an item with no signal
-many_w = build(*[hold_at(92 + k, 20, "home-agent: then check", f"board#{9225 + k} first runs on the wake") for k in range(3)], *[closed(35 + k, "dropped", "overtaken", 21, "[home] dropped") for k in range(3)],
-               *[hold_at(27 + k, 20, "home-agent: then check", f"board#{9238 + k} first runs on the wake") for k in range(3)],
-               *[item(48 + k, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x") for k in range(3)])
-rec_clear(); fake(); rec = go(many_w)
-check("six waiting items, three with a dropped citation: three calls, none for the three waiting on an open item", rec["calls"]["made"] == 3 and rec["calls"]["suspects"] == 3 and len(calls()) == 3, rec["calls"])
-rec_clear(); _cfg.CFG["audit"]["max_calls"] = 2; rec = go(many_w)
-check("the cap holds for this check as for the others", rec["calls"]["made"] == 2 and rec["calls"]["suspects"] == 3, rec["calls"])
-_cfg.CFG["audit"]["max_calls"] = 40
-rec_clear()
-
-# the priority: fifty obsolete-wait suspects and one wrong-needs suspect under a cap of forty: the wrong-needs one is judged
-flood = build(closed(12, "dropped", "overtaken", 21, "[home] dropped"), *[hold_at(24 + k, 20, "home-agent: then check", f"board#{BID_02} first runs on the wake") for k in range(50)],
-              item(15, wrote=now - 3 * H, state="doing", needs=["home-agent"], ask="Pick a colour", next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x"))
-sus, _skip = AR.suspects(flood, now, env())
-check("fifty obsolete-wait suspects rank after the wrong-needs one", len(sus) == 51 and sus[0]["id"] == f"board#{BID_05}" and "wrong-needs" in sus[0]["checks"] and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
-rec_clear(); fake(); rec = go(flood)
-check("under the cap of 40 the wrong-needs suspect is judged, and the calls stop at the cap", rec["calls"]["made"] == 40 and any(f"Item board#{BID_05}:" in c["stdin"] for c in calls()), (rec["calls"], len(calls())))
-rec_clear()
-
-# ---- 28. why-not-now: a stored doing item that only waits for a later day (dated_wait.py) is asked "why not now?"
-WNN = "why-not-now"
-def ordinal(n): return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
-def prose(n):                                                  # "Wed Nov 4th": the local day n days from now, as the board writes a date
-    t = dt.datetime.fromtimestamp(now + n * 86400, ZONE)
-    return t.strftime("%a %b ") + ordinal(t.day)
-wake_in = lambda h: local(now + h * H).replace(" ", "T")
-STEP = f"home-agent: {prose(2)} after the nightly run, check the result"
-def selfwait(i, nxt=STEP, wake=None, ago=2, **kw): return doing(i, ago, nxt=nxt, wake=wake or wake_in(24), **kw)
-sw = build(selfwait(32))
-rec_clear(); fake(answers={f"board#{BID_22}": YES(WNN, "the step is dated two days out and nothing says why it waits for then", "do it now, or write what holds it")})
-sus, _skip = AR.suspects(sw, now, env())
-check("why-not-now: a doing item with a wake tomorrow and only a dated step is a suspect, priority 3 with obsolete-wait, with a signature and the wait as context",
-      [(s["id"], s["checks"], s["priority"]) for s in sus] == [(f"board#{BID_22}", [WNN], 3)] and sus[0]["sig"] and "dated for later" in sus[0]["evidence"][WNN] and sus[0]["context"], sus)
-rec = go(sw)
-fnd = [f for f in rec["findings"] if f["category"] == WNN]
-check("why-not-now: the audit asks, and a yes is a finding from the model on the item's mover", len(fnd) == 1 and fnd[0]["id"] == f"board#{BID_22}" and fnd[0]["source"] == "model" and fnd[0]["mover"] == "home-agent"
-      and "nothing says why" in fnd[0]["detail"], rec["findings"])
-check("why-not-now: one call, whose message names the check, the dated step and the wake, and the rubric carries the check",
-      len(calls()) == 1 and rec["calls"]["made"] == 1 and f"- {WNN}: read as doing" in calls()[0]["stdin"] and "after the nightly run" in calls()[0]["stdin"] and "The wait (for why-not-now):" in calls()[0]["stdin"]
-      and "why-not-now" in RUBRIC_TEXT and RUBRIC_TEXT in calls()[0]["argv"], calls())
-check("why-not-now: the finding goes to the mover as one line '<id> · why-not-now · <evidence> · <fix>'", any(to == "home-agent" and f"board#{BID_22} · why-not-now · the step is dated" in t and "do it now, or write what holds it" in t for to, t, fy in sent), sent)
-check("why-not-now: the verdict is kept with the signature", rec["judged"][f"board#{BID_22}"]["verdict"] == "yes" and rec["judged"][f"board#{BID_22}"]["check"] == WNN and rec["judged"][f"board#{BID_22}"]["sig"] == sus[0]["sig"], rec["judged"])
-
-# not a suspect: one undated step, a wake 30 minutes out, a step dated today, no wake
-nots = build(selfwait(70, nxt=STEP + "\nhome-agent: tidy the notes"), selfwait(17, wake=wake_in(0.5)), selfwait(49, nxt=f"home-agent: {prose(0)} check the result"), doing(18, 2, nxt=STEP))
-check("why-not-now: an undated step, a wake 30 minutes out, a step dated today, or no wake is no suspect", AR.suspects(nots, now, env())[0] == [], [(s["id"], s["checks"]) for s in AR.suspects(nots, now, env())[0]])
-rec_clear(); fake(); rec = go(nots)
-check("why-not-now: …no call and no finding", calls() == [] and not [f for f in rec["findings"] if f["category"] == WNN], (len(calls()), rec["findings"]))
-
-# a verdict stands while the dated lines and the wake stand; a 'yes' is carried; a changed line or wake is judged again
-def yesterday_record():
-    prev = json.loads(AR._record_path(now).read_text())
-    (T / "state/audit" / f"run-{dt.datetime.fromtimestamp(now - 2 * 86400, ZONE).date().isoformat()}.json").write_text(json.dumps(dict(prev, started=now - 2 * 86400, finished=now - 2 * 86400 + 60)))
-    AR._record_path(now).unlink()
-rec_clear(); fake(answers={f"board#{BID_22}": YES(WNN)}); go(sw); yesterday_record()
-rec = go(sw)
-check("why-not-now: unchanged lines and wake: no new call, the 'yes' is carried as a finding", calls() == [] and rec["calls"]["unchanged"] == 1 and [f["id"] for f in rec["findings"] if f["category"] == WNN] == [f"board#{BID_22}"], (len(calls()), rec["calls"]))
-AR._record_path(now).unlink()
-rec = go(build(selfwait(32, wake=wake_in(30))))
-check("why-not-now: a moved wake is judged again", len(calls()) == 1 and rec["calls"]["made"] == 1, rec["calls"])
-AR._record_path(now).unlink()
-rec = go(build(selfwait(32, nxt=f"home-agent: {prose(3)} after the weekly run, check the result")))
-check("why-not-now: a changed dated line is judged again", len(calls()) == 1 and rec["calls"]["made"] == 1, rec["calls"])
-AR._record_path(now).unlink()
-rec = go(build(selfwait(32, nxt=STEP + "\nhome-agent: tidy the notes")))
-check("why-not-now: a step that became undated: no suspect, no call, the old 'yes' is not sent again and not kept", calls() == [] and not [f for f in rec["findings"] if f["category"] == WNN] and f"board#{BID_22}" not in rec["judged"]
-      and not [1 for to, t, fy in sent if WNN in t], (rec["findings"], rec["judged"]))
-rec_clear()
-
-# a 'no' is kept and not asked again
-rec_clear(); fake(); go(sw); yesterday_record(); rec = go(sw)
-check("why-not-now: a 'no' stands: no new call, no finding", calls() == [] and rec["calls"]["unchanged"] == 1 and not [f for f in rec["findings"] if f["category"] == WNN], (len(calls()), rec["calls"]))
-rec_clear()
-
-# the cap per run, the priority, and the call cap
-many_sw = build(*[selfwait(44 + k) for k in range(8)])
-sus, _skip = AR.suspects(many_sw, now, env())
-check("why-not-now: at most five suspects a run", [s["id"] for s in sus] == [f"board#{9234 + k}" for k in range(5)], [s["id"] for s in sus])
-rec_clear(); fake(); rec = go(many_sw)
-check("why-not-now: the calls added are one per suspect, five here", rec["calls"]["made"] == 5 and rec["calls"]["suspects"] == 5 and len(calls()) == 5, rec["calls"])
-rec_clear(); _cfg.CFG["audit"]["max_calls"] = 2; rec = go(many_sw)
-check("why-not-now: the [audit] cap holds for this check as for the others", rec["calls"]["made"] == 2, rec["calls"])
-_cfg.CFG["audit"]["max_calls"] = 40
-mixed = build(*many_sw.items(), item(15, wrote=now - 3 * H, state="doing", needs=["home-agent"], ask="Pick a colour", next="home-agent: go", expected_by=local(now + 30 * H), expected_reason="x"))
-sus, _skip = AR.suspects(mixed, now, env())
-check("why-not-now: ranks after the other checks (a wrong-needs suspect comes first)", sus[0]["id"] == f"board#{BID_05}" and all(s["priority"] == 3 for s in sus[1:]), [(s["id"], s["priority"]) for s in sus[:3]])
-rec_clear()
 
 # ---- 28b. goal-unclear: an open item whose subject and `Goal:` bullet are new or reworded is asked "do the title and the Goal say what is to be done and what done looks like?"
 GU = "goal-unclear"
@@ -2022,7 +1865,7 @@ from stackshot.audit import audit_checks as _ACP
 ASK_P = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 UNTIL_P = (dt.datetime.fromtimestamp(now, ZONE) + dt.timedelta(days=10)).strftime("%Y-%m-%d")
 PARK_P = dict(needs=["home-agent"], ask=ASK_P, until=UNTIL_P, wait_kind="time", mover="Oliver", wait_basis={"text": f"away until {UNTIL_P}", "wake": UNTIL_P, "by": "a script", "at": now - H})
-ASK_CHECKS = ("wrong-needs", "ask-missing", "unneeded-escalation")
+ASK_CHECKS = ("wrong-needs", "ask-missing", "unneeded-escalation")      # the last two are retired model kinds: no suspect names them any more (the check below)
 def ask_flags(*pairs):
     sus, _skip = AR.suspects(build(*pairs), now, env())
     return {s["id"]: sorted(c for c in s["checks"] if c in ASK_CHECKS) for s in sus}
@@ -2032,11 +1875,11 @@ flags = ask_flags(item(P_DATE, wrote=now - 30 * H, **PARK_P),
                   item(P_HOLD, wrote=now - 30 * H, needs=["home-agent"], ask=ASK_P, hold=True, wake=UNTIL_P, wait_basis={"text": f"away until {UNTIL_P}", "wake": UNTIL_P, "by": "a script", "at": now - H}),
                   item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}),
                   item(P_BARE, wrote=now - 30 * H, needs=["home-agent"], ask=ASK_P, wake=UNTIL_P))
-check("parked ask: an item with needs naming a session, its ask kept and a date wait (until, kind time) is not flagged wrong-needs or ask-missing", f"board#{P_DATE}" not in flags, flags)
-check("parked ask: …an item with the same ask and needs and no park still is flagged for both (the check is not blind)", flags.get(f"board#{P_NONE}") == ["ask-missing", "wrong-needs"], flags)
+check("parked ask: an item with needs naming a session, its ask kept and a date wait (until, kind time) is not flagged wrong-needs", f"board#{P_DATE}" not in flags, flags)
+check("parked ask: …an item with the same ask and needs and no park still is flagged (the check is not blind)", flags.get(f"board#{P_NONE}") == ["wrong-needs"], flags)
 check("parked ask: …a stored hold (flag and wake) still counts as parked, as before", f"board#{P_HOLD}" not in flags, flags)
-check("parked ask: …a date wait whose needs hold decision is no park: it is judged as the owner's call, as before", "unneeded-escalation" in flags.get(f"board#{P_DEC}", []), flags)
-check("parked ask: …a wake with no hold and no until (a hand-off's backstop) is no park, so its ask is still flagged", flags.get(f"board#{P_BARE}") == ["ask-missing", "wrong-needs"], flags)
+check("parked ask: …a date wait whose needs hold decision is no park: it is judged as the owner's call, as before: its only flag is wrong-needs (no open step is his), the retired kinds are never named", flags.get(f"board#{P_DEC}", []) == ["wrong-needs"], flags)
+check("parked ask: …a wake with no hold and no until (a hand-off's backstop) is no park, so its ask is still flagged", flags.get(f"board#{P_BARE}") == ["wrong-needs"], flags)
 def prk(status="open", **meta): return {"status": status, "metadata": meta}
 matrix = [(prk(hold=True, needs=["home-agent"]), True), (prk(until=UNTIL_P, needs=["home-agent"]), True), (prk(until=UNTIL_P, wait_kind="time"), True), (prk(until=UNTIL_P, wait_kind="relay", needs=["external"]), False),
           (prk(until=UNTIL_P, wait_kind="event"), False), (prk(hold=True, needs=["decision"]), False), (prk(until=UNTIL_P, needs=["Decision"]), False), (prk(until=UNTIL_P, needs="decision"), False),
@@ -2052,67 +1895,39 @@ pit, pmeta, pafter, pmover = _ACP._item_view(pk_item, f"a{P_DATE}")
 check("parked ask: a date-parked doing item is not stale while its date is ahead", _ACP.check_stale(pit, pmeta, "home-agent", pafter, now, now - 30 * H) == "", None)
 check("parked ask: …and its first open step is no stuck-elsewhere finding while its date is ahead", _ACP.check_stuck_elsewhere(pit, pmeta, "home-agent", {"home-agent", "Oliver"}, now - 30 * H, pafter, now) is None, None)
 
-# ---- the cut: model_cuts.AUDIT_MODEL_OFF (unneeded-escalation, obsolete-wait) makes no model call for those two kinds and leaves every deterministic check
-CUT = ("unneeded-escalation", "obsolete-wait")
-check("cut: the switch as shipped names exactly the two kinds", tuple(_MC_DEFAULT) == CUT, _MC_DEFAULT)
-cut_items = build(*replay.items(), item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}))
-def cut_findings(): return sorted((f["id"], f["category"]) for f in AR.field_findings(cut_items, {}, now, env())[0])
-_MC.AUDIT_MODEL_OFF = ()
-old_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
-old_det = cut_findings()
-_MC.AUDIT_MODEL_OFF = CUT
-try:
-    new_sus = {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}
-    check("cut: before the cut both kinds are asked about (the fixture is a real suspect for each)", any(OBS in c for c in old_sus.values()) and any("unneeded-escalation" in c for c in old_sus.values()), old_sus)
-    check("cut: with the cut no suspect carries either kind, and the item's other checks stay", not any(k in c for c in new_sus.values() for k in CUT) and f"board#{BID_80}" in new_sus and "next-done" in new_sus[f"board#{BID_80}"]
-          and any("ask-missing" in c for c in new_sus.values()), new_sus)
-    rec_clear(); fake(default=YES("next-done"))
-    rec = go(build(*replay.items()))
-    check("cut: a run makes one call (next-done) and its message offers no obsolete-wait check", len(calls()) == 1 and "obsolete-wait" not in calls()[0]["stdin"].split("Candidate checks")[-1], calls())
-    only_wait = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", "the done line waits on that sync"), closed(75, "dropped", "closed as overtaken", 21, "[home] Add a nightly sync"))
-    only_wait[f"a{BID_80}"]["metadata"]["next"] = "home-agent: then wait for the wake"
-    reset_calls(); rec = go(only_wait)
-    check("cut: an item suspected for obsolete-wait alone makes no call at all", not [s for s in AR.suspects(only_wait, now, env())[0] if OBS in s["checks"]] and rec["calls"]["made"] == len(calls()) and not [c for c in calls() if OBS in c["stdin"].split("Candidate checks")[-1]], (calls(), rec["calls"]))
-    check("cut: the deterministic checks are unchanged by it", cut_findings() == old_det, (old_det, cut_findings()))
-    # verdicts stored before the cut list the cut kinds in `checks` (and the obsolete-wait signature): neither is asked again after the deploy
-    _MC.AUDIT_MODEL_OFF = ()
-    old_full = AR.suspects(cut_items, now, env())[0]
-    _MC.AUDIT_MODEL_OFF = CUT
-    stored = {s["id"]: {"verdict": "no", "write": s["write"], "checks": s["checks"], "at": now, **({"sig": s["sig"]} if s.get("sig") else {})} for s in old_full}
-    check("cut: the stored verdicts are the two shapes the deploy meets (an ask item with unneeded-escalation, a held item with next-done and obsolete-wait)",
-          sorted(stored[f"board#{P_DEC}"]["checks"]) == ["ask-missing", "unneeded-escalation", "wrong-needs"] and stored[f"board#{BID_80}"]["checks"] == ["next-done", OBS], stored)
-    again, skipped = AR.suspects(cut_items, now, env(), stored)
-    check("cut: …neither is picked again (a stored 'no' that listed a cut kind still stands), they count as skipped", [s["id"] for s in again] == [] and skipped == len(new_sus), (again, skipped, new_sus))
-    stored[f"board#{P_DEC}"]["checks"] = ["wrong-needs"]
-    check("cut: …a stored verdict whose other checks differ is still asked again", [s["id"] for s in AR.suspects(cut_items, now, env(), stored)[0]] == [f"board#{P_DEC}"], None)
-    # the rank is the one the item had with its cut kind: a decision with an ask and an open owner step stays at priority 1
-    prio_item = build(item(6, wrote=now - 30 * H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_P, next="Oliver: pick one of the options"))
-    _MC.AUDIT_MODEL_OFF = ()
-    p_old = AR.suspects(prio_item, now, env())[0]
-    _MC.AUDIT_MODEL_OFF = CUT
-    p_new = AR.suspects(prio_item, now, env())[0]
-    check("cut: an item that was a suspect for unneeded-escalation keeps its priority (1) though the call now rests on ask-missing alone", len(p_old) == len(p_new) == 1 and "unneeded-escalation" in p_old[0]["checks"] and p_new[0]["checks"] == ["ask-missing"]
-          and p_old[0]["priority"] == p_new[0]["priority"] == 1, (p_old, p_new))
-    # the evidence of a cut kind is not even read
-    reads = []
-    _real_owe = AR.obsolete_wait_evidence
-    AR.obsolete_wait_evidence = lambda *a, **k: reads.append(1) or _real_owe(*a, **k)
-    try:
-        AR.suspects(build(*replay.items()), now, env())
-        n_cut = len(reads)
-        _MC.AUDIT_MODEL_OFF = ()
-        AR.suspects(build(*replay.items()), now, env())
-        n_old = len(reads) - n_cut
-    finally:
-        AR.obsolete_wait_evidence = _real_owe
-        _MC.AUDIT_MODEL_OFF = CUT
-    check("cut: the obsolete-wait evidence is not read for a waiting item while its model call is cut, and is read with the call back", n_cut == 0 and n_old > 0, (n_cut, n_old))
-    prev = {f"board#{BID_80}": {"verdict": "yes", "check": OBS, "write": now, "checks": [OBS], "reason": "r", "fix": "f"}}
-    keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"}, None)
-    check("cut: an old yes under a cut kind is dropped when the record is carried, so its finding is not sent again", keep == {} and again == [], (keep, again))
-finally:
-    _MC.AUDIT_MODEL_OFF = ()
-check("cut: with the tuple empty the two kinds are asked about again (one line to put them back)", any(OBS in c for c in {s["id"]: s["checks"] for s in AR.suspects(cut_items, now, env())[0]}.values()), None)
+# ---- the retired kinds (docs/audit.md, "Turning a check back on"): ask-missing as a model kind, unneeded-escalation, obsolete-wait and why-not-now are out of CHECKS_MODEL and out of the rubric; the code checks stay; old records still read
+RETIRED = ("ask-missing", "unneeded-escalation", "obsolete-wait", "why-not-now")
+check("retired: the model kinds are exactly the four that are still asked about", AR.CHECKS_MODEL == ("next-done", "wrong-needs", "older-than-page", "goal-unclear"), AR.CHECKS_MODEL)
+check("retired: the rubric has no text for a retired kind and still has the four live ones", not any(re.search(rf"^{k}\n", RUBRIC_TEXT, re.M) for k in RETIRED) and all(re.search(rf"^{k}\n", RUBRIC_TEXT, re.M) for k in AR.CHECKS_MODEL), RUBRIC_TEXT[:200])
+check("retired: model_cuts holds no switch for the audit's kinds any more (the stall pass's cold-call cut stays)", not hasattr(_MC, "AUDIT_MODEL_OFF") and hasattr(_MC, "STALL_COLD_SKIP"), None)
+# the replay of the first of the retired kinds: an item parked on a wake whose wait rests on another item's nightly sync, which is closed as dropped (overtaken)
+replay = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", f"the done line needs a daily run and board#{BID_65}'s first sync runs on the wake (parked from doing)"),
+               closed(75, "dropped", "Oliver: close as overtaken; the new live-update feature made the nightly sync unneeded", 21, "[home] Add a nightly sync"))
+cut_items = build(*replay.items(), item(P_DEC, wrote=now - 30 * H, **{**PARK_P, "needs": ["decision"]}),
+                  item(6, wrote=now - 30 * H, state="your-call", needs=["decision"], mover="Oliver", ask=ASK_P, next="Oliver: pick one of the options"))
+sus_now = AR.suspects(cut_items, now, env())[0]
+check("retired: no suspect carries a retired kind; the held item with a closed citation is still asked about next-done alone", not any(k in s["checks"] or k in s["evidence"] for s in sus_now for k in RETIRED)
+      and [s["checks"] for s in sus_now if s["id"] == f"board#{BID_80}"] == [["next-done"]], [(s["id"], s["checks"]) for s in sus_now])
+check("retired: a decision item with an ask and an open step of the owner's is no suspect at all (it was one for two retired kinds on every write)", "board#6" not in [s["id"] for s in sus_now], [(s["id"], s["checks"]) for s in sus_now])
+rec_clear(); fake(default=YES("next-done"))
+rec = go(build(*replay.items()))
+check("retired: a run makes one call (next-done) and its message offers no retired check", len(calls()) == 1 and not any(k in calls()[0]["stdin"].split("Candidate checks")[-1] for k in RETIRED), calls())
+check("retired: the code check for a decision item with no ask is untouched", [f["id"] for f in AR.field_findings(build(item(1, needs=["decision"], mover="Oliver", wrote=now - 30 * H)), {}, now, env())[0] if f["category"] == "ask-missing"] == ["board#1"], None)
+# the old verdicts: a stored 'no' that lists retired kinds still stands, a stored 'yes' under one is dropped and its finding is not sent again
+only_wait = build(hold_at(99, 20, f"home-agent: then fold board#{BID_65}'s nightly sync into this item's record", "the done line waits on that sync"), closed(75, "dropped", "closed as overtaken", 21, "[home] Add a nightly sync"))
+from stackshot.tools import board_report as _BR
+stored = {f"board#{BID_80}": {"verdict": "no", "write": _BR._last_write(replay[f"a{BID_80}"]), "checks": ["next-done", OBS], "at": now, "sig": "abc123"}}
+again_sus, skipped = AR.suspects(replay, now, env(), stored)
+check("retired: a verdict stored before the retirement, whose checks list a retired kind (and a signature), still stands: not asked again", [s["id"] for s in again_sus] == [] and skipped == 1, (again_sus, skipped))
+prev = {f"board#{BID_80}": {"verdict": "yes", "check": OBS, "write": now, "checks": [OBS], "reason": "r", "fix": "f"}}
+keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"})
+check("retired: an old yes under a retired kind is dropped when the record is carried, so its finding is not sent again", keep == {} and again == [], (keep, again))
+prev = {f"board#{BID_80}": {"verdict": "yes", "check": "next-done", "write": now, "checks": ["next-done"], "reason": "r", "fix": "f"}}
+keep, again = AR.carried(prev, replay, set(), {f"board#{BID_80}": f"a{BID_80}"})
+check("retired: …while a yes under a live kind is carried as before", list(keep) == [f"board#{BID_80}"] and [f["category"] for f in again] == ["next-done"], (keep, again))
+from stackshot.audit import audit_overview as _AOV
+check("retired: the Audits page still files a findings-log row of a retired kind under its group (the history reads as before)",
+      [_AOV.group_of("run", k) for k in RETIRED] == ["wording", "wording", "filing", "filing"], [_AOV.group_of("run", k) for k in RETIRED])
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

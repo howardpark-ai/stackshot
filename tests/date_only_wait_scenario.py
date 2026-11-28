@@ -9,7 +9,7 @@ asked. Checked here against a scratch store and config (no port, no real server,
   2  a real reminder stays one: a line that is an action to take now, a timed line beside an action, a wake within the hour, a step started by an outside event (its note stays), another party's step in
      flight, a sender who is not the mover, a call that already holds or passes its own wait_basis: no hold, stored phase alive
   3  the ten-minute pass (audit_checks.date_only_wait through filing_findings, audit_run.filing_pass): the same shape set directly in the store is a why-not-now finding for its mover with the park as the fix,
-     found with no model call and with no cap (more than the daily run's SELF_WAIT_MAX at once); a real reminder, an item already on hold, a wake within the hour, an item the board already lists as
+     found with no model call and with no cap (more than the five a run the daily audit's retired model call took, at once); a real reminder, an item already on hold, a wake within the hour, an item the board already lists as
      waiting and the item the write parked are no finding; the finding is sent once and again after a write; the daily run's why-not-now suspects are as they were
 
     tests/run-suite date_only_wait        → exit 0 / 1"""
@@ -213,9 +213,9 @@ f9031 = next(f for f in fs if f["id"] == "board#9031")
 check("3 …to the mover, with the wake, the hours away, the line and the park as the fix", f9031["mover"] == "home-agent" and f9031["source"] == "code" and wk_(shape["a9031"]["metadata"]) in f9031["detail"] and "hours away" in f9031["detail"]
       and "every open next line waits for it" in f9031["detail"] and f9031["fix"] == AC.DATE_ONLY_FIX and 'wait_kind="time"' in f9031["fix"] and "wait_basis" in f9031["fix"], f9031)
 check("3 …and the server's stamp agrees that the board shows such an item alive (the gap this closes)", stamp_svc._stamp_values("a9031", shape["a9031"])[0] == "alive", stamp_svc._stamp_values("a9031", shape["a9031"]))
-many = dict(aitem(i) for i in range(40, 40 + AR.SELF_WAIT_MAX + 4))
+many = dict(aitem(i) for i in range(40, 40 + 5 + 4))
 fs, _flags = AC.filing_findings(many, {}, now, env())
-check(f"3 it is not capped: {len(many)} such items, more than the daily run's {AR.SELF_WAIT_MAX} why-not-now suspects a run, are all found", len([f for f in fs if f["category"] == "why-not-now"]) == len(many), len(fs))
+check(f"3 it is not capped: {len(many)} such items, more than the five a run the daily audit's retired model call took, are all found", len([f for f in fs if f["category"] == "why-not-now"]) == len(many), len(fs))
 clean = dict([aitem(50, nxt="home-agent: fix the retry loop and check the log"),                                                  # an action to take now: a reminder on work in hand
               aitem(51, nxt="home-agent: at 08:00 run the check\nhome-agent: file the report now"),                              # a timed line beside an action
               aitem(52, wake_in_h=0.5), aitem(53, hold=True, wait_basis={"text": "the window ends", "wake": "x", "by": "home-agent", "at": now}),
@@ -251,8 +251,8 @@ fresher = dict(shape); k, d = aitem(9031); d["written_at"] = time.time() + 60; f
 r3 = AR.filing_pass(now=now + 1200, items=fresher, anchors={}, env=env())
 check("3 a write to the item sends its finding again, and only that one", r3["fresh"] == 1 and sent and sent[0][1].count("board#") == 1, (r3, sent))
 sus, _skipped = AR.suspects(shape, now, AR.Env(roles=ROLES, fallback=lambda p: "alpha-main", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None)))
-check("3 the daily run's why-not-now suspects are as they were: the dated-steps shape only, this shape is not a model call", not [s for s in sus if "why-not-now" in s["checks"]], sus)
-check("3 the rubric still describes the daily check and the fix text is the pass's own", "why-not-now" in AC.CHECKS_FILING and AC.FIX["why-not-now"].startswith("do the step now"), None)
+check("3 the daily run makes no why-not-now suspect (the check is code only now), this shape included", not [s for s in sus if "why-not-now" in s["checks"]], sus)
+check("3 the filing pass keeps the check and the fix text is the pass's own", "why-not-now" in AC.CHECKS_FILING and AC.FIX["why-not-now"].startswith("do the step now"), None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": date only wait scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
