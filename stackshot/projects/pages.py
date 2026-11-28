@@ -1843,9 +1843,9 @@ def board_due(sid, name, payload, activity):
     items = owned_items(sid)
     if items is None: return [], act
     start = act.get("start") or 0
-    # touched = any write to it in the turn: a state change, a confirm, or a filing edit such as an ask-only update, which moves
+    # touched = any write to it in the turn: a state change, a confirm, or a filing edit such as a priority change, which moves
     # neither clock (a rule keeps it off the confirm clock) but is the session working on the item (the hook asked about another item after
-    # an ask-only update)
+    # a priority change)
     due = [it for it in items if not it.get("held") and max(_num(it.get("state_updated")), _num(it.get("confirmed")), _num(it.get("updated"))) < start]
     prompt = int(act.get("prompt") or 0)
     asked = named_asks(sid, prompt or start); named = {a["gid"] for a in asked}; act["named"] = named

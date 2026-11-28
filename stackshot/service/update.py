@@ -253,6 +253,23 @@ def _wait_is_bare(m: dict[str, Any]) -> bool:
     return _uw.is_bare(m)
 
 
+_STATE_GIVEN = frozenset({"needs", "clear_needs", "agent", "status", "mover", "then", "post_wake_mover", "clear_mover", "clear_then", "wake", "clear_wake", "hold", "clear_hold", "ask_by",
+                          "wait_kind", "wait_anchor", "wait_event", "after", "clear_after", "waits", "wait_mode", "clear_wait", "wait_basis", "clear_wait_basis", "step", "supplies",
+                          "recycle", "clear_recycle", "clear_ask", "clear_options", "done", "dropped", "reword", "work", "clear_next"})
+
+
+def _asks_alone(item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], ask: str, opts: Any, given: dict[str, Any]) -> bool:
+    """Is this a question for the owner written with no state of its own: an ask or options (the item then holds an ask) on an open item that is not on his call and not in his hands,
+    and a call that gives no needs, mover, wait, status or step? The server then adds the decision need, as needs=decision beside the ask would."""
+    return bool(item.get("status") == "open" and (ask or opts) and (ask or meta.get("ask")) and "decision" not in [str(x).lower() for x in was_needs]
+                and not (_STATE_GIVEN & (set(given) - ({"status"} if str(given.get("status") or "").strip().lower() == "open" else set()))) and not _model.is_owner(_model.norm_who(meta.get("mover"))))
+
+
+def _parked(meta: dict[str, Any]) -> bool:
+    """Does the item hold a wait (a kind, a date or a hold), as the write finds it?"""
+    return bool(_model.waits_stored(meta) or meta.get("hold") or meta.get("wait_kind") or _uw.date_of(meta))
+
+
 def _old_holder_goes(meta: dict[str, Any]) -> bool:
     """Is the stored mover the old holder a hand-off by needs replaces: a session that is not among the sessions `needs` names now (and not the owner)? The write drops it then."""
     h = _hooks()
@@ -835,6 +852,14 @@ def update_unlocked(
             fc.add(f"Refused: {_gh.shown(gid)} is completed and keeps the contact it had as its record; reopen it (status=open with a next) before changing the contact")
         else:
             contact_new = fc.call(_gates.gate_contact, contact, proj_for, (str(meta.get("owner") or ""), str(meta.get("contact") or "")), default="")
+    ask_note = ""        # what the server did with a question written alone: the decision need it added, or why it did not
+    if _asks_alone(item, meta, was_needs, ask, opts, given):      # a question for the owner, written with no state of its own: the same write as needs=decision beside it, so the mover, the owner's step and the page follow the one path
+        if _parked(meta):
+            ask_note = (f"\n(the ask and its options are stored, but {OWNER} does not have the question: {_gh.shown(gid)} is parked, so no decision need was added and it does not reach his move while it is parked;"
+                        f" unpark it with clear_wait=true (and clear_hold=true if it holds) and needs=decision in one write)")
+        else:
+            needs, needs_set = [*was_needs, "decision"], True
+            ask_note = "\n(added the decision need; the question is on his move now)"
     if needs_set:
         if (got_needs := fc.call(_gates.gate_needs, needs, proj_for, own_for, _model.norm_who(meta.get("then")))) is not None:
             _needs_store(meta, got_needs)
@@ -1438,7 +1463,7 @@ def update_unlocked(
     if wake or clear_wake or hold or clear_hold or after_set or clear_after or needs_set or clear_needs or recycle or clear_recycle or chk or clear_check:
         for k in ("waiting", "wait_failed"):      # what it waits on changed (a check alone is a filing edit, so it does not reach the line above): the old failure (and any `waiting` record) is about the old wait
             meta.pop(k, None)
-    if opts is not None:          # a filing edit like the ask; [] clears
+    if opts is not None:          # the options are stored with the ask (alone, they add the decision need on an open item: _asks_alone); [] clears
         if opts: meta["options"] = opts
         else: meta.pop("options", None)
     if closing:                   # the end state is the record; nothing is left to do, ask or wait on (due stays as a record)
@@ -1604,7 +1629,7 @@ def update_unlocked(
             fc.call(_gates.gate_step_gap, meta, steps_new, steps_old)         # a step that delivers a pull request, followed by another session's step, needs its proof
     elif step_proof is not None:
         fc.add(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before giving a step a proof")
-    asked = lifted + ("" if item.get("status") == "completed" else h.ask_owed(meta))   # a needs=decision item left without an ask (a completion never needs one)
+    asked = lifted + ("" if item.get("status") == "completed" else h.ask_owed(meta)) + ask_note   # a needs=decision item left without an ask (a completion never needs one); then what the server did with a question written alone
     if item.get("status") != "completed" and not closing and (ask or meta.get("ask") != ask_was):   # only a call that writes or changes the ask
         fc.call_family(*_faults.DECISION, _dg._gate_one_decision, meta, item.get("description") or "", bool(lifted) and not ask)
     if item.get("status") != "completed" and (ask or (description and not reformat) or needs_set or opts is not None):   # only a call that writes what it reads
@@ -1768,7 +1793,7 @@ def update_unlocked(
     item["metadata"] = meta
     item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)
     if state_change:
-        item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject, and the ask line) leave the state clock alone
+        item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject) leave the state clock alone; an ask alone on an open item adds the decision need, which is a state change
         item["confirmed"] = item["updated"]       # a state change confirms the item; a filing edit does not
     named = name_commit()                  # every gate has passed: the naming is stored as its own save, then this write's
     _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or _writes.reformat()) else (_writes.NAMED if mover_named else _writes.PLAIN), written=next if next_touch else "")
