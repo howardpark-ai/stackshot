@@ -11,7 +11,7 @@ config on disk (STACKSHOT_CONFIG):
 
 THE CONFIG IS REVERTED (the commits of the switch are reverted, pushed and pulled)
   The checkout's code has to load the config (`python -m stackshot.core.config check`). When it does not, nothing is changed: fix the config, or run this
-  with --saved.
+  with --saved (and --snapshot DIR when there is no saved copy that such a run would take).
   1  the splitter is disabled; it runs on until step 4
   2  an override of an earlier run is removed
   3  `./install.sh units`. When step 2 or 3 fails, nothing is restarted and the override is put back
@@ -429,8 +429,15 @@ def way_back(co: Path, cfg_path: Path, snapshot: Path | None, apply: bool, end_h
     if not use_saved and not loads(co, cfg_path, "the config on disk", lim):
         if window is None:
             fs.say("REFUSE", "the board is not restarted on a config that the code cannot load")
-            fs.emit("nothing was changed. Fix the config in its repository, push, pull and run this again; or run the board on the saved copy of the old config:")
-            fs.say("UNDO", fs.command("frontdoor_undo.py", "--apply", "--saved", *(["--snapshot", str(snapshot)] if snapshot else [])))
+            retry = "nothing was changed. Fix the config in its repository, push, pull and run this again; or run the board on "
+            saved = fs.rollback_copy()
+            if snapshot or not (usable(saved) or stale(saved)):
+                fs.emit(retry + "the saved copy of the old config:")
+                fs.say("UNDO", fs.command("frontdoor_undo.py", "--apply", "--saved", *(["--snapshot", str(snapshot)] if snapshot else [])))
+            else:                                    # no copy a run would take: an UNDO line is pasted as it is, so this one is an OPTION
+                fs.emit(retry + "a snapshot's config:")
+                fs.say("OPTION", "put the board on a snapshot's config, with its folder for DIR",
+                       fs.command("frontdoor_undo.py", "--apply", "--saved", "--snapshot") + " DIR")
             return fs.FAILED
         fs.say("NOTE", "the way back runs on the saved copy instead")
         use_saved = True

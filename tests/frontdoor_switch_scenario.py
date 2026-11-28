@@ -1543,6 +1543,27 @@ def reverted_config_the_code_refuses():
     r = subprocess.run(printed, env=w.env, capture_output=True, text=True, timeout=120)
     check("the command that refusal prints works", r.returncode == 4 and on_the_saved_copy(w), (r.returncode, r.stdout + r.stderr))
 
+for old in (False, True):
+    def refused_with_no_copy_to_take(old=old):
+        w = World().switched(); w.config.write_text(w.text("single") + "# the code refuses this\n")
+        if old: os.utime(w.rollback, (time.time() - 25 * 3600,) * 2)
+        else: w.rollback.unlink()
+        what = "an old saved copy" if old else "no saved copy"
+        files = w.files(); units = w.state()["units"]
+        for more in ((), ("--apply",)):
+            w.clear_calls()
+            rc, out = undo(w, *more)
+            wanted = [l for l in out.splitlines() if l.startswith("OPTION") and l.endswith("frontdoor_undo.py --apply --saved --snapshot DIR")]
+            check(f"undo {more} refuses a config the code cannot load, with {what}: the printed run asks for a snapshot folder, never the saved copy", rc == 1 and line(out, "REFUSE", "not restarted")
+                  and len(wanted) == 1 and not any(l.endswith("frontdoor_undo.py --apply --saved") for l in out.splitlines()) and not acted(w) and w.files() == files and w.state()["units"] == units
+                  and pasteable(out), (rc, out, w.calls()))
+        r = None
+        if wanted:
+            printed = shlex.split(wanted[0][wanted[0].index("env "):])
+            r = subprocess.run([str(w.snap) if a == "DIR" else a for a in printed], env=w.env, capture_output=True, text=True, timeout=120)
+        check(f"that run, with the snapshot's folder for DIR, works ({what})", r is not None and r.returncode == 4 and on_the_saved_copy(w), r and (r.returncode, r.stdout + r.stderr))
+    refused_with_no_copy_to_take.__name__ = f"refused no copy {old}"; CASES.append(refused_with_no_copy_to_take)
+
 @case
 def reverted_config_the_real_code_refuses():
     w = way_back_done(); real = {"FRONTDOOR_SWITCH_PYTHON": shlex.quote(sys.executable), "PYTHONPATH": STACK, "PYTHONDONTWRITEBYTECODE": "1"}
