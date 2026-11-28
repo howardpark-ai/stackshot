@@ -50,7 +50,25 @@ SINGLE_KINDS = ("time", "anchor", "item", "relay", "event")      # the kinds of 
 WAIT_KINDS = (*SINGLE_KINDS, "list")                             # …and the sixth, a wait on a list of waits: wait_kind=list, the lines in `waits`, the mode in `wait_mode`, the backstop day in `until`
 LEGACY_PICKER_KEY = "post_wake_mover"      # the old stored name of a waiting item's `mover` (who picks it up when the wait ends); read only through stored_picker
 PICKER_ALIAS_UNTIL = "2026-11-29"          # the last day the parameter post_wake_mover is accepted as an alias of `mover` (14 days after the release that opens the window): [model] post_wake_alias_until moves it without a release
-WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "until", "waits", "wait_mode")      # what a clear of the wait drops (the wake and after have flags of their own); the old picker key goes with it too (LEGACY_PICKER_KEY), but it is no field of the wait a session names any more
+SERVER_END_KEY = "until_server"      # metadata: the day the server stored as a wait's end when the call gave none (a wait on an item, anchor, relay or event); it reads as set by the server only while the stored `until` is still that day
+WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "until", "waits", "wait_mode", "until_server")      # what a clear of the wait drops (the wake and after have flags of their own); the old picker key goes with it too (LEGACY_PICKER_KEY), but it is no field of the wait a session names any more
+
+
+def server_end(m: dict[str, Any]) -> str:
+    """The day the server stored as the wait's end when the call gave none ("" when the end is another day, the wait is gone, or the server set none): the mark counts only while the date
+    the wait stands on (until, else the working ask_by or wake) is still that day."""
+    d = clean(m.get(SERVER_END_KEY))[:10]
+    return d if d and d in {clean(m.get(k))[:10] for k in ("until", "ask_by", "wake")} else ""
+
+
+OUTCOME_SERVER_KEY = "outcome_server"      # metadata of a closed item: the fields of its close (outcome, reason, outcome_text) the server wrote because the close left them out; a reopen drops it with them
+SERVER_SET = "(set by the server)"         # the words every read puts beside a value the server wrote in the caller's place
+
+
+def server_outcome(m: dict[str, Any]) -> list[str]:
+    """The close fields the server wrote (OUTCOME_SERVER_KEY), those of outcome, reason and outcome_text the item still stores; [] when it wrote none."""
+    v = m.get(OUTCOME_SERVER_KEY)
+    return [k for k in (v if isinstance(v, list) else []) if k in ("outcome", "reason", "outcome_text") and clean(m.get(k))]
 MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)
 DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP, LEGACY_PICKER_KEY)            # a closed item has no mover and waits on nothing; its goal stays as the record
 LINE_MAX = 300

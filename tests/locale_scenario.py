@@ -548,6 +548,7 @@ ix(210, "Time wait", wait_kind="time", wake="2099-01-01", post_wake_mover="alpha
    cap_ok={"wake": "2099-01-01", "quote": "wait until the new year", "source": "chat", "by": OWN}, recycle=True, observers=["alpha-helper"], due="2099-01-05", confirmed=now0 - 90 * DY, su=now0 - 90 * DY)
 ix(211, "Item wait", wait_kind="item", after=["a201", "a210"], post_wake_mover="alpha-helper", next="alpha-helper: go on")
 ix(212, "Item wait, no ids", wait_kind="item", after=[], post_wake_mover="alpha-helper", next="alpha-helper: go on")
+ix(262, "Item wait, end by the server", wait_kind="item", after=["a201", "a210"], post_wake_mover="alpha-helper", until="2099-03-01", until_server="2099-03-01", next="alpha-helper: go on")      # the end day the server stored when the call gave none
 ix(213, "Anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", post_wake_mover="alpha-helper", wake="2099-02-01",
    chases=[{"at": now0 - 2 * HR, "by": "alpha-main", "note": "asked in the thread"}, {"at": now0 - HR, "by": "alpha-main", "note": "pinged the reviewer"}], next="alpha-main: wait for it")
 ix(214, "Anchor wait, no event", wait_kind="anchor", wait_anchor="", post_wake_mover="alpha-helper", next="alpha-main: wait for it")
@@ -626,7 +627,7 @@ ix(251, "A long History", mover="alpha-main", next="alpha-main: x", priority="p2
 for n_ in range(56): ic(251, {"priority": "p1" if n_ % 2 == 0 else "p3"}, updated=now0 - (100 - n_) * 60)
 (IPX / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/o/r/pull/9", "items": ["a201"], "added": 1, "by": "t"}], "projects/beta": [{"url": "https://github.com/o/r/pull/10", "items": ["a201"], "added": 1, "by": "t"}]}))
 git("add", "-A"); git("commit", "-q", "-m", "ipx all")
-IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258, 259, 260, 261]
+IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262]
 IPX_BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 IPX_WATCH = {"action": "/items/a1/watch", "token": "TOKEN", "flag": "", "watched": True, "why": "it is yours"}
 def ipx_pages():

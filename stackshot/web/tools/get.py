@@ -124,11 +124,13 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if m.get("goal"):                        # the end-state in one sentence
         out.append(f"goal: {m['goal']}")
     if item.get("status") == "completed" and m.get("outcome"):   # how it ended
-        out.append(f"outcome: {_rmod.outcome_word(m['outcome'])}" + (f" by {m['superseded_by']}" if m.get("superseded_by") else ""))
+        by_server = _model.server_outcome(m)                 # the fields the server wrote in the close's place, each marked so (a default whose words already say so is not marked twice)
+        mark = lambda f: f" {_model.SERVER_SET}" if f in by_server and _model.SERVER_SET not in str(m.get(f) or "") else ""
+        out.append(f"outcome: {_rmod.outcome_word(m['outcome'])}" + (f" by {m['superseded_by']}" if m.get("superseded_by") else "") + mark("outcome"))
         if m.get("reason"):
-            out.append(f"reason: {m['reason']}")
+            out.append(f"reason: {m['reason']}" + mark("reason"))
         if m.get("outcome_text") and not brief:    # how it ended, in bullets: the description above stays what the item was about (the brief leaves it out, like the description's length)
-            out.append(f"outcome text:\n{m['outcome_text']}")
+            out.append(f"outcome text:{mark('outcome_text')}\n{m['outcome_text']}")
     if item.get("status") == "open":         # where it stands: the stored state with the fields it carries; an item that stores none shows no state line (the model line below says alive or waiting)
         out.extend(w for w in [_states.words(item, lambda i_: _item_read._after_open(i_.get("metadata") or {}))] if w)
         out.extend(f"{k}: {v}" for k, v in _states.carry_of(item).items())
@@ -152,7 +154,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             if m.get(k):
                 out.append(f"project: {_ip.line_of(m)}")      # the top-level project, with the page the item is filed on after it when that is a sub-page (item_project.line_of)
         elif m.get(k):
-            out.append(f"{k}: {m[k]}")
+            out.append(f"{k}: {m[k]}" + (f" {_model.SERVER_SET}" if k == "until" and _model.server_end(m) else ""))      # a backstop day the server stored is marked as such
         if k == "ask" and _rmod.open_options(item):   # under the ask, one line each; only while it waits on his decision
             out.append("options:\n" + "\n".join("- " + ln for ln in _rmod.option_lines(item)))
     if not brief and _contacts._contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
