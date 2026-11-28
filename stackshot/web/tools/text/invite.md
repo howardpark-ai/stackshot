@@ -7,7 +7,8 @@ registration makes the address a member, who reads and writes as any member does
 registered, with an address Google reports as verified, and the first sign-in binds the Google account, which every
 later one has to be. Calling it again for a registered address returns the same link and mail. remove=true takes the
 registration back: unless another entry still lets the address in, from the next request on the person gets no list,
-read or call of this board through a connector, sign-ins already issued included. A machine token or an enrolled key
+read or call of this board through a connector, sign-ins already issued included, and the Google account that had joined
+is refused if the address is registered again. A machine token or an enrolled key
 is revoked separately.
 
 ## param address
