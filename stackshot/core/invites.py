@@ -43,7 +43,8 @@ from stackshot.core.frontdoor_config import NAME
 TABLE = "invites"
 KEY = "invited"                       # the key of a members entry the board wrote
 PIN = "google_sub"                    # inside it: the id of the Google account that joined first ("" until one has)
-PAGE_PATH = "/join"                   # the setup page the link names (web/routes/join.py)
+REMOVED = "removed_from"              # inside it: the boards taken off an entry that kept its recorded account for others; registering one of them again is refused until that account is let go
+PAGE_PATH = "/join"                  # the setup page the link names (web/routes/join.py)
 LOCK_SECONDS = 2.0                    # the longest a change waits for another change of the file
 
 # The redirect URIs of the apps the setup page names, added to [auth] allowed_client_redirect_uris while registering is on. Each is the one its app documents:
@@ -361,6 +362,12 @@ def register(address: str, by: str, s: Settings) -> tuple[bool, bool]:
         joined = bool(_pin_of(value))
         if s.board in value["boards"]:
             return (False, joined), False
+        gone = value[KEY].get(REMOVED)
+        if joined and isinstance(gone, list) and s.board in gone:
+            raise InviteError(f"{address} was removed from board {s.board}, and the entry still holds the Google account of the earlier registration (it is on other boards): "
+                              f"remove {address} from every board first (or set google_sub to \"\" in the file), then register it again so the new registration is the new person's own")
+        if isinstance(gone, list):
+            value[KEY][REMOVED] = [b for b in gone if b != s.board]
         value["boards"].append(s.board)
         return (True, joined), True
     return _change(s.members_file, add)
@@ -390,6 +397,8 @@ def remove(address: str, s: Settings) -> tuple[tuple[str, ...], bool]:
             value["boards"] = [b for b in value["boards"] if b != s.board]
             if value["boards"]:
                 left.extend(b for b in value["boards"] if isinstance(b, str))
+                if isinstance(value.get(KEY), dict) and _pin_of(value):      # the recorded account stays for the other boards: say this board was taken off
+                    value[KEY][REMOVED] = list(dict.fromkeys([*(value[KEY].get(REMOVED) or []), s.board]))
             else:
                 del doc[key]
         listed = any(_listed_on(v, s.board) for _k, v in holders if not (isinstance(v, dict) and KEY in v))
