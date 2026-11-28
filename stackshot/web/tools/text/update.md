@@ -50,7 +50,7 @@ it)`): reword or drop those lines in the same turn. An item stores alive or wait
 set, and these are not parameters of this tool or of create: a call that passes state, clear_state, party, chase, end,
 proof or chase_note is refused with what to pass instead. Whose move it is goes in mover; {{OWNER}}'s call is
 needs=["decision"] with an ask; his own step is step=<one line, no command, of the single thing only {{OWNER}} does;
-what he runs goes in a next line that starts `{{OWNER}}:`> (the board ticks it when he says it is done; never ask him
+what he runs goes in a next line that starts `{{OWNER}}:`; a step that asks him to open or check something carries the link itself, [words](url), never "the link above" or "the mockup I sent"> (the board ticks it when he says it is done; never ask him
 "have you done it?" as a decision); a wait on another item is after=["board#N"] (supplies=<one line: what that item's
 output gives this one> says what it takes from it); a park is until=<date> with wait_kind="time" and either his recorded
 words for it (cap_ok) or a wait_basis (the end of a window the work needs, or a date past the cap); a wait on someone

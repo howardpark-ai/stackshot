@@ -1103,3 +1103,5 @@ yes_no_words = []                                   # (words) other-language wor
 
 [keywords.server]
 command_cues = []                                   # (words) other-language words that say an item waits on the owner running or pasting a command
+open_cues = []                                      # (words) other-language words that ask the owner to open, check or test something
+back_refs = []                                      # (words) other-language words that point back at a link elsewhere (the link above, a message sent earlier)

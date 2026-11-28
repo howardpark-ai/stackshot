@@ -36,7 +36,7 @@ waits it is the list's backstop day, required.
 
 ## param NEXT_CREATE
 The checklist, one step per line, each opening with who takes it: next="my-x: open the PR" (or several lines with \n).
-Results and PRs go on the project page, never in next. A line opening with `{{OWNER}}:` over {{STEP_SPLIT_OVER}} characters
+Results and PRs go on the project page, never in next. A line opening with `{{OWNER}}:` that asks him to open or check something carries the link itself, never "the link above". A line opening with `{{OWNER}}:` over {{STEP_SPLIT_OVER}} characters
 with several actions is split into one line per action (a lead-in that ends with a colon before `1) … 2) …` stays one line, its items indented `- ` lines under it; not one over {{STEP_SPLIT_MAX}} characters or {{STEP_SPLIT_ACTIONS}} actions).
 
 ## param ASK_PARAM_NEW
