@@ -377,6 +377,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     at = {mark: next((n for n, s in enumerate(hd.scripts) if mark in s), -1) for mark in ("window.ssBrief={", "SK='ss-home-scroll'", "ssBrief.takes(a)")}
     check("the installed app's link rule leaves a title the panel takes, and the panel's script reads the address before the home script clears it",
           0 <= at["ssBrief.takes(a)"] < at["window.ssBrief={"] < at["SK='ss-home-scroll'"] and "takes:function(a)" in scripts[0], at)
+    check("a row's click leaves words that carry their own explanation to the explanation's popup", """,[data-tip],[title]:not([title=""])');if((x&&li.contains(x))""" in scripts[0])
     check("the box and send-key scripts take a form put in by the script", sum(s.count("addEventListener('stackshot:inserted'") for s in hd.scripts) == 2, [s.count("stackshot:inserted") for s in hd.scripts])
     links = [a.get("href") for t, a in hd.tags if t == "a" and "ir-link" in (a.get("class") or "").split()]
     check("every row's link is still the item's own page", links and all(re.fullmatch(r"/items/" + _ids._ITEM_KEY, h) for h in links), links)

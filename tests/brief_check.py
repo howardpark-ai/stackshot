@@ -185,6 +185,10 @@ def desktop(br, errors):
     pg = ctx.new_page(); pg.on("pageerror", lambda e: errors.append(str(e)))
     home(pg)
     check("every row has its button", pg.eval_on_selector_all("li.irow.hrow", "l => l.length > 5 && l.every(x => x.querySelectorAll('.bopen').length === 1)"))
+    pg.click(f"{row(2)} .ir-age"); pg.wait_for_timeout(200)
+    got = (pg.eval_on_selector_all(".xt-pop", "l => l.length"), state(pg))
+    check("a tap on a row's time opens its explanation, not the panel", got[0] == 1 and not got[1]["open"], got)
+    pg.keyboard.press("Escape"); pg.mouse.move(5, 5)
     order = pg.eval_on_selector_all("li.irow.hrow a.ir-link", "l => l.filter(a => a.getClientRects().length).map(a => a.getAttribute('href'))")
     shot(pg, "desktop-home")
     top = "(s) => document.querySelector(s).getBoundingClientRect().top"

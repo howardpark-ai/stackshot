@@ -344,7 +344,7 @@ setTimeout(lockAll,0);      // after the form's data is taken: a button shut now
 setTimeout(function(){if(SENDING[k]!==s)return;delete SENDING[k];lockAll();failure(k,SST('js.brief.unsure'))},LIMIT)},true);
 document.addEventListener('click',function(e){if(e.defaultPrevented||e.button!==0)return;var t=e.target,li=t.closest&&t.closest('li.irow.hrow');if(!li)return;
 if(!t.closest('.bopen')){if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
-if(!t.closest('a.ir-link')){var x=t.closest('a,button,summary,input,textarea,select,label,form,details,.draft,.sentline,.isent,.rsz');if((x&&li.contains(x))||String(window.getSelection()))return}}
+if(!t.closest('a.ir-link')){var x=t.closest('a,button,summary,input,textarea,select,label,form,details,.draft,.sentline,.isent,.rsz,[data-tip],[title]:not([title=""])');if((x&&li.contains(x))||String(window.getSelection()))return}}
 var k=keyOf(li);if(!k)return;e.preventDefault();open(k,cur?'step':'click')});
 P.addEventListener('click',function(e){var b=e.target.closest('[data-bact]');if(b){var a=b.getAttribute('data-bact');if(a==='prev')step(-1);else if(a==='next')step(1);else if(a==='close')close();return}
 if(e.target.closest('.bnext'))nextOpen()});
