@@ -655,7 +655,7 @@ def cmd_doctor(a: argparse.Namespace) -> int:
 
     # the config through config.py, as the server and the hooks read it; with no config file, what they would fall back to
     env = env_with(cfg) if cfg.is_file() else {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_CONFIG", "BOARD_MCP_CONFIG")}
-    r = subprocess.run([sys.executable, "-c", "from stackshot.core import config; import json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, 'obsolete': config.obsolete(), 'notes': config.notes(), 'runner_process': config.runner_process(), 'emails': __import__('stackshot.core.members', fromlist=['x']).emails()}))"],
+    r = subprocess.run([sys.executable, "-c", "from stackshot.core import config; import json; print(json.dumps({'file': str(config.PATH), 'cfg': config.CFG, 'obsolete': config.obsolete(), 'notes': config.notes(), 'runner_process': config.runner_process(), 'emails': __import__('stackshot.core.members', fromlist=['x']).emails(), 'autonomy': __import__('stackshot.core.autonomy', fromlist=['x']).problems()}))"],
                        capture_output=True, text=True, env=env, cwd=str(HERE))
     loaded = json.loads(r.stdout) if r.returncode == 0 else {}
     c = loaded.get("cfg") or {}
@@ -694,6 +694,12 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     emails = list(loaded.get("emails") or [])
     line(bool(emails) or c.get("auth", {}).get("mode") == "off", f"auth.allowed_emails: {len(emails)} address(es)",
          f"add your Google email to [auth] allowed_emails in {cfg}: nobody can sign in, and the server will not start")
+    gaps = list(loaded.get("autonomy") or [])      # the autonomy profile (core/autonomy.py): gaps read as hand-on, so they warn and fix nothing; nothing reads the profile yet
+    if gaps:
+        for g in gaps:
+            line(False, f"autonomy: {g}", warn=True)
+    else:
+        line(True, "autonomy: every member has a level for every kind")
     line((secrets / "client.token").is_file(), "this box's client token", "run bin/stackshot client install (or setup)")
     port = int(c.get("server", {}).get("port") or 8020)
     base = str(c.get("auth", {}).get("base_url") or "").rstrip("/")

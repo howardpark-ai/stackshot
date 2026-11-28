@@ -31,6 +31,7 @@ from stackshot.web.tools import canvas as _tool_canvas
 from stackshot.web.tools import anchors as _tool_anchors
 from stackshot.web.tools import rules as _tool_rules
 from stackshot.web.tools import invite as _tool_invite
+from stackshot.web.tools import autonomy as _tool_autonomy
 from stackshot.web import canvas_guard as _canvas_guard, door_guard as _door_guard, frame_guard as _frame_guard, requestlog as _requestlog
 from stackshot.web.middleware import _Fingerprint, _LinkIds, _MembersOnly, _ReadOnly, _RefusalLog, _RetiredInputs
 from stackshot.web.routes import client_api as _routes_client_api
@@ -240,6 +241,7 @@ def build(
     _tool_rules.register(mcp)
     _tool_canvas.register(mcp)      # the `canvas` tool: add, update, history, undo and list of the pages the board keeps (web/tools/canvas.py)
     _tool_invite.register(mcp)      # the `invite` tool, only on a board whose [invites] names an admin (web/tools/invite.py)
+    _tool_autonomy.register(mcp)      # the `autonomy` tool: a person's row of the autonomy profile, read only (web/tools/autonomy.py)
     _signin.register(mcp)
     _routes_door_verify.register(mcp)      # `GET /frontdoor/verify` for the sign-in service, only on a board whose [behind_frontdoor] names a verify_secret_file (web/routes/door_verify.py)
     _routes_client_api.register(mcp, client_get=client_get, recycle_wanted_tokens=recycle_wanted_tokens)
