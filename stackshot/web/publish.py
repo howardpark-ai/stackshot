@@ -2,6 +2,12 @@
 
 publish()   refresh the version tracker + the project-page registry, render board.md from the
             store, commit board-data/ + board.md + projects.json when anything changed, fetch, then push, fast-forward or (diverged on disjoint files) merge off the live tree; never a rebase. One flock; safe to call often.
+            It never commits anything under pages/, whatever [publish] pages says.
+publish_pages(paths, author, email)  [publish] pages on only: commit the page files the caller names (relative to pages/) as one commit, the named person or agent
+            as git author, the board's own identity as committer, then push. True: committed; False: those files are as committed already; CommitFailed: not
+            committed, with why (the switch off, a path or an author refused before anything is staged, the clone midway, a file not named that would go with
+            them or that a session staged and would lose, git refusing), the store clone's index as it was (the commit is built in an index of its own).
+pages_lock()  the publish lock, for a caller to hold across a page's write and its publish_pages(), which nests inside it.
 bump()      refresh the latest-version lookups (npm, gbrain releases), then publish; installed versions come from the
             fleet state the fleet tool writes before calling it. `--host` is accepted and ignored (the split).
 brief()     the one-line brief + top items (session-start banner).
@@ -21,11 +27,16 @@ if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py)
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _sys.path[:] = [_os.path.dirname(_os.path.dirname(_here))] + [p for p in _sys.path if _os.path.abspath(p or ".") != _here]
 
+import contextlib
 import fcntl
 import os
 import re
+import shutil
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -45,16 +56,23 @@ DATA = _cfg.path("paths", "store")
 OUT = _cfg.path("paths", "markdown")
 DATA_REL = str(DATA.relative_to(REPO))
 OUT_REL = str(OUT.relative_to(REPO))
+PAGES_REL = "pages"                      # a brain's pages: markdown files it writes here and never commits (publish_pages() does, for the files it is given)
 LOCK = _cfg.state("publish.lock")        # one publish at a time
-# [paths] is restart-only (config.RESTART_ONLY); [publish] git is read at use, so a reload is live at once.
+# [paths] is restart-only (config.RESTART_ONLY); [publish] git and pages are read at use, so a reload is live at once.
 
 
 def _git_on() -> bool:      # false: render only, never fetch, commit or push (a staging instance)
     return bool(_cfg.get("publish", "git", default=True))
 
 
-def _git(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, check=check)
+def _pages_on() -> bool:    # only a TOML true turns it on (a string "false" is not true); off, the default, publish_pages() commits nothing
+    return _cfg.get("publish", "pages", default=False) is True
+
+
+def _git(*args: str, check: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """git in the store clone (`env`: the whole environment of that one call, else this process's). Its output is read as UTF-8, and a byte that is not (a
+    hook's message, a remote's refusal) is read as U+FFFD, never raised on."""
+    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, encoding="utf-8", errors="replace", check=check, env=env)
 
 
 _NOTED: dict[str, float] = {}      # kind of note -> when it was last printed (time.monotonic)
@@ -93,10 +111,13 @@ def _refused(r: subprocess.CompletedProcess) -> str:
 
 
 def _identity() -> dict[str, str]:
-    """The environment a commit made off the live tree needs: the store clone's own configured identity, and where it has none the author of its last commit."""
+    """The environment a commit made off the live tree needs: the store clone's own configured identity; where it has none, this process's committer
+    (GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL: the board's own); where that is unset too, the committer of the store's last commit. Never an author: the last
+    commit may be a page whose author is a person (publish_pages), and the board's merge is not theirs."""
     env = {}
-    for key, cfg, fmt in (("NAME", "name", "an"), ("EMAIL", "email", "ae")):
-        v = _git("config", f"user.{cfg}").stdout.strip() or _git("log", "-1", f"--format=%{fmt}").stdout.strip()
+    for key, cfg, fmt in (("NAME", "name", "cn"), ("EMAIL", "email", "ce")):
+        v = (_git("config", f"user.{cfg}").stdout.strip() or os.environ.get(f"GIT_COMMITTER_{key}", "").strip()
+             or _git("log", "-1", f"--format=%{fmt}").stdout.strip())
         if v:
             env[f"GIT_AUTHOR_{key}"] = env[f"GIT_COMMITTER_{key}"] = v
     return env
@@ -123,9 +144,10 @@ def _midway() -> str:
     return ""
 
 
-def _gitsync(msg: str, *paths: str) -> None:
+def _gitsync(msg: str, *paths: str, committed: bool = False) -> None:
     """Commit the given paths and push. `--only` with the pathspecs: the server shares this checkout with every session on
     the host, and a plain commit swept in whatever a session had staged (a deletion went out under a board message).
+    `committed`: a commit was made just before this call (publish_pages' own, which then calls this with no path), so the push step runs.
     While a session has the clone midway through something (`_midway`) the whole step is skipped, with one note an hour, and the files stay as they are."""
     if (why := _midway()):
         _note("midway", f"publish: the store clone is {why}; the git step (commit, merge, push) waits until it is finished")
@@ -133,7 +155,6 @@ def _gitsync(msg: str, *paths: str) -> None:
     have = [p for p in paths if (REPO / p).exists()]
     for p in have:
         _git("add", "-A", "--", p)
-    committed = False
     if have and _git("diff", "--cached", "--quiet", "--", *have).returncode != 0:
         _git("commit", "--quiet", "--only", "-m", msg, "--", *have); committed = True
     if not committed and _git("rev-list", "--count", "@{u}..HEAD").stdout.strip() in ("", "0"):
@@ -223,13 +244,51 @@ def _check_host(argv: list[str]) -> None:
         raise NotServerHost(line)
 
 
+_RLOCK = threading.RLock()      # this process's threads take turns here; the outermost hold also takes the flock on LOCK, so processes take turns too
+_DEPTH = 0                      # how many holds the thread that has _RLOCK has made of it: read and written only while _RLOCK is held
+
+
+@contextlib.contextmanager
+def _locked():
+    """The one publish lock. Re-entrant in a thread (a caller that holds `pages_lock()` and calls publish_pages() nests, never waits on itself); the outermost
+    hold of the thread that has it also takes the flock on LOCK, so another process (`publish.py publish`, `flush`) waits for it as it always did."""
+    global _DEPTH
+    with _RLOCK:
+        lf = None
+        if _DEPTH == 0:
+            LOCK.parent.mkdir(parents=True, exist_ok=True)
+            lf = open(LOCK, "w")
+            try:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+            except BaseException:
+                lf.close()
+                raise
+        _DEPTH += 1
+        try:
+            yield
+        finally:
+            _DEPTH -= 1
+            if lf is not None:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+                lf.close()
+
+
+def pages_lock():
+    """Hold the publish lock across a page's write and its commit, so that no other write or publish lands between them:
+
+        with publish.pages_lock():
+            <write the page file>
+            publish.publish_pages([path], author)
+
+    publish_pages()'s own hold, taken inside this one, nests."""
+    return _locked()
+
+
 def publish(force_versions: bool = False, host: str = "") -> str:
     """Render + commit + push. Returns the brief's first line."""
     _ro.guard("publish: files, versions, registry, commit and push")
     _check_host(["bump" if force_versions else "publish"])
-    LOCK.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOCK, "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
+    with _locked():
         # other writers' commits to the repo arrive through git (the fleet's heartbeats no longer do: fleet.py)
         if _git_on() and not _midway() and _git("fetch", "--quiet", "origin", "main").returncode == 0:
             _git("merge", "--ff-only", "--no-autostash", "--quiet", "origin/main")
@@ -240,13 +299,361 @@ def publish(force_versions: bool = False, host: str = "") -> str:
         r = render_all(str(DATA))                              # one load of the store, both renders
         md = r["full"]
         if len(md) < 200:                                # never overwrite the board with an empty render
-            fcntl.flock(lf, fcntl.LOCK_UN)
             raise RuntimeError(f"render produced {len(md)} md chars — board left untouched")
         tmp = OUT.with_suffix(".md.tmp"); tmp.write_text(md, encoding="utf-8"); os.replace(tmp, OUT)
         first = r["brief"].splitlines()[0].replace("Board: ", "", 1) if md else "board"
         if _git_on(): _gitsync(f"board: {first}", OUT_REL, DATA_REL)
-        fcntl.flock(lf, fcntl.LOCK_UN)
     return first
+
+
+# ---------------------------------------------------------------------------- a brain's pages ([publish] pages on)
+# Only publish_pages() commits a page, and only the files its caller names: nothing here, and nothing in publish(), ever decides on its own that a file under
+# pages/ is to be added or removed. Every check on what is named (the paths, the author) is made before anything is staged. The commit is built in an index
+# of the call's own (GIT_INDEX_FILE: HEAD read into it, then the named files), never in the store clone's index, which every session on the host shares:
+# what a session staged there is never staged, unstaged or committed by a page, and a commit that is not made leaves that index exactly as it was (a
+# CommitFailed). Once the commit is made, that index is brought to it for the named files only, as `git commit --only` does; a call that would drop an
+# entry a session staged there is refused before the commit. So a failed page is never reported as unchanged and is never taken up later under another
+# author's name.
+
+class CommitFailed(RuntimeError):
+    """The page files publish_pages() was given were not committed; the message says why. Nothing was staged for them in the store clone's index (the
+    commit is built in an index of the call's own); the files on disk are as the caller left them, for the same author to try again."""
+
+
+_CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f<>]|[\ud800-\udfff]")     # control characters (NUL, line breaks, DEL, the C1 set), angle brackets, lone surrogates
+_CRUD = " .,:;<>\"\\'"                                               # what git strips from both ends of an identity's name and address (ident.c, crud())
+_NAME_LIMIT = 300                                                    # long enough that no real name is cut, short enough that nothing absurd reaches git's argv
+_BAD_PATH = re.compile(r"[\x00-\x1f\x7f]|[\ud800-\udfff]")           # in a page path: control characters, and a lone surrogate (a file name that is not UTF-8)
+_LIT = "--literal-pathspecs"                                         # every page path is a file name, never a pattern: `a[1].md`, `q?.md`, `*` name themselves
+_PATHS_MAX = 1000                                                    # page paths one call takes, and their length in all: every git call's argument list
+_PATHS_BYTES = 64 * 1024                                             # stays far below what the system takes
+
+
+def _clean_name(text: object) -> str:
+    """A name as git will write it: every control character, angle bracket and lone surrogate a space, white space runs one space, cut to
+    _NAME_LIMIT and stripped at both ends of what git strips there itself. "" when nothing usable is left (".", "...", a DEL, white space)."""
+    s = " ".join(_CTRL.sub(" ", text if isinstance(text, str) else "").split())
+    return s[:_NAME_LIMIT].strip(_CRUD)
+
+
+def _clean_mail(text: object) -> str:
+    """An address as git will write it: control characters, angle brackets, lone surrogates and white space dropped, cut, git's end characters stripped."""
+    s = "".join(_CTRL.sub("", text if isinstance(text, str) else "").split())
+    return s[:_NAME_LIMIT].strip(_CRUD)
+
+
+def _person(author: object, email: object = "") -> str:
+    """`Name <address>` for git's --author, made before anything is staged. The name is `author`, cleaned (`_clean_name`); one that cleans to nothing raises
+    CommitFailed: a page commit always names who wrote it, never the clone's own user.name. The address: `email`, cleaned, else this process's
+    GIT_COMMITTER_EMAIL (the board's own), else a fixed generic one, never the clone's configured user.email (a person's own address, perhaps)."""
+    name = _clean_name(author)
+    if not name:
+        raise CommitFailed(f"the author {str(author)[:80]!r} is no usable name (empty, or only spaces, punctuation or control characters): nothing staged or committed")
+    mail = _clean_mail(email) or _clean_mail(os.environ.get("GIT_COMMITTER_EMAIL", "")) or "board@localhost"
+    return f"{name} <{mail}>"
+
+
+def _page_paths(paths: object) -> tuple[str, ...]:
+    """The repository paths (`pages/<path>`) of the page paths a caller named, each checked as text before anything is staged. TypeError for one string
+    (or path) where a list is meant, or an entry that is no text; CommitFailed for an empty list, for more paths than one call takes (_PATHS_MAX, or
+    _PATHS_BYTES of them in all: name them over several calls), and for a path that is empty, holds a control character or a byte that is not UTF-8, or
+    has an empty, "." or ".." part (a leading or doubled "/", "../x") or a ".git" part in any case: such a path could reach outside pages/, into a
+    repository's own files, or name more than one file. A path named twice counts once."""
+    if isinstance(paths, (str, bytes, os.PathLike)):
+        raise TypeError("publish_pages: paths is a list of page paths, not one path")
+    out: list[str] = []
+    for p in paths:
+        p = os.fspath(p) if isinstance(p, os.PathLike) else p
+        if not isinstance(p, str):
+            raise TypeError(f"publish_pages: a page path is text, not {type(p).__name__}")
+        if not p or _BAD_PATH.search(p) or any(part in ("", ".", "..") or part.casefold() == ".git" for part in p.split("/")):
+            raise CommitFailed(f"the page path {p[:120]!r} is refused (empty, a control character, a file name that is not UTF-8, or an empty, \".\", \"..\" or \".git\" part): nothing staged or committed")
+        if (rel := f"{PAGES_REL}/{p}") not in out:
+            out.append(rel)
+    if not out:
+        raise CommitFailed("no page path given: nothing staged or committed")
+    if len(out) > _PATHS_MAX or sum(len(r.encode()) + 1 for r in out) > _PATHS_BYTES:
+        raise CommitFailed(f"{len(out)} page paths are more than one call takes (at most {_PATHS_MAX}, and {_PATHS_BYTES // 1024} KiB of path text in all): name them over several calls; nothing staged or committed")
+    return tuple(out)
+
+
+def _lstat(rel: str, name: str = "") -> os.stat_result | None:
+    """What is at `rel` in the repository (the link itself, never followed), or None when nothing is: it, or a folder above it, is missing. Where it cannot be
+    read (a folder with no read or search right, a name too long), CommitFailed naming `name` (or `rel`): unreadable is never taken for missing."""
+    try:
+        return os.lstat(REPO / rel)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise CommitFailed(f"{(name or rel)[:200]} cannot be read ({e.strerror or type(e).__name__}): nothing staged or committed") from None
+
+
+def _in_head(rel: str) -> bool:
+    return _git("cat-file", "-t", f"HEAD:{rel}").stdout.strip() == "blob"
+
+
+def _page_changes(rels: tuple[str, ...]) -> tuple[list[str], list[str], list[str]]:
+    """(files to add, files to remove, those of the files to remove that are a folder on disk now) of `rels`, read from disk and from HEAD, or CommitFailed
+    before anything is staged. A path is a file to add when it is a plain file on disk, one to remove when nothing is on disk there and HEAD has it as a file.
+    A file and a folder that swapped places are taken when both sides are named: a path under a folder that is a named file now is a removal (HEAD has it as
+    a file), and a named file of HEAD that is a folder now is a removal when a file in that folder is named too (that file's commit removes it). Refused: a
+    folder (one path, one file), a symbolic link, a path that runs through a link or through something that is no folder and not named, a folder on the way
+    (pages/ included) that is a git repository of its own, a path that cannot be read (never taken for a removal), and a path that is neither on disk nor in
+    HEAD (a typo, a doubled "pages/"). So a missing, moved, emptied or linked pages/ never makes more than the named files' removal."""
+    named = set(rels)
+    adds: list[str] = []
+    drops: list[str] = []
+    folded: list[str] = []
+    for rel in rels:
+        parts = rel.split("/")
+        gone = False                                                            # a folder above it is missing, or is a named file now
+        for i in range(1, len(parts)):                                          # pages/, then every folder between it and the file
+            up = "/".join(parts[:i])
+            a = _lstat(up)
+            if a is None or (stat.S_ISREG(a.st_mode) and up in named):
+                gone = True
+                break
+            if not stat.S_ISDIR(a.st_mode):
+                raise CommitFailed(f"{up} is a symbolic link or not a folder: nothing staged or committed")
+            if _lstat(f"{up}/.git", up) is not None:
+                raise CommitFailed(f"{up} is a git repository of its own (it holds a .git): nothing staged or committed")
+        st = None if gone else _lstat(rel)
+        if st is not None and stat.S_ISREG(st.st_mode):
+            adds.append(rel)
+        elif st is None and _in_head(rel):
+            drops.append(rel)
+        elif st is None:
+            raise CommitFailed(f"{rel} is neither a file on disk nor a file in the last commit: nothing staged or committed")
+        elif stat.S_ISDIR(st.st_mode) and any(n.startswith(rel + "/") for n in named) and _in_head(rel):
+            drops.append(rel)
+            folded.append(rel)
+        else:
+            raise CommitFailed(f"{rel} is a symbolic link or not a file: nothing staged or committed")
+    return adds, drops, folded
+
+
+def _unmerged(rels: tuple[str, ...]) -> None:
+    """CommitFailed, before anything is staged, where the index holds one of `rels` (or a file under one) unmerged: a conflict a stash pop or a merge left.
+    A `git add` would take the file with its conflict markers as resolved."""
+    u = _git(_LIT, "ls-files", "-u", "-z", "--", *rels)
+    if u.returncode != 0:
+        raise CommitFailed(f"git ls-files failed: {_last_line(u)}: nothing staged or committed")
+    if (left := sorted({e.partition("\t")[2] for e in u.stdout.split("\0") if e})):
+        raise CommitFailed(f"{_shown(left)} left unmerged (a conflict from a stash pop or a merge): resolve it first; nothing staged or committed")
+
+
+def _last_line(r: subprocess.CompletedProcess) -> str:
+    return (r.stderr.strip().splitlines() or ["no reason given"])[-1]
+
+
+def _shown(paths: list[str] | tuple[str, ...], most: int = 10) -> str:
+    return ", ".join(paths[:most]) + (f" and {len(paths) - most} more" if len(paths) > most else "")
+
+
+def _page_msg(rels: list[str]) -> str:
+    shown = [r.removeprefix(PAGES_REL + "/") for r in rels]
+    return "board: page " + ", ".join(shown) if len(shown) <= 3 else f"board: {len(shown)} pages"
+
+
+def _index_file() -> Path:
+    """The store clone's own index file (in a linked worktree, that worktree's), shared with every session on the host."""
+    r = _git("rev-parse", "--git-path", "index")
+    if r.returncode != 0 or not r.stdout.strip():
+        raise CommitFailed(f"git rev-parse failed: {_last_line(r)}: nothing staged or committed")
+    return REPO / r.stdout.rstrip("\n")
+
+
+def _entries(env: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    """Every entry of the index `env` names: path -> its `mode object stage` lines."""
+    ls = _git("ls-files", "-s", "-z", env=env)
+    if ls.returncode != 0:
+        raise CommitFailed(f"git ls-files failed: {_last_line(ls)}: nothing committed")
+    out: dict[str, list[str]] = {}
+    for entry in ls.stdout.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path:
+            out.setdefault(path, []).append(meta)
+    return {p: tuple(m) for p, m in out.items()}
+
+
+def _dropped(tree: str, only: list[str], named: set[str], work: Path) -> list[str]:
+    """The entries of the store clone's index, none of them named, that bringing it to `tree` for `only` (what follows the commit) would change: a file a
+    session staged where a named file and a folder swap places (a new file staged in a folder that is a named file now, a file staged where a named file
+    needs a folder). Tried with git on a copy of that index in `work`, never on the index itself."""
+    copy = work / "shared"
+    try:
+        shutil.copyfile(_index_file(), copy)
+    except FileNotFoundError:
+        pass                                                                    # no index yet: git reads a missing one as empty
+    env = {**os.environ, "GIT_INDEX_FILE": str(copy)}
+    before = _entries(env)
+    r = _git(_LIT, "reset", "-q", tree, "--", *only, env=env)
+    if r.returncode != 0:
+        raise CommitFailed(f"git reset failed on a copy of the index: {_last_line(r)}: nothing committed")
+    after = _entries(env)
+    return sorted(p for p in before.keys() | after.keys() if p not in named and before.get(p) != after.get(p))
+
+
+def _bring_index(only: list[str], own: dict[str, str]) -> str:
+    """Bring the store clone's index to the commit just made, for `only` (what `git commit --only` does to the index it runs on): "" when done, else why
+    not. A session's git that holds that index at the moment is waited for, a little."""
+    try:
+        t = _git("write-tree", env=own)                                          # the call's own index, as committed
+        if t.returncode != 0 or not t.stdout.strip():
+            return f"git write-tree failed: {_last_line(t)}"
+        for wait in (0.1, 0.2, 0.4, 0.8, 0.0):
+            r = _git(_LIT, "reset", "-q", t.stdout.strip(), "--", *only)
+            if r.returncode == 0:
+                return ""
+            time.sleep(wait)
+        return _last_line(r)
+    except Exception as e:  # noqa: BLE001 — the commit is made: said, never raised over it
+        return f"{type(e).__name__}: {e}"
+
+
+@contextlib.contextmanager
+def _interrupt_after(held: list[int]):
+    """Hold SIGINT back while the block runs: each one is put in `held`, for the caller to raise KeyboardInterrupt once the block is done. An interrupt
+    in the middle of a page commit raised inside subprocess.run, which then kills git outright: git's index.lock and next-index-*.lock stayed behind, and
+    a commit already made was left with the index not brought to it. Only where SIGINT raises KeyboardInterrupt at all (the main thread, Python's own
+    handler); a second SIGINT raises at once (git stopped where it is)."""
+    if threading.current_thread() is not threading.main_thread() or signal.getsignal(signal.SIGINT) is not signal.default_int_handler:
+        yield
+        return
+    def hold(signum, frame):
+        held.append(signum)
+        if len(held) > 1:
+            raise KeyboardInterrupt
+    prev = signal.signal(signal.SIGINT, hold)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, prev)
+
+
+def _commit_pages(rels: tuple[str, ...], adds: list[str], drops: list[str], folded: list[str], who: str) -> bool:
+    """Commit the removal of `drops` and `adds`, those of `rels` that differ from HEAD, with `who` as the author, built in an index of this call's own (in a
+    folder of its own, removed at the end): HEAD read into it, the named files staged there, never in the store clone's index. True: committed; False:
+    every one is as HEAD has it. Refused before the commit (CommitFailed, nothing committed, the store clone's index untouched): an entry that is not named
+    and would go with them (a file and a folder that swapped places with one side named, a submodule in a folder that is a named file now: `git diff-index`
+    is told to show submodules, whatever the config says), and an entry a session staged in the store clone's index that bringing it to the commit would
+    drop (`_dropped`). The commit is `git commit --only` of the named files on that index: hooks and signing as for any commit, HEAD as it is at the commit,
+    and no automatic maintenance (a gc started from it would read this index, not the store clone's, and could prune a blob only a session's staged entry
+    holds). After it the store clone's index is brought to it for the named files (`_bring_index`); where that fails, the commit stays made and stderr says
+    what is left and how to clear it."""
+    named = set(rels)
+    work = Path(tempfile.mkdtemp(prefix="stackshot-pages-"))
+    own = {**os.environ, "GIT_INDEX_FILE": str(work / "index")}
+    try:
+        try:
+            h = _git("rev-parse", "--verify", "-q", "HEAD^{commit}")
+            if h.returncode != 0 or not h.stdout.strip():
+                raise CommitFailed(f"git rev-parse failed: {_last_line(h)}: nothing committed")
+            head = h.stdout.strip()
+            if (r := _git("read-tree", head, env=own)).returncode != 0:
+                raise CommitFailed(f"git read-tree failed: {_last_line(r)}: nothing committed")
+            if drops and (r := _git(_LIT, "rm", "--cached", "-q", "--ignore-unmatch", "--", *drops, env=own)).returncode != 0:
+                raise CommitFailed(f"git rm --cached failed: {_last_line(r)}: nothing committed")
+            if adds and (r := _git(_LIT, "add", "--", *adds, env=own)).returncode != 0:
+                raise CommitFailed(f"git add failed: {_last_line(r)}: nothing committed")
+            d = _git("diff-index", "--cached", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", head, env=own)
+            if d.returncode != 0:
+                raise CommitFailed(f"git diff-index failed: {_last_line(d)}: nothing committed")
+            moved = {p for p in d.stdout.split("\0") if p}
+            if (extra := sorted(moved - named)):
+                raise CommitFailed(f"{_shown(extra)} would go with {_shown(rels)} and were not named (a file and a folder that swapped places: name both sides): nothing committed")
+            changed = [rel for rel in rels if rel in moved]
+            if not changed:
+                return False
+            only = [c for c in changed if c not in folded]
+            t = _git("write-tree", env=own)
+            if t.returncode != 0 or not t.stdout.strip():
+                raise CommitFailed(f"git write-tree failed: {_last_line(t)}: nothing committed")
+            if (lost := _dropped(t.stdout.strip(), only, named, work)):
+                raise CommitFailed(f"{_shown(lost)}, staged in the store clone's index and not named, would be dropped from it with {_shown(rels)} (a file and a "
+                                   "folder that swap places): commit, unstage or name them first: nothing committed")
+            r = _git(_LIT, "-c", "maintenance.auto=false", "commit", "--quiet", "--only", "--author", who, "-m", _page_msg(changed), "--", *only, env=own)
+            if r.returncode != 0:
+                raise CommitFailed(f"git commit failed: {_last_line(r)}: nothing committed")
+        except CommitFailed:
+            raise
+        except Exception as e:                                                  # an OSError (git could not be started), or any other
+            raise CommitFailed(f"{type(e).__name__}: {e}: nothing committed") from e
+        if (why := _bring_index(only, own)):
+            print(f"publish: the page commit is made, and the store clone's index could not be brought to it ({why}): it still holds {_shown(only)} as they "
+                  "were before the commit, which reads as staged changes; `git reset -q -- <those files>` in the store clone clears them", file=sys.stderr)
+        return True
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def publish_pages(paths, author: str, email: str = "") -> bool:
+    """Commit the page files `paths` names (each relative to pages/: an edit, a new file or a removed one) as one commit, `author` (the signed-in person or
+    agent; `email` their address, if known) as the git author and this board's own identity as the committer (a name on the commit, not a signature), then
+    push it. Only those files: nothing else under pages/ is ever added, removed or committed. Call it right after the write, under `pages_lock()` where
+    another write could land on the same file first.
+
+    True: committed (the push is the board's own: tried at once; a commit that is not on the mirror after it, the push refused or failed, or the fetch
+    before it, is said on stderr once an hour and goes out with a later publish: the next one where the branch tracks the mirror, else the next that
+    commits; a real conflict with the mirror waits for a manual merge, as the board's own commits do). False: every file named is as the last commit has
+    it already. Raises CommitFailed, nothing committed, the store clone's index as it was and the files as they were, when [publish] pages is off (the
+    default) or [publish] git is off, for a path or an author refused (checked before anything is staged; see `_page_paths`, `_page_changes`, `_unmerged`,
+    `_person`), while the clone is midway through a session's git operation (a merge, a rebase, a detached HEAD), where [paths] repo is a folder inside
+    its repository rather than its top, where the store clone's index is locked (an index.lock), where the commit would carry a file not named (a file and
+    a folder that swapped places, one side named) or would drop an entry a session staged, or where git refuses or fails a step (a failed sign, a refusing
+    hook, git that cannot be started). TypeError for one string where a list is meant. A read-only standby and a box that is not the server host raise as
+    publish() does. An interrupt (SIGINT, in the main thread) waits for the commit and the index after it, then raises KeyboardInterrupt saying what was
+    made; the push is then the next publish's."""
+    _ro.guard("publish pages: commit and push")
+    _check_host(["publish"])
+    if not _git_on() or not _pages_on():
+        raise CommitFailed("pages publishing is off for this board ([publish] pages is not true, or [publish] git is false): nothing staged or committed")
+    rels = _page_paths(paths)
+    who = _person(author, email)
+    with _locked():
+        held: list[int] = []
+        try:
+            with _interrupt_after(held):
+                try:
+                    if (why := _midway()):
+                        raise CommitFailed(f"the store clone is {why}: nothing staged or committed")
+                    if (r := _git("rev-parse", "--show-prefix")).returncode != 0:
+                        raise CommitFailed(f"git rev-parse failed: {_last_line(r)}: nothing staged or committed")
+                    if r.stdout.strip():
+                        raise CommitFailed(f"the store clone's path ([paths] repo) is the folder {r.stdout.strip()} inside its repository, not the repository's top: page commits need the top; nothing staged or committed")
+                    if (r := _git("var", "GIT_COMMITTER_IDENT")).returncode != 0:
+                        raise CommitFailed(f"the board has no committer identity git accepts ({_last_line(r)}): nothing staged or committed")
+                    adds, drops, folded = _page_changes(rels)
+                    _unmerged(rels)
+                    if (lock := Path(f"{_index_file()}.lock")).exists():
+                        raise CommitFailed(f"the store clone's index is locked ({lock.name} is there: another git command is running, or one was stopped and left it): nothing staged or committed")
+                except OSError as e:                                            # git could not be started: nothing is staged yet
+                    raise CommitFailed(f"{type(e).__name__}: {e}: nothing staged or committed") from e
+                made = _commit_pages(rels, adds, drops, folded, who)
+        except BaseException as e:
+            if not held:
+                raise
+            line = (f"publish: interrupted; no page commit made ({e})" if isinstance(e, CommitFailed) else
+                    "publish: interrupted twice; git was stopped where it was, so the page commit may or may not be made and git's index.lock may be left"
+                    if len(held) > 1 else f"publish: interrupted, and the page commit raised {type(e).__name__}: {e}")
+            print(line, file=sys.stderr)
+            raise KeyboardInterrupt(line) from e
+        if held:
+            line = ("publish: interrupted; the page commit is made, and its push is the next publish's" if made else
+                    "publish: interrupted; the named pages are as the last commit has them, nothing committed")
+            print(line, file=sys.stderr)
+            raise KeyboardInterrupt(line)
+        if made:
+            mine = _git("rev-parse", "HEAD").stdout.strip()
+            try:
+                _gitsync("", committed=True)
+            except Exception as e:  # noqa: BLE001 — the commit is made and stays True; its push is the next publish's
+                _note("pages-sync", f"publish: a page commit is made, and the push step after it failed ({type(e).__name__}: {e}); the next publish that pushes takes it")
+            else:
+                if mine and _git("merge-base", "--is-ancestor", mine, "origin/main").returncode != 0:
+                    _note("pages-unpushed", "publish: a page commit is made and is not on the mirror yet (the push or the fetch before it failed or was refused, "
+                                            "or the mirror conflicts); the next publish that pushes takes it")
+        return made
 
 
 def bump(host: str = "") -> str:

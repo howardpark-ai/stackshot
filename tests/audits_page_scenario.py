@@ -115,17 +115,18 @@ with TestClient(server.mcp.http_app()) as c:
           and f'href="/items/board-tmp-q-9">board-tmp-q#{9}</a>' in h, re.findall(r'<div class="af"><a[^>]*>([^<]+)</a>', h))
     check("the runs: the record's start, its length, items read, findings and calls", re.search(r"<tr><td>[^<]+</td><td>700 s</td><td>41</td><td>2</td><td>6</td></tr>", h) is not None
           and "No audit has run yet." not in h, re.findall(r"<tr>.*?</tr>", h)[:3])
-    check("the page's note says what a dash means", 'shows a dash on the card and "not logged" here, not a zero' in w)
+    check("what a dash means is behind the Groups heading's \"?\"", re.search(r'<span class="xp-pop" id="xp-audit-groups"[^>]*>[^<]*shows a dash on the card and &quot;not logged&quot; here, not a zero\.</span>', h) is not None)
     check("no error text on the page", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w), w)
 
     # ---- 3. the card
     cd = h[h.find('<div id="audit"'):]; cd = cd[:cd.find("</div>") + 6]
     check("the card: its name is a link to the Audits page, the Audit now text link beside it", '<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now">Audit now</button></b>' in cd, cd[:300])
-    rows = re.findall(r'<span class="lbl">([^<]+)</span><span class="val a-n">(\d+)</span><span class="val a-n( hit)?">([^<]+)</span>', cd)
+    rows = re.findall(r'<span class="lbl">([^<]+)</span><span class="val a-n">(\d+)</span><span class="val a-n( hit)?(?: a-none" title="[^"]*)?">([^<]+)</span>', cd)
     check("the card's shortlist: each group with its number of audits and its findings in 24 hours, the same numbers as the page",
           [(a, int(b), d) for a, b, _, d in rows] == [(g["name"], len(g["audits"]), n) for g, n in zip(ov.GROUPS, ["1", "3", "2", "1", "1", "1", "–", "–"])], rows)
-    check("the card: a dash, never a zero, for Fleet and services and Text and rules; a group with findings is marked (hit); the note says what the dash means",
-          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and '<span class="a-cn">– keeps no findings log</span>' in cd and ">0</span><span" not in cd.replace('class="val a-n">0', ""), cd)
+    check('the card: a dash, never a zero, for Fleet and services and Text and rules; a group with findings is marked (hit); a "?" under the list says what the dash means',
+          [d for *_, d in rows][-2:] == ["–", "–"] and sum(1 for x in rows if x[2]) == 6 and cd.count('<span class="val a-n a-none" title="A dash means the group keeps no findings log.">–</span>') == 2 and "a-cq" not in cd
+          and "– keeps no findings log" not in cd and ">0</span><span" not in cd.replace('class="val a-n">0', ""), cd)
     check("the card's header cells name its columns", '<span class="a-h">audits</span><span class="a-h">found, 24 h</span>' in cd)
     check("the card and the status endpoint say the same: GET /audit/status has the card's rows",
           c.get("/audit/status").json()["card"] == {"groups": [{"name": g["name"], "audits": len(g["audits"]), "found": n} for g, n in zip(ov.GROUPS, [1, 3, 2, 1, 1, 1, None, None])], "note": "– keeps no findings log"})
@@ -154,7 +155,7 @@ with TestClient(server.mcp.http_app()) as c:
           and re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h) == ["0 found"] * 6 + ["not logged"] * 2, w[:600])
     check("without findings: no error text, no finding rows, no table", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w) and 'class="af"' not in h and "<table>" not in h, w)
     check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("10", "0")]
-          and h.count('<span class="val a-n">–</span>') == 2)
+          and h.count('<span class="val a-n a-none" title="A dash means the group keeps no findings log.">–</span>') == 2)
     LOG.unlink()
     r = c.get("/audits")
     check("no findings log file at all: the same page, still no error", r.status_code == 200 and "No findings in the last 24 hours." in r.text and "Traceback" not in r.text)
@@ -230,9 +231,10 @@ with TestClient(server.mcp.http_app()) as c:
         far = c.get("/audits")
     finally:
         runner_svc.status = real_runner
-    check("the ten-minute pace says its last run as the clock today", re.search(r"last \d\d:\d\d: filing, dates, audit lines", today) is not None, re.findall(r"Every 10 minutes.{0,60}", today))
-    check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d: filing, dates, audit lines", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
-    check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and "last –: filing, dates, audit lines" in text_of(far.text), (far.status_code, far.text[:200]))
+    said = r"Checks filing, dates and audit lines\. "      # what the pace looks at, in its popup; the last run follows it on the card
+    check("the ten-minute pace says its last run as the clock today", re.search(said + r"last \d\d:\d\d ", today) is not None, re.findall(r"Every 10 minutes.{0,90}", today))
+    check("... and with its date for a run of another day", re.search(said + r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th)(?: \d{4})? \d\d:\d\d ", old) is not None, re.findall(r"Every 10 minutes.{0,90}", old))
+    check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and re.search(said + "last – ", text_of(far.text)) is not None, (far.status_code, far.text[:200]))
     (D / "run-2026-02-25.json").unlink()
 
     # ---- 6. the findings log off
@@ -240,7 +242,7 @@ with TestClient(server.mcp.http_app()) as c:
     r = c.get("/audits"); h = r.text; w = text_of(h)
     check("the findings log off: every group says so, the feed says findings are not listed, the card's note says the log is off, no count anywhere",
           r.status_code == 200 and re.findall(r'<span class="anum">((?:\d+ found)|not logged|log off)</span>', h) == ["log off"] * 6 + ["not logged"] * 2
-          and "The findings log is off, so findings are not listed here." in w and "– the findings log is off" in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
+          and "The findings log is off." in w and '<span class="a-cn">– the findings log is off</span>' in h and 'class="val a-n a-none"' not in h and "found</span>" not in h.replace("found, 24 h", ""), w[:600])
     config.CFG["audit"]["pattern_review"] = "shadow"
 
     # ---- 7. the audit off

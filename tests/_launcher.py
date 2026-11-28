@@ -17,6 +17,8 @@ The repository names no machine and no tool: the machine supplies the launcher (
   * The loop guard: the launcher's side is started with `STACKSHOT_TEST_LAUNCHED=1` in the environment, and while that variable is set (non-empty)
     nothing launches again. A launcher whose far side runs the command with the variable carried never loops, and `suitemap.py run`'s calls
     of tests/run-suite stay where the first one ran.
+  * `suitemap.py select` with no --map and no fetched map asks `configured` and, where a launcher is named and the run is not launched yet, tries
+    `suitemap.py fetch` once before the call, so the map travels with the tree.
   * A launcher that is not there, not executable, or whose line cannot be split is said once on stderr (`test launcher <line> is not executable:
     running here`) and the run is local: a bad config never fails a run.
 
@@ -55,6 +57,11 @@ def _line():
     except (OSError, UnicodeDecodeError):
         pass
     return None
+
+
+def configured():
+    """True when a launcher is named and this run was not started by one: this machine is where such runs are typed (one that cannot be used counts: `begin` says so)"""
+    return _line() is not None
 
 
 def _quiet():

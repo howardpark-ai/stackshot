@@ -126,7 +126,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     """`client.py post terminal-prompt open|clear --session S --sender L [--question Q]`: a pane waiting in its terminal becomes an open item in the owner's Your move list, and
     stops being one when the pane stops waiting. body: action (open | clear), session, sender, and for open the question (one line, at most 200 characters).
     open: one open item per session. It is filed through create_item (service/create.py), the create tool's own code, so the subject prefix, the description and next gates, the project page, the
-    owner as mover and the GitHub mirror all apply and a refusal is the tool's text (400): the subject "<session> is waiting for your answer in its terminal", under the session's
+    owner as mover and the GitHub mirror all apply and a refusal is the tool's text (400): the subject "Answer <session> in its terminal", under the session's
     project from the registry (else projects/example-two), p1, mover the owner, then the project's front agent (its -main agent first, as _question), next "<owner>:
     open <the pane's address> and answer: <question>", marked metadata.terminal_prompt = the session's name; then its state is set to your-step with the step "Answer <session>'s
     question in its terminal" (a create sets no step). A second open for a session that has an open item changes that item's next line and creates nothing; the same question
@@ -214,10 +214,10 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
     key = rec["key"]
     owner = sorted(_item_read._hub_sessions(key)[3], key=lambda n: (not n.endswith("-main"), n))[0]
     desc = _terminal_bullets(f"{name} is waiting in its terminal for {OWNER}'s answer", f"Opened by {sender} (a script on {machine}); it closes when the pane stops waiting")
-    pfx_, tail_ = _terminal_subject_prefix(str(rec.get('scope') or '')), " is waiting for your answer in its terminal"
+    pfx_, head_, tail_ = _terminal_subject_prefix(str(rec.get('scope') or '')), "Answer ", " in its terminal"      # a task, as every title is
     name_ = _svcstore._shown_ids(name)
-    room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long pane name is cut so the server's own subject is never refused
-    subject = f"{pfx_}{_fit(name_, room_) if 0 < room_ < len(name_) else name_}{tail_}"
+    room_ = (_subject_max() - len(pfx_) - len(head_) - len(tail_)) if _subject_max() else 0      # a long pane name is cut so the server's own subject is never refused
+    subject = f"{pfx_}{head_}{_fit(name_, room_) if 0 < room_ < len(name_) else name_}{tail_}"
     gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, priority="p1", mover=OWNER, then=owner, by=by, extra={"terminal_prompt": name})      # The owner answers, then the project's -main agent takes it
     try:                     # a create sets no step: the state is a second write, and an item the state fails for (a refusal or any error) is closed again, never left half made
         _terminal_state(gid, name, by)

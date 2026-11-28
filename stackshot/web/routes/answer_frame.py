@@ -29,8 +29,10 @@ def _headers(origins: list[str]) -> dict[str, str]:
     return {"Content-Security-Policy": "frame-ancestors 'self' " + " ".join(origins), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
-def _since(v: str) -> float:
-    """When the frame says it was first drawn; a value that is no time counts as never (no recorded answer is newer than it)."""
+def _since(v: str) -> float | None:
+    """The time the frame reads against (ui/answer_frame.py state_of), None when it sends none; a value that is no time counts as never (no recorded answer is newer than it)."""
+    if not v:
+        return None
     try:
         x = float(v)
     except ValueError:

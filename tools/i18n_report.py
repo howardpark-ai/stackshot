@@ -40,6 +40,7 @@ PAGE_MODULES = (            # the page code: one per page, then the shared rende
     "stackshot/web/ui/runners.py",
     "stackshot/web/ui/search.py",
     "stackshot/web/ui/colortool.py",
+    "stackshot/web/ui/explain.py",
     "stackshot/web/ui/kit.py",
     "stackshot/web/ui/render.py",
 )
@@ -47,7 +48,7 @@ GROUPS = (                  # the three lines the report is read in
     ("item page", ("stackshot/web/itempage.py",)),
     ("other pages", ("stackshot/web/home.py", "stackshot/notify/foryou.py", "stackshot/notify/landed.py", "stackshot/web/ui/groups.py", "stackshot/web/ui/releasing.py",
                      "stackshot/web/ui/runners.py", "stackshot/web/ui/search.py", "stackshot/web/ui/colortool.py")),
-    ("shared render code", ("stackshot/web/ui/kit.py", "stackshot/web/ui/render.py")),
+    ("shared render code", ("stackshot/web/ui/explain.py", "stackshot/web/ui/kit.py", "stackshot/web/ui/render.py")),
 )
 T_NAMES = {"t", "_t", "tr"}
 T_ATTRS = {"t"}                                     # _i18n.t, i18n.t

@@ -18,7 +18,8 @@ never raises. [router] hold_notices (default true) is the switch; false delivers
 
 WHERE THEY LIVE. <state>/held/<key>.jsonl, one file per session, a line per notice {id, ts, kind, text, from, gid, nid}; the key is the
 session's permanent id when the registry resolves it, else its transcript id or name (key_of). It is server-side state, so a pane's
-conversation cleared or recycled loses nothing, and a restart of the server reloads it from the files.
+conversation cleared or recycled loses nothing, and a restart of the server reloads it from the files. <state>/held/reached/<key>.jsonl keeps, for REACHED_KEEP, the words of the
+held lines a hook printed and of the router passes delivered to the session (note_reached; service/ask_named.py reads it).
 
 HOW THEY REACH THE TURN. Every machine's UserPromptSubmit hook (`pages.py nag`, wired by `bin/stackshot client install`) asks the server for
 the session's held notices (POST /client/held, the machine's token, the session as the server registered it), prints the answer (the hook's
@@ -71,6 +72,8 @@ WHOLE_MAX = MSG_MAX + FRAME_ROOM      # characters in one held message: the mess
 WHERE_MAX = 120             # characters of the place a cut message's rest is named in (the note stays short whatever a caller passes)
 REST_IN = "the message log (ask the sender for it)"      # where the words of a cut message are, when its caller names no better place
 LEASE = 60.0                # s a line handed to a hook stays reserved for it until it acknowledges (then it is offered again)
+REACHED_KEEP = 86400.0      # s the words of a line that reached a session are kept (note_reached)
+REACHED_MAX = 200           # lines kept per session in that record; past it the oldest go
 CLIENT_DAYS = 30            # a session counts as fetching held lines for this long after its hook last asked
 _ORD = {1: "st", 2: "nd", 3: "rd"}
 
@@ -310,6 +313,37 @@ def _sweep(now: float) -> None:
                 pass
     except OSError:
         pass
+    try:
+        for p in (dir_() / "reached").glob("*.jsonl"):
+            if p.stat().st_mtime < now - REACHED_KEEP:
+                p.unlink()
+    except OSError:
+        pass
+
+
+def _reached_file(key: str) -> Path:
+    return dir_() / "reached" / _file(key).name
+
+
+def note_reached(who: str, texts: list[str], now: float | None = None) -> None:
+    """Keep the words of lines that just reached the session `who` (a held line its hook printed, a router pass delivered to it), for reached_since. Never raises."""
+    try:
+        key = key_of(who)
+        if not key or not texts:
+            return
+        now = time.time() if now is None else now
+        with _locked():
+            p = _reached_file(key)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            kept = [r for r in _read(p) if float(r.get("ts", 0)) >= now - REACHED_KEEP]
+            _write(p, (kept + [{"ts": now, "text": str(t)} for t in texts])[-REACHED_MAX:])
+    except Exception as e:  # noqa: BLE001  — the delivery stands; the record is an extra
+        _say(f"{who}: a delivered line not recorded: {type(e).__name__}: {e}")
+
+
+def reached_since(floor: float, *refs: str) -> list[str]:
+    """The words of the lines note_reached kept for the session (keys_for) at or after `floor` (epoch seconds)."""
+    return [str(r["text"]) for p in dict.fromkeys(_reached_file(k) for k in keys_for(*refs)) for r in _read(p) if float(r.get("ts", 0)) >= floor]
 
 
 def add(key: str, kind: str, text: str, sender: str = "", gid: str = "", nid: str = "", now: float | None = None, whole: bool = False, where: str = "") -> bool:
@@ -410,12 +444,14 @@ def lease(*refs: str, now: float | None = None, shown_max: int | None = None) ->
         return "", []
 
 
-def ack(*refs: str, ids: list[str] | None = None) -> int:
-    """The hook printed these lines: remove them. → how many were removed. An id the session does not hold is ignored. Never raises."""
+def ack(*refs: str, ids: list[str] | None = None, shown: bool = False) -> int:
+    """The hook printed these lines: remove them. → how many were removed. An id the session does not hold is ignored. `shown`: the lines went into the session's turn
+    (not moved to another key), so their words are kept (note_reached). Never raises."""
     want = {str(i) for i in (ids or []) if i}
     if not want:
         return 0
     n = 0
+    gone: list[str] = []
     try:
         with _locked():
             for p in dict.fromkeys(_file(k) for k in keys_for(*refs)):
@@ -424,15 +460,18 @@ def ack(*refs: str, ids: list[str] | None = None) -> int:
                 if len(keep) != len(rows):
                     n += len(rows) - len(keep)
                     _write(p, keep)
+                    gone += [str(r["text"]) for r in rows if str(r.get("id")) in want]
     except Exception:  # noqa: BLE001
         pass
+    if shown and gone:      # after the lock: note_reached takes it again
+        note_reached(keys_for(*refs)[0], gone)
     return n
 
 
 def take(*refs: str, now: float | None = None, shown_max: int | None = None) -> str:
     """lease() and ack() in one step: the text, with the lines it shows removed at once (each handed over once). For a caller with no hook to wait for. Never raises."""
     text, ids = lease(*refs, now=now, shown_max=shown_max)
-    ack(*refs, ids=ids)
+    ack(*refs, ids=ids, shown=True)
     return text
 
 

@@ -1466,9 +1466,9 @@ check(f"tests.yml: the plan is made once, by the shards job: `suitemap.py plan -
       and {k: v for k, v in pj["outputs"].items() if k.startswith("shard")} == {f"shard{i}": "${{ steps.plan.outputs.shard%d }}" % i for i in range(sm.SHARDS)}, (plan_step["run"], pj.get("outputs")))
 # a pull request's selection (a large one runs in these same shards): made once, in the shards job, and handed on as two more outputs; the shards' lists are of that selection alone
 select_step = next(st for st in pj["steps"] if st.get("id") == "select")
-check("tests.yml: the shards job makes a pull request's selection once (the `select` step, for a pull request only, `suitemap.py select --map .suitemap/map.json --to HEAD`, a failure of it is every suite) and hands it on as `selected`, with `large` from the plan",
+check("tests.yml: the shards job makes a pull request's selection once (the `select` step, for a pull request only, `suitemap.py select --map .suitemap/map.json --to HEAD --base HEAD^1`, a failure of it is every suite) and hands it on as `selected`, with `large` from the plan",
       [k for k in pj["outputs"] if not k.startswith("shard")] == ["large", "selected"] and "steps.plan.outputs.large" in pj["outputs"]["large"] and "steps.select.outputs.selected" in pj["outputs"]["selected"]
-      and select_step["if"].strip() == "github.event_name == 'pull_request'" and "suitemap.py select --map .suitemap/map.json --to HEAD" in select_step["run"] and "sel=all" in select_step["run"]
+      and select_step["if"].strip() == "github.event_name == 'pull_request'" and "suitemap.py select --map .suitemap/map.json --to HEAD --base HEAD^1)" in select_step["run"] and "sel=all" in select_step["run"]
       and plan_step["env"]["SELECTED"] == "${{ steps.select.outputs.selected }}" and "--only $SELECTED" in plan_step["run"] and "pull_request" in plan_step["run"], (select_step, plan_step))
 check("tests.yml: every shard runs the list the plan job gave it (its own output, by the matrix index) and plans nothing, PLAINLY on every event: `suitemap.py run -T \"$SUITE_T\" --report .suitemap/run-<shard>.json`: no measure, no --prev, no strace, no map or cache read in the shard",
       measure_step["env"]["SELECTED"] == "${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}" and "if" not in measure_step and "$SELECTED" in measure_step["run"]
@@ -1747,7 +1747,10 @@ check("suites job, a queue branch's push (no plan job): it selects for itself, a
 COPY = T / "checkout-copy"
 subprocess.run(["git", "clone", "-q", "--no-checkout", "--shared", CHECKOUT, str(COPY)], check=True, capture_output=True)
 subprocess.run(["git", "-C", str(COPY), "read-tree", "HEAD"], check=True, capture_output=True)
-COPY_HEAD = subprocess.run(["git", "-C", str(COPY), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+def copy_git(*a): return subprocess.run(["git", "-C", str(COPY), "-c", "user.name=t", "-c", "user.email=t@t", *a], check=True, capture_output=True, text=True).stdout.strip()
+# an empty change on top, so that the step's `--base HEAD^1` counts no file whatever the checkout's own last commit changed
+copy_git("update-ref", "--no-deref", "HEAD", copy_git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "an empty change"))
+COPY_HEAD = copy_git("rev-parse", "HEAD")
 (COPY / "tests").mkdir(); shutil.copy(os.path.join(SCR, "suitemap.py"), COPY / "tests" / "suitemap.py"); shutil.copy(os.path.join(SCR, "_launcher.py"), COPY / "tests" / "_launcher.py")   # the index has the tracked files; the one script the steps run is put in place
 (COPY / ".suitemap").mkdir()
 (COPY / ".suitemap" / "map.json").write_text(json.dumps({"format": sm.FORMAT, "commit": COPY_HEAD, "strace": True,
@@ -2170,6 +2173,9 @@ DOCUSE_ALLOW = {
     ("tests/script_post_kinds_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and terminal_prompt_svc._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
     ("tests/standby_copy_scenario.py", "getmembers"): (1, "TarFile.getmembers on the stream under test, a tar archive's member list: no function's docstring is read"),
+    ("tools/frontdoor_cutover.py", ".command("): (7, "frontdoor_switch.command(script, *args) builds the shell line a person pastes to run the undo script, not a registry"),
+    ("tools/frontdoor_snapshot.py", ".command("): (1, "frontdoor_switch.command(script, *args) builds a shell line a person pastes, not a registry"),
+    ("tools/frontdoor_undo.py", ".command("): (8, "frontdoor_switch.command(script, *args) builds the shell line a person pastes to run the undo script again, not a registry"),
 }
 def doc_uses(files):
     """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
@@ -2884,6 +2890,174 @@ out, err = imp_sel(lambda: sub("imp4.py", "from eff import A, B\n", "from eff im
 check("IMPORT-OUT 10 a name taken out of an import from a module with effects that is still imported is no removal of the import: quiet as before, no suite", out == [], (out, err))
 out, err = imp_sel(lambda: sub("imp6.py", "from eff import A\n", "A = 1\n"), "remove the only import of an effectful module")
 check("IMPORT-OUT 11 the only import of a module with effects replaced by a plain binding is a removal: the importer's suites (s1, s2)", out == ["s1", "s2"], (out, err))
+
+# [ahead base c]
+# ---- a pick counts what the change itself changes (Sat Nov 28th 2026): a synthetic map of commit A, nothing measured. Main then goes on to M (edits of its own, a file it adds, one it renames, a harness file, a new suite,
+# which has no measurement and so always runs), and each change branches from M. Counted from the map's commit alone, every one of them would carry all of that.
+R = T / "repobase"; R.mkdir()
+git("init", "-q", "-b", "main")
+write("pkg/lib.py", "def fa():\n    return 1\n\n\ndef fb():\n    return 2\n")
+write("pkg/other.py", "def o():\n    return 3\n")
+write("pkg/ren.py", "def rx():\n    return 4\n\n\ndef ry():\n    return 5\n\n\ndef rz():\n    return 6\n")
+write("data.txt", "d\n"); write("d*.txt", "a name git would read as a pattern\n")
+write(".github/workflows/ci.yml", "on: push\n")
+for s_ in ("s1", "s2", "s3", "s4", "s5", "s6"): write(f"tests/{s_}_scenario.py", "print('x')\n")
+write("pkg/kmod.py", "LIMIT = 2\n\n\ndef fk():\n    return LIMIT\n\n\ndef fm():\n    return 1\n")
+harness_stub(R)
+at_map = commit("the commit the map is of")
+BM = T / "mapbase.json"
+def bent(py=None, files=(), dirs=("tests",)): return {"ok": True, "failed": False, "files": list(files), "dirs": list(dirs), "whole": [], "py": py or {}, "seconds": 1}
+BM.write_text(json.dumps({"format": 1, "commit": at_map, "strace": True, "suites": {
+    "s1": bent({"pkg/lib.py": ["", "fa"]}), "s2": bent({"pkg/lib.py": ["", "fb"]}), "s3": bent({"pkg/other.py": ["", "o"]}, files=["data.txt"]),
+    "s4": bent({"pkg/ren.py": ["", "rx"]}), "s5": bent(files=["d*.txt"], dirs=["tests", "pkg"]), "s6": bent({"pkg/kmod.py": ["", "fk"]})}}))
+sub("pkg/other.py", "return 3", "return 30"); sub("pkg/lib.py", "return 2", "return 20"); sub("data.txt", "d\n", "d2\n"); sub(".github/workflows/ci.yml", "push", "pull_request")
+write("pkg/added.txt", "main added this\n"); write("tests/new_scenario.py", "print('x')\n"); git("mv", "pkg/ren.py", "pkg/moved.py")
+main_now = commit("main since the map")
+M12 = main_now[:12]
+def brun(*a, root=None, **env):
+    return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, "SUITEMAP_ROOT": str(root or R), **env}, cwd=str(root or R), timeout=120)
+def change(*edits):
+    git("checkout", "-q", "-B", f"b{len(ran)}", main_now)
+    for e in edits: e()
+    git("add", "-A"); git("commit", "-q", "--allow-empty", "-m", "a change"); return git("rev-parse", "HEAD").strip()
+def bsel(head, base=main_now, root=None, **env):
+    r = brun("select", "--map", str(BM), "--to", head, *([] if base is None else ["--base", base]), root=root, **env)
+    return r.returncode, r.stdout.split(), r.stderr
+fa = lambda: sub("pkg/lib.py", "return 1", "return 10")
+undo_o = lambda: sub("pkg/other.py", "return 30", "return 3")
+summ = T / "basesummary.md"
+fa_head = change(fa)
+rc, out, err = bsel(fa_head, GITHUB_STEP_SUMMARY=str(summ))
+check("BASE 1 what main changed since the map and the change did not (another module, a data file, a rename, a harness file) is not picked, and a harness file changed on main alone does not make it `all`",
+      rc == 0 and out != ["all"] and "s1" in out and not {"s3", "s4", "s5"} & set(out), (rc, out, err))
+check("BASE 2 a file of the change that main also changed since the map is counted from the map's commit: the suite that ran the function MAIN edited in it is picked with the one that ran the change's own, and the suite the map lacks always runs",
+      out == ["new", "s1", "s2"], (rc, out, err))
+check("BASE 3 stderr and the job summary say how many files changed since the base",
+      f"1 file(s) changed since {M12}" in err and "everything since the map" not in err and f"1 file(s) changed since {M12}" in (summ.read_text() if summ.exists() else "")
+      and "**Suites: 3 of 7**" in summ.read_text(),(err, summ.read_text() if summ.exists() else None))
+rc, out, err = bsel(change(lambda: sub("d*.txt", "pattern", "glob")))
+check("BASE 4 a path is taken as it is spelled, never as a pattern: a change to `d*.txt` does not count main's change to data.txt", rc == 0 and out == ["new", "s5"], (rc, out, err))
+rc, out, err = bsel(change(undo_o))
+check("BASE 5 a change that puts back what main did since the map, in a file the change does not otherwise touch (the file differs from the map only by main's edit), is counted from the base: the suite that ran it is picked",rc == 0 and out == ["new", "s3"], (rc, out, err))
+rc, out, err = bsel(change(undo_o, fa))
+check("BASE 6 ... and with another file besides, the pick is the union of the two", rc == 0 and out == ["new", "s1", "s2", "s3"], (rc, out, err))
+def on(base, *edits, name):
+    git("checkout", "-q", "-B", name, base)
+    for e in edits: e()
+    git("add", "-A"); git("commit", "-q", "--allow-empty", "-m", name); return git("rev-parse", "HEAD").strip()
+mb_fa = on(main_now, fa, name="partial_main_fa")
+hd_fb = on(mb_fa, lambda: sub("pkg/lib.py", "return 20", "return 2"), name="partial_revert_fb")
+rc, out, err = bsel(hd_fb, base=mb_fa)
+check("BASE 16 a change that puts back one function main edited (fb, to the map's content) in a file that still differs from the map (main edited fa) is counted from the base: the suite that ran fb is picked with the one that ran fa",
+      rc == 0 and out == ["new", "s1", "s2"], (rc, out, err))
+mb_k = on(main_now, lambda: sub("pkg/kmod.py", "LIMIT = 2", "LIMIT = 20"), lambda: sub("pkg/kmod.py", "return 1", "return 5"), name="partial_main_limit")
+hd_k = on(mb_k, lambda: sub("pkg/kmod.py", "LIMIT = 20", "LIMIT = 2"), name="partial_revert_limit")
+rc, out, err = bsel(hd_k, base=mb_k)
+check("BASE 17 ... and a module constant main edited (LIMIT, read by fk) put back to the map's value, in a file that still differs from the map (main edited fm): the suite that ran fk is picked",
+      rc == 0 and out == ["new", "s6"], (rc, out, err))
+rc, out, err = bsel(change(lambda: sub("pkg/added.txt", "this", "that")))
+check("BASE 7 a file main added after the map and the change edits is counted from the map's commit, as a new file: the suite that lists its folder is picked", rc == 0 and out == ["new", "s5"], (rc, out, err))
+rc, out, err = bsel(change(lambda: (R / "pkg/added.txt").unlink()))
+check("BASE 8 a file main added after the map and the change deletes (absent at both ends of the diff from the map) is counted from the base", rc == 0 and out == ["new", "s5"], (rc, out, err))
+rc, out, err = bsel(change(lambda: (R / "data.txt").unlink()))
+check("BASE 9 a file the change deletes picks the suite that read it", rc == 0 and out == ["new", "s3"], (rc, out, err))
+rc, out, err = bsel(change(lambda: git("mv", "pkg/lib.py", "pkg/lib2.py")))
+check("BASE 10 a rename by the change counts both names: the suites that ran the old one are picked, and nothing of main's", rc == 0 and {"s1", "s2"} <= set(out) and not {"s3", "s4"} & set(out) and out != ["all"], (rc, out, err))
+rc, out, err = bsel(change(lambda: sub("pkg/moved.py", "return 4", "return 40")))
+check("BASE 11 a module main renamed after the map and the change edits is diffed with its old name too: the suite that ran the function under the old name is picked", rc == 0 and "s4" in out and "s3" not in out and out != ["all"], (rc, out, err))
+rc, out, err = bsel(change(lambda: (R / "pkg/moved.py").unlink()))
+check("BASE 12 ... and when the change deletes it", rc == 0 and "s4" in out and "s3" not in out and out != ["all"], (rc, out, err))
+rc, out, err = bsel(change(lambda: sub(".github/workflows/ci.yml", "pull_request", "merge_group")))
+check("BASE 13 a harness file the change itself changes is still every suite", rc == 0 and out == ["all"] and ".github/workflows/ci.yml: the harness" in err, (rc, out, err))
+rc, out, err = bsel(change(lambda: sub(".github/workflows/ci.yml", "pull_request", "push")))
+check("BASE 14 ... also when it puts the harness file back as the map's commit had it", rc == 0 and out == ["all"] and ".github/workflows/ci.yml: the harness" in err, (rc, out, err))
+rc, out, err = bsel(change())
+check("BASE 15 a change with no file picks only the suites that always run (an empty list of pathspecs is not everything)", rc == 0 and out == ["new"] and f"0 file(s) changed since {M12}" in err, (rc, out, err))
+fa_head = change(fa)
+git("checkout", "-q", "main"); sub("pkg/other.py", "return 30", "return 31"); later = commit("main goes on after the change branched")
+git("update-ref", "refs/remotes/origin/main", later)
+rc, out, err = bsel(fa_head, base=None)
+check("BASE 16 with no --base the change starts at the merge base of origin/main and --to", rc == 0 and out == ["new", "s1", "s2"] and f"1 file(s) changed since {M12}" in err, (rc, out, err))
+rc, out, err = bsel(main_now, base=None)
+check("BASE 17 a --to that is the merge base itself (a commit of main) takes no base: everything since the map counts, as before, and the line says so and names --base",
+      rc == 0 and out == ["all"] and "counts everything since the map" in err and "`--base <sha>` narrows it" in err and "changed since" not in err, (rc, out, err))
+git("update-ref", "-d", "refs/remotes/origin/main")
+rc, out, err = bsel(fa_head, base=None)
+check("BASE 18 with no origin/main and no --base the pick is the old one (main's harness change since the map makes it `all`), and the line says so and names --base",
+      rc == 0 and out == ["all"] and ".github/workflows/ci.yml: the harness" in err and "counts everything since the map" in err and "`--base <sha>` narrows it" in err, (rc, out, err))
+rc, out, err = bsel(fa_head, base="0" * 40)
+check("BASE 19 a --base that is no commit here and cannot be fetched is said, and the pick is the old one", rc == 0 and out == ["all"] and "is no commit of this checkout" in err and "counts everything since the map" in err, (rc, out, err))
+# a pull request's run on CI: HEAD is the merge of the change into the base tip, the checkout is two commits deep, and the map's commit is fetched
+git("checkout", "-q", "-B", "prmerge", main_now); git("merge", "-q", "--no-ff", "-m", "refs/pull/1/merge", fa_head)
+for depth, base_arg, how in ((2, "HEAD^1", "two commits deep, --base HEAD^1"), (1, main_now, "one commit deep, a --base it lacks is fetched like the map's commit")):
+    ci = T / f"ci{depth}"
+    subprocess.run(["git", "clone", "-q", f"--depth={depth}", "--branch", "prmerge", f"file://{R}", str(ci)], check=True, capture_output=True)
+    rc, out, err = bsel("HEAD", base=base_arg, root=ci)
+    check(f"BASE 20.{depth} a shallow checkout of a pull request's merge ref ({how}) picks by the change alone", rc == 0 and out == ["new", "s1", "s2"] and f"1 file(s) changed since {M12}" in err, (rc, out, err))
+
+# the workflow: both selections of a pull request pass --base HEAD^1 from a checkout two commits deep; a queue branch's passes none. The steps' own scripts are run, with a `uv` that only notes its words
+import yaml
+wf = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8"))
+for job in ("shards", "suites"):
+    co = [st for st in wf["jobs"][job]["steps"] if str(st.get("uses", "")).startswith("actions/checkout@")]
+    check(f"tests.yml: the {job} job checks out two commits deep, so that HEAD^1 is there", len(co) == 1 and co[0].get("with", {}).get("fetch-depth") == 2, co)
+ub = T / "uvbin"; ub.mkdir(); (ub / "uv").write_text('#!/bin/sh\necho "$*" >> "$UV_LOG"\n'); (ub / "uv").chmod(0o755)
+def step_selects(job, pick, **env):
+    script = next(st for st in wf["jobs"][job]["steps"] if pick(st))["run"]
+    log = T / "uv.log"; log.unlink(missing_ok=True)
+    r = subprocess.run(["bash", "-e", "-c", script], capture_output=True, text=True, cwd=str(T), timeout=60, env={**ENV, "PATH": f"{ub}:{os.environ['PATH']}", "UV_LOG": str(log), "GITHUB_OUTPUT": str(T / "uv.out"), "SUITE_T": "900", **env})
+    return r.returncode, [l.split("tests/suitemap.py ", 1)[1] for l in (log.read_text().splitlines() if log.exists() else []) if "suitemap.py select" in l], r.stderr
+SEL = "select --map .suitemap/map.json --to HEAD"
+got = step_selects("shards", lambda st: st.get("id") == "select")
+check("tests.yml: the shards job's selection of a pull request is `select ... --to HEAD --base HEAD^1`", got[:2] == (0, [SEL + " --base HEAD^1"]), got)
+small = lambda st: st.get("name") == "run the suites the change reaches"
+got = step_selects("suites", small, EVENT="pull_request", PLAN="failure", HANDED="")
+check("tests.yml: the suites job's own selection of a pull request (the plan job failed) passes --base HEAD^1 too", got[:2] == (0, [SEL + " --base HEAD^1"]), got)
+got = step_selects("suites", small, EVENT="push", PLAN="skipped", HANDED="")
+check("tests.yml: a push to a queue branch selects with no --base, as before", got[:2] == (0, [SEL]), got)
+
+# the machine that sends its runs away: a `select` with no map in the tree fetches it before the launcher is started (a fake gh and a fake launcher: no network)
+git("remote", "add", "origin", "git@github.com:owner/name.git")   # never fetched: the ssh command below is false
+lb = T / "lbin"; lb.mkdir()
+(lb / "gh").write_text("""#!/bin/sh
+echo "$*" >> "$FAKE_GH_LOG"
+case "$FAKE_GH_MODE" in
+    denied) printf 'HTTP 401: Bad credentials\\nsecond line\\n' >&2; exit 1 ;;
+    odd) echo '[]'; exit 0 ;;
+esac
+if [ "$1" = api ]; then cat "$FAKE_GH_RUNS"; exit 0; fi
+while [ "$1" != -D ]; do shift; done
+cp "$FAKE_GH_MAP" "$2/map.json"
+""")
+(lb / "far").write_text('#!/bin/sh\nif [ -f "$FAR_MAP" ]; then echo map; else echo none; fi >> "$FAR_LOG"\necho far\n')
+for f_ in ("gh", "far"): (lb / f_).chmod(0o755)
+runs_file = T / "runs.json"; runs_file.write_text(json.dumps({"workflow_runs": [{"id": 7, "head_sha": at_map, "path": ".github/workflows/suitemap-refresh.yml", "created_at": "2026-11-28T00:00:00Z"}]}))
+fetched = R / ".suitemap-ci" / "map.json"; ghlog, farlog = T / "gh.log", T / "far.log"
+def lrun(*a, **env):
+    ghlog.unlink(missing_ok=True); farlog.unlink(missing_ok=True)
+    r = brun(*a, **{"PATH": f"{lb}:{os.environ['PATH']}", "STACKSHOT_TEST_LAUNCHER": str(lb / "far"), "STACKSHOT_TEST_LAUNCHED": "", "STACKSHOT_TEST_LAUNCHER_QUIET": "", "GIT_SSH_COMMAND": "false", "GIT_TERMINAL_PROMPT": "0",
+                    "FAKE_GH_LOG": str(ghlog), "FAKE_GH_RUNS": str(runs_file), "FAKE_GH_MAP": str(BM), "FAKE_GH_MODE": "", "FAR_MAP": str(fetched), "FAR_LOG": str(farlog), **env})
+    read = lambda p: p.read_text().splitlines() if p.exists() else []
+    return r.returncode, r.stdout, r.stderr, read(ghlog), read(farlog)
+rc, out, err, gh, far = lrun("select")
+check("LAUNCH 1 a select with no map, where a launcher is configured, fetches the map before the launcher starts; the fetch says nothing on stdout",
+      rc == 0 and out == "far\n" and far == ["map"] and fetched.exists() and fetched.read_bytes() == BM.read_bytes() and "fetched the CI map" in err and len(gh) == 2, (rc, out, err, gh, far))
+rc, out, err, gh, far = lrun("select")
+check("LAUNCH 2 a map that is there already is not fetched again", rc == 0 and out == "far\n" and far == ["map"] and gh == [], (rc, out, err, gh, far))
+shutil.rmtree(R / ".suitemap-ci", ignore_errors=True)
+rc, out, err, gh, far = lrun("select", "--map", str(BM))
+check("LAUNCH 3 a select given --map fetches nothing", rc == 0 and out == "far\n" and gh == [] and not fetched.exists(), (rc, out, err, gh, far))
+for mode, word in (("denied", "401"), ("odd", "AttributeError")):
+    rc, out, err, gh, far = lrun("select", FAKE_GH_MODE=mode)
+    said = [l for l in err.splitlines() if "running through the test launcher" not in l]
+    check(f"LAUNCH 4 ({mode}) a fetch that fails is one line on stderr, and the run goes on to the launcher",
+          rc == 0 and out == "far\n" and far == ["none"] and len(gh) == 1 and len(said) == 1 and "no CI map fetched" in said[0] and word in said[0] and not fetched.exists(), (rc, out, err, gh, far))
+rc, out, err, gh, far = lrun("select", STACKSHOT_TEST_LAUNCHED="1")
+check("LAUNCH 5 a run the launcher started fetches nothing (the far side has no token to need)", rc == 0 and out == "all\n" and gh == [] and far == [], (rc, out, err, gh, far))
+rc, out, err, gh, far = lrun("select", STACKSHOT_TEST_LAUNCHER="")
+check("LAUNCH 6 with no launcher configured nothing is fetched", rc == 0 and out == "all\n" and gh == [] and far == [], (rc, out, err, gh, far))
+rc, out, err, gh, far = lrun("list")
+check("LAUNCH 7 no other subcommand fetches", rc == 0 and out == "far\n" and gh == [], (rc, out, err, gh, far))
 
 # [final]
 shutil.rmtree(tmp, ignore_errors=True)
