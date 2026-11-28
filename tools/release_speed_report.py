@@ -22,6 +22,10 @@ that stage only; the worst pull request is named):
 
 A value below zero (a clock or a log out of order) is dropped from its stage and counted in a note.
 
+Grouped releases (several PRs queued and merged together) are only partly measured: a group writes its progress lines into each member's log,
+but some of its lines (its results among them) stay in the group's own log, so the stages read from the member logs, and the queue flakes, can be
+undercounted. The report does not parse the group logs.
+
 Same-commit flakes, counted in the window, once each:
   * merge queue   an entry removed because the merge group failed its checks, whose head was later merged by the queue unchanged (the log);
   * PR runs       a workflow that failed on a head and later succeeded on the same head (GitHub's pull-request runs; a re-run of one run
@@ -51,11 +55,12 @@ such a run is removed from it (`open_pending`). --dry-run prints the report and 
 GitHub is asked for: one `gh pr list` (the merged pull requests of the window) and the pull-request runs of the window in day-long slices of 100 a
 page (about 10 to 40 calls for a week; a slice GitHub cuts at 1000 is halved). With no `gh`, no login or an answer that cannot be read, the stages
 that need GitHub are left out with a note, the flake count is the log's alone, and the status is 4. A run's stages are only what that run measured.
-When the pull request list itself cannot be read, the last measured open -> live median is kept apart in the record, `open_to_live_kept`
-({"median", "generated": when it was measured}): only a later "since the previous run" line uses it, saying it is from an earlier run and when; it
-raises no flag and goes into no item. When the list is read and only the runs cannot be, the run's own numbers stand and nothing is kept.
+Whenever a run has no open -> live median (no release reached live, the pull request list could not be read, or GitHub was not asked), the last
+measured median is kept apart in the record, `open_to_live_kept` ({"median", "generated": when it was measured}): only a later "since the previous
+run" line uses it, saying it is from an earlier run and when; it is in no stage, raises no flag and goes into no item. A run that measured
+open -> live keeps nothing. When the list is read and only the runs cannot be, the run's own numbers stand.
 
-Exit status: 0 the report was made (a flag included, and its item opened or answered, or not sent for --no-open), 1 the state folder or file cannot
+Exit status: 0 the report was made (a flag included, and its item opened or answered, or not sent for --no-open or --dry-run), 1 the state folder or file cannot
 be written, 2 a usage, config or logs-folder problem, 3 the report was made but the item was not opened, 4 the report was made but there was
 nothing to report (no release in the window) or GitHub could not be read (3 wins when both happen, and both are on stderr)."""
 from __future__ import annotations
@@ -86,7 +91,7 @@ STAGES = [("open_to_green", "PR open -> checks green"), ("green_to_queued", "che
           ("merged_to_live", "merged -> live"), ("live_to_main", "live -> main's check"), ("open_to_live", "PR open -> live")]
 STAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (.*)$")
 START = re.compile(r"release of PRs? (#\d+(?: #\d+)*) starts in \S+(?: \(([^)]*)\))?")     # release.sh: one PR's start, or a group's "PRs #N #M" (every member's log has it)
-CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the (?:updated|pushed) head)\b")
+CHECKS_PASS = re.compile(r"(checks pass|the PR's tests pass on the (?:pushed|regenerated) head)\b")   # release.sh writes both head lines; "checks pass" is the quiet one
 ENQUEUED = re.compile(r"enqueued: ")
 MERGED = re.compile(r"merged( |$)")
 DONE = re.compile(r"done: ")
@@ -531,7 +536,6 @@ def build(args, now: dt.datetime) -> tuple[str, dict, str]:
     greens: dict[str, dt.datetime] = {}
     pr_run_flakes = None
     args.no_data = None
-    kept = None                    # the last measured open -> live median, only for a run that could not read the pull request list
     if not logs["live"] and not logs["not_live"]:
         args.no_data = f"no release in the last {args.days:g} days in {logdir}"
     elif not slug:
@@ -550,11 +554,13 @@ def build(args, now: dt.datetime) -> tuple[str, dict, str]:
                 notes.append(f"{args.no_data}: the pull request list was read and the check runs were not, so the check times are the logs' alone and the PR-run flakes are not counted")
             else:
                 notes.append(f"{args.no_data}: the stages that start at the PR's creation or need a check run are from the logs alone, and the PR-run flakes are not counted")
-                kept = last_measured(prev)
     stages = summarize(logs["live"], prs, greens, notes)
-    if kept:
-        notes.append(f"open -> live is not measured in this run (the pull request list could not be read): the last measured median, {num(kept['median'])} min, measured "
-                     f"{kept['generated']}, is kept for a later comparison only and raises no flag")
+    kept = None
+    if stages["open_to_live"]["median"] is None:      # any run without its own open -> live median keeps the last measured one, for the "since the previous run" line only
+        kept = last_measured(prev)
+        why = args.no_data or "no release of this window reached live"
+        notes.append(f"open -> live is not measured in this run ({why})" + (f": the last measured median, {num(kept['median'])} min, measured {kept['generated']}, "
+                     "is kept for a later comparison only and raises no flag" if kept else ""))
     flakes = {"merge_queue": logs["queue_flakes"], "pr_runs": pr_run_flakes, "main_run": logs["main_flakes"],
               "total": logs["queue_flakes"] + (pr_run_flakes or 0) + logs["main_flakes"]}
     rec = {"format": FORMAT, "repo": repo, "github": slug, "generated": now.isoformat(timespec="seconds"), "window_days": args.days,
@@ -580,7 +586,7 @@ def owed_flags(prev: dict | None) -> list[dict]:
     if not isinstance(pending, list):
         return out
     for t in pending:
-        if isinstance(t, dict) and t.get("key") in DEFAULTS and isinstance(t.get("line"), str) and t["line"].startswith("FLAG: "):
+        if isinstance(t, dict) and isinstance(t.get("key"), str) and t["key"] in DEFAULTS and isinstance(t.get("line"), str) and t["line"].startswith("FLAG: "):
             out.append({"key": t["key"], "limit": t.get("limit"), "value": t.get("value"), "line": t["line"]})
     return out
 

@@ -27,7 +27,7 @@ creation, check, queue, merge, deploy and main-run times), with HOME pointed int
   13 a group release's member logs (only lines release.sh writes there) and the pushed-head checks line; in a window with no release a paid debt leaves
      the record and an unpaid one (--no-open, --dry-run, a refused or impossible call) stays
   14 GitHub unreadable: the stages are only what the run measured; with the pull request list unread the last measured open -> live median is kept apart
-     (open_to_live_kept, its time kept over weeks), used by the comparison line alone and never flagged; with only the runs unread nothing is kept; a
+     (open_to_live_kept, its time kept over weeks; a measured run, then runs with releases and none live, then GitHub not asked, then measured again compares with the first), used by the comparison line alone and never flagged; with only the runs unread nothing is kept; a
      damaged previous record never stops a run
 
     tests/run-suite release_speed_report      -> exit 0 / 1"""
@@ -175,10 +175,10 @@ def stats_world(name, durations=((4, 2, 3, 1, 1), (8, 4, 6, 2, 2), (12, 6, 9, 3,
 CONF = T / "speed.toml"; CONF.write_text("")
 
 
-def run(w, *args, now=z(NOW), env=None, config=CONF, logs=True, github=True, no_open=True):
+def run(w, *args, now=z(NOW), env=None, config=CONF, logs=True, github=True, no_open=True, tool=TOOL):
     e = {"PATH": f"{GH_BIN}:{os.environ['PATH']}", "HOME": str(HOME), "TMPDIR": tmp, "LANG": "C.UTF-8", "GH_DATA": str(w.data)}
     e.update(env or {})
-    cmd = [sys.executable, TOOL, *(["--no-open"] if no_open else []), *(["--now", now] if now else []), *(["--github", SLUG] if github else []),
+    cmd = [sys.executable, tool, *(["--no-open"] if no_open else []), *(["--now", now] if now else []), *(["--github", SLUG] if github else []),
            *(["--logs", str(w.logs)] if logs else []), "--state-dir", str(w.state), *(["--config", str(config)] if config else []), *args]
     return subprocess.run(cmd, capture_output=True, text=True, env=e, cwd=T, timeout=180)
 
@@ -659,6 +659,49 @@ for now_med, old_med, flagged in ((120, 10.0, True), (30, 120.0, False)):      #
 CONF.write_text("")
 client_reset()
 
+# the chain: a measured run, an unmeasured one with releases and none live, an unmeasured one with GitHub not asked, then a measured one that compares with the first
+wc = stats_world("chain")                                          # five releases in the window of NOW, open -> live 30, measured
+r1 = run(wc)
+g1 = rec(wc)
+check("chain 1, measured: open -> live 30, nothing kept", r1.returncode == 0 and g1["stages"]["open_to_live"]["median"] == 30.0 and "open_to_live_kept" not in g1, (r1.returncode, g1.get("stages")))
+wc.log(741, [(NOW + dt.timedelta(days=1), f"release of PR #741 starts in /srv/widgets ({SLUG})"), (NOW + dt.timedelta(days=1, minutes=1), "FAILED at checks: a check failed: suites=fail")])
+wc.save()
+r2 = run(wc, now=z(NOW + dt.timedelta(days=7)))                   # a release of the window, none live, GitHub readable
+g2 = rec(wc)
+check("chain 2, releases but none live: the stage is unmeasured, the measured 30 is kept with its time, the note says why, the comparison line uses the measured 30",
+      r2.returncode == 0 and g2["stages"]["open_to_live"] == NO_STAGE and g2.get("open_to_live_kept") == {"median": 30.0, "generated": "2026-11-26T12:00:00+00:00"}
+      and any("open -> live is not measured in this run (no release of this window reached live)" in n and "the last measured median, 30 min, measured 2026-11-26T12:00:00+00:00, is kept" in n for n in g2["notes"])
+      and "open -> live median 30 -> n/a min" in r2.stdout, (r2.returncode, r2.stdout[-500:], g2.get("notes")))
+wc.log(742, [(NOW + dt.timedelta(days=8), f"release of PR #742 starts in /srv/widgets ({SLUG})"), (NOW + dt.timedelta(days=8, minutes=1), "FAILED at checks: a check failed: suites=fail")])
+wc.save()
+# GitHub not asked: the tool takes its repository from the origin remote of the checkout it runs from, so it runs from a copy of
+# the two tool files in a folder with no git repository: no origin, no repository named
+import shutil
+nogit = T / "nogit" / "tools"; nogit.mkdir(parents=True)
+for name in ("release_speed_report.py", "test_trim_report.py"):
+    shutil.copy(os.path.join(STACK, "tools", name), nogit / name)
+r3 = run(wc, "--repo", "widgets", now=z(NOW + dt.timedelta(days=14)), github=False, tool=str(nogit / "release_speed_report.py"))     # releases in the window, GitHub not asked: the repository name is given by hand
+g3 = rec(wc)
+check("chain 3, GitHub not asked: the stage is unmeasured, the kept 30 stays with its first time, the note says GitHub was not asked, said on stderr, exit 4",
+      r3.returncode == 4 and "GitHub was not asked" in r3.stderr and g3["stages"]["open_to_live"] == NO_STAGE and g3.get("open_to_live_kept") == {"median": 30.0, "generated": "2026-11-26T12:00:00+00:00"}
+      and any("open -> live is not measured in this run (GitHub was not asked" in n for n in g3["notes"]), (r3.returncode, r3.stderr, g3.get("notes")))
+wc.release(751, NOW + dt.timedelta(days=15), f"{751:040x}", 10, 2, 5, 1, 1)   # one release in the window of NOW + 21 days, open -> live 18
+wc.save()
+r4 = run(wc, now=z(NOW + dt.timedelta(days=21)))
+g4 = rec(wc)
+check("chain 4, measured again: open -> live 18, compared with the first measured 30 (kept from chain 1), no median kept in this measured run",
+      r4.returncode == 0 and g4["stages"]["open_to_live"]["median"] == 18.0 and "open_to_live_kept" not in g4 and "open -> live median 30 (from an earlier run, measured 2026-11-26T12:00:00+00:00) -> 18 min" in r4.stdout,
+      (r4.returncode, r4.stdout[-500:], g4.get("stages"), g4.get("open_to_live_kept")))
+
+# CHECKS_PASS: release.sh writes "the PR's tests pass on the regenerated head" after a regeneration, which counts as the checks-pass line
+wr = World("regen")
+wr.log(704, [(BASE, f"release of PR #704 starts in /srv/widgets ({SLUG})"), (BASE + mins(2), "the PR's tests pass on the regenerated head 7040404"),
+             (BASE + mins(6), "enqueued: the merge queue accepted the head 7040404"), (BASE + mins(20), "merged by the merge queue as abc1234, 14 min after the enqueue"),
+             (BASE + mins(22), "done: abc1234, restarted app.service ")])
+wr.save()
+rr, jr = jrun(wr)
+check("the regenerated-head line is the checks-pass line: checks pass -> queued 4 from the log alone", rr.returncode == 0 and jr["stages"]["green_to_queued"]["n"] == 1 and jr["stages"]["green_to_queued"]["median"] == 4.0, (rr.returncode, jr.get("stages"), rr.stderr))
+
 HUGE = 10 ** 400                                                  # a damaged previous record never stops a run, GitHub readable or not
 wd = stats_world("damaged")                                       # open -> live 30
 for label, fields, kept, before in (
@@ -675,7 +718,9 @@ for label, fields, kept, before in (
         ("a kept median with no time", {"open_to_live_kept": {"median": 5}}, None, "n/a"),
         ("a kept time that is no time", {"open_to_live_kept": {"median": 5, "generated": "x"}}, None, "n/a"),
         ("a kept time that is a number", {"open_to_live_kept": {"median": 5, "generated": 7}}, None, "n/a"),
-        ("a kept time with no offset", {"open_to_live_kept": {"median": 5, "generated": "2026-11-19T00:00:00"}}, None, "n/a")):
+        ("a kept time with no offset", {"open_to_live_kept": {"median": 5, "generated": "2026-11-19T00:00:00"}}, None, "n/a"),
+        ("open_pending entries that are a list and an object with no line", {"open_pending": [{"key": []}, {"key": {}}]}, None, "n/a"),
+        ("an open_pending entry with a key and no line", {"open_pending": [{"key": "max_open_to_live_median_minutes"}]}, None, "n/a")):
     put_prev(wd, **fields)
     r = run(wd, env={"GH_FAIL": "1"})
     got = rec(wd)

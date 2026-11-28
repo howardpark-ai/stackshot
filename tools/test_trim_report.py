@@ -60,7 +60,7 @@ repository, a missing or wrong-typed field, a time without a UTC offset, a count
 over from with a one-line note, and this run's record replaces it. --dry-run prints the report and writes nothing; --json prints the
 record instead of the text. `--now ISO` sets the clock, for tests.
 
-Exit status: 0 the report was made (triggers included, and their item opened or answered, or not sent for --no-open), 1 the state folder or
+Exit status: 0 the report was made (triggers included, and their item opened or answered, or not sent for --no-open or --dry-run), 1 the state folder or
 file cannot be written, 2 a usage, config or checkout problem, 3 the report was made but the item was not opened, 4 the report was made
 and its state kept, but the suite times could not be fetched or read (3 wins when both happen; both are on stderr). SIGTERM ends the run cleanly (the download folder is removed first; status 143)."""
 from __future__ import annotations

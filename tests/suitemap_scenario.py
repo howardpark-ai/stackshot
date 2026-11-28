@@ -2032,8 +2032,9 @@ check("fetch reads the refresh workflow's runs: the file `suitemap.py fetch` nam
 # every cache restore of the suite map (an actions/cache/restore step, and an actions/cache step, which restores too) reads the newest entry: key suitemap-newest, restore-keys suitemap-. The skip logic reads the commit off the matched key (suitemap-<commit>-<run id>),
 # so the prefix is pinned here; a restore with another key or prefix would read an unrelated entry and be taken for this commit's map.
 def map_restores(wf):
+    # every actions/cache and actions/cache/restore step of the file, whatever its path: none is exempt (a step that is ever exempt needs a comment here naming it and why)
     jobs = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", wf), encoding="utf-8"))["jobs"].values()
-    return [s.get("with", {}) for j in jobs for s in j.get("steps", []) if re.match(r"actions/cache(/restore)?@", str(s.get("uses", ""))) and "suitemap" in str(s.get("with", {}).get("path", ""))]
+    return [s.get("with", {}) for j in jobs for s in j.get("steps", []) if re.match(r"actions/cache(/restore)?@", str(s.get("uses", "")))]
 MAP_RESTORES = {wf: map_restores(wf) for wf in ("suitemap-refresh.yml", "tests.yml")}
 check("the suite map's cache restores in suitemap-refresh.yml and tests.yml: each file has one, and every one is key suitemap-newest with restore-keys suitemap-",
       all(ws and all(w.get("key") == "suitemap-newest" and w.get("restore-keys") == "suitemap-" for w in ws) for ws in MAP_RESTORES.values()),
