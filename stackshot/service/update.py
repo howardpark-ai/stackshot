@@ -676,12 +676,13 @@ def update_unlocked(
     waits: list[dict[str, Any]] | str | None = None,
     wait_mode: str = "",
     busy_note: str | None = None,
+    route_record: dict[str, str] | None = None,      # a script route's write for its step (service/item_sync.py), no tool passes it: step= then replaces no line by itself, and this is what the route records, {"own": …, "sent": …} (owner_steps.route_writes)
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
     if not _steps.reword_given(reword):
         reword = None             # {} and "{}" name no step: the call is as if it passed none
-    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
+    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait", "busy_note", "route_record") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     fc = _faults.current()          # the faults of the form this write finds are kept and refused together (model/faults.py): the gates up to the checkpoint below go on past a fault on stand-in values
     h = _hooks()
     filing_only = bool(given) and set(given) <= (_FILING_ONLY | ({"said"} if "tell_him" in given else set()))      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
@@ -968,7 +969,7 @@ def update_unlocked(
     was_meta = item_was.get("metadata") or {}
     group = {k for k in was_meta.get("step_lines") or [] if isinstance(k, str)} if str(was_meta.get("step") or "").strip() else set()      # the keys of the lines the stored step was split into: they belong to it only while it is stored
     step_same = bool(group) and not step_lines and bool(state_given.get("step")) and _states.clean(state_given.get("step")) == _states.clean(was_meta.get("step"))      # the stored summary sent again: not a new step, so nothing of its split goes
-    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and not closing and not step_same and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
+    gone_keys = (open_keys & group) - {_steps.key(x) for x in step_lines} if group and route_record is None and not closing and not step_same and (step_withdrawn or state_given.get("step")) else set()      # the step is replaced (by a long or a short one) or withdrawn: the open lines of its old split go with it (a done one stays)
     step_kept = step_same and not clear_next      # clear_next wipes every line of next, so the record of the split goes and nothing is said to be unchanged
     if step_kept and not closing:
         _calls.fixed("step-split", "the step is the one the item holds already: the lines of next it was split into stay as they are, nothing was changed", fields=["step"])
@@ -1493,6 +1494,10 @@ def update_unlocked(
                                               ("wake", wake or clear_wake), ("hold", hold or clear_hold), ("ask", ask or clear_ask), ("next", next_touch),
                                               ("wait_basis", basis_txt or clear_wait_basis)) if v)
     work_note += hold_note + h.state_apply(meta, str(item.get("status") or ""), state_st, state_given, state_touched, step_withdrawn)   # the state last: it reads the item as every gate above left it
+    if route_record is not None:
+        _hs.route_writes(meta, route_record["own"], route_record["sent"], "step" in state_given)      # before the save settles his step: the line the server kept for the step before is not reworded away
+    elif step_withdrawn or state_given.get("step"):
+        _hs.route_replaced(meta, str(meta.get("owner") or ""), state_given.get("step") or "", str((item_was.get("metadata") or {}).get("step") or ""))      # before the save drops lines: a step a session replaced or withdrew is not one a wait dropped
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
