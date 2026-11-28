@@ -34,7 +34,8 @@ What the pass verifies, from data the server already holds, and says in the line
     item is UNKNOWN, not idle: the mover has a running subagent that is tied to none of its items (a brief that names no item and no pull request, a Build subagent started before its pull request exists), or the
     mover's state or subagents could not be read at all (an error, or no fresh snapshot naming the mover: a snapshot that is missing, older than `agent_state.MAX_AGE_S`, that does not list the mover or did not read it). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
     verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
-  - a pull request tied to the item had a CI result, a review, a comment by a person, a merge or a new head commit in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
+  - a pull request tied to the item had a new head commit, a verification verdict (a comment whose first line is a `verify:` line, anchors/event_log.py `is_verdict`), a merge, a CI result, a review or a comment
+    by a person in the last hour, as `metadata.last_pr_event` keeps it (model/last_activity.py `pr_event`): the mover's later update, step or state change takes `last_activity` over and does not hide it.
 
 The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
 (`… (live state only, nothing recorded on the item)`). A line that verified something is the hourly update the item promises, so it is stamped as the item's `last_activity` (kind `audit`, the words
@@ -76,7 +77,6 @@ PANE_UNREAD = "the mover's pane state was not given"      # an idle line reaches
 NO_SUBAGENT = "no subagent is running for the mover"
 SUBAGENT_ELSEWHERE = "its running subagents are tied to other items"
 NO_EVENT = "no commit, review or CI in the hour"
-PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED, _la.COMMIT})      # the recorded signals that are a tied pull request's events (a new head commit included, as in audit/hand_idle.py)
 
 
 def enabled() -> bool:
@@ -119,8 +119,8 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
             out.append("a subagent is running on it")
     except Exception:  # noqa: BLE001  (a subagent that cannot be read verifies nothing)
         pass
-    rec = _la.read(item)
-    if rec and rec["kind"] in PR_KINDS and 0 <= now - rec["at"] <= HOUR:
+    rec = _la.pr_event(item, now)
+    if rec and now - rec["at"] <= HOUR:
         out.append(rec["what"])
         recorded.append(rec["what"])
     return out, recorded

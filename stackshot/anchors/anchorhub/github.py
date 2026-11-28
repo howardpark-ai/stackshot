@@ -385,7 +385,11 @@ def run(hub: Hub):
         q = f"since={since}&" if since else ""
         own = lambda xs: any(_events.trusted_association(x.get("author_association")) for x in xs)      # the repository's own side (OWNER, MEMBER, COLLABORATOR) among them, from the payload: a stranger's comment is news for the notice but no activity of the item
         vouched, rv, rc = [], [], []
-        cs = others(gh(f"/repos/{repo}/issues/{n}/comments?{q}per_page=50"), "created_at")
+        said = gh(f"/repos/{repo}/issues/{n}/comments?{q}per_page=50")
+        if is_pr:      # a verdict is mostly the owner's or a bot's own comment, which `others` leaves out
+            for c in said or []:
+                if _ts(c.get("created_at")) > t0: verdict_seen(f"github:{repo}#{n}", repo, f"{repo.split('/')[1]}#{n}", c)
+        cs = others(said, "created_at")
         if cs: news.append(f"{len(cs)} new comment" + ("s" if len(cs) > 1 else "")); who += [c["user"]["login"] for c in cs]; link = cs[-1].get("html_url") or link; types.append("comment"); vouched += ["comment"] if own(cs) else []
         if is_pr:
             rv = [r for r in others(gh(f"/repos/{repo}/pulls/{n}/reviews?per_page=100"), "submitted_at") if r.get("state") != "PENDING"]
@@ -470,6 +474,13 @@ def run(hub: Hub):
         hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", "record_only": True, **pr_meta(c)}, kind="github-state")
     issue_gone: set[str] = set()                      # anchors whose issue read answered 404 at the last look (memory only: a restart asks once more)
     def gone_404(e): return bool(GONE.search(str(e)))
+    def verdict_seen(a_id, repo, title, c):
+        """A pull request comment just read: when its first line is a verification verdict (event_log.is_verdict) and its author is the hub's own login or the repository's own side, record it for the item's last
+        activity. record_only: written to the event log and told to no one (Hub.emit); the comment's own notice, when there is one, goes as before. No request of its own."""
+        if not _events.is_verdict(c.get("body")): return
+        who = (c.get("user") or {}).get("login") or ""
+        if not ((me and who == me) or _events.trusted_association(c.get("author_association"))): return
+        hub.event(a_id, {"title": title, "who": who, "text": "verification verdict", "url": c.get("html_url") or "", "ts": c.get("created_at"), "etype": "pr_verdict", "repo_id": rid(repo), "vouched": "verdict", "record_only": True}, kind="github-state")
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
@@ -669,11 +680,12 @@ def run(hub: Hub):
             title = f"{repo.split('/')[1]}#{n} \"{i['title'][:50]}\""
             if i["comments"] > st["comments"]:
                 for c in gh(f"/repos/{repo}/issues/{n}/comments?since={st['updated']}&per_page=20"):
-                    if c["user"]["login"] == me and not os.environ.get("ANCHOR_HUB_ALLOW_SELF"): continue
                     # `since` is inclusive of the seed instant, so the comment that set the seeded updated_at
                     # comes back on the next change (an old comment would come back as new): only
                     # comments created after the last observed state are new
                     if _ts(c.get("created_at")) <= _ts(st.get("updated")): continue
+                    if i.get("pull_request"): verdict_seen(a_id, repo, title, c)      # before the own-login skip: the sessions post their verdicts as that login
+                    if c["user"]["login"] == me and not os.environ.get("ANCHOR_HUB_ALLOW_SELF"): continue
                     body = (c.get("body") or "").replace("\n", " ")
                     hub.event(a_id, {"title": title, "who": c["user"]["login"], "text": body[:140] + ("…" if len(body) > 140 else ""), "url": c["html_url"], "ts": c["created_at"], "etype": "comment", "repo_id": rid(repo), "bot": (c.get("user") or {}).get("type") == "Bot", "vouched": "comment" if _events.trusted_association(c.get("author_association")) else "", **pr_meta(ci_st.get(a_id))}, kind="github")
             merged_now = bool((i.get("pull_request") or {}).get("merged_at"))

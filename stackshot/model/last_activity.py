@@ -1,5 +1,8 @@
 """last_activity.py: the item's one "last activity" record, `metadata.last_activity = {"at": epoch seconds, "kind": what sort of activity (KINDS), "what": "short words"}`.
 
+Beside it, `metadata.last_pr_event` (the same shape) keeps the newest event on a tied pull request (PR_KINDS: a push, a verification verdict, a merge, a CI result, a review, a comment), so a later update, step or
+state change, which takes the record over, does not hide it from the readers that judge an item by those events (`pr_event`; the hourly audit line, audit/hourly.py). `apply` stores both.
+
 The pure half: no server import, no clock read, no file. Part A of the rule that no item an agent moves goes more than an hour without visible activity: this records the
 last visible activity. The home page's On agent rows and the item page show it (ui/render.py `act_parts`); no flag and no notice read it yet, a later part does.
 
@@ -8,13 +11,13 @@ The one definition of activity. Something visible happened to the item when:
   a save moved the item (model/progress.py `moved`, the same test, so this adds no second opinion): a step marked done or dropped, a state change (status, phase, the kind
   of a wait, mover, state, needs), a pull request recorded as merged, the item created. A save that is no one's write about the work (progress.moved with real=False) is the server's
   own bookkeeping and counts only by a status or phase change, as it does for progress; or
-  a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
+  a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit, a verification verdict (anchors/event_log.py, tied by merge_tie).
 
 What is not activity: a status line that repeats the previous text, or one written by anyone but the item's mover (a new text by the mover is an `update`, below), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
 writes about the item, which are not in progress either: a History line (the ladder's, an audit pass's, a merge pass's reason), the ask itself, the step a session or the server
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
-Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit` (stamped today: the
+Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit`, `verdict` (stamped today: the
 progress signals of a save and the events of a tied pull request), `audit` (stamped by the hourly audit line, audit/hourly.py `stamp_signal`, when the line verified something: a pane in a turn, a subagent running; its `what` is "audit verified …"; a line that verified nothing stamps nothing),
 and `update` (a mover's own status write whose text differs from the previous status text: `update_signal` is the test, `update_signals` finds the writes of a save, and service/writes.py stamps it when the writer is the item's mover; its `what` is the short text itself).
 A reply that says nothing changed is no `update` (same text as before), a status written by anyone but the mover is none, and the ladder's and the server's own lines are none of these kinds.
@@ -41,6 +44,7 @@ from stackshot.model import progress as _progress
 from stackshot.model import steps as _steps
 
 FIELD = "last_activity"
+PR_FIELD = "last_pr_event"      # the newest event on a tied pull request, whatever came after it
 MAX_WHAT = 80         # characters of the words kept
 MAX_STEPS_NAMED = 3   # steps named in one save's words
 MAX_AT = 32503680000.0  # the latest time kept (the start of year 3000): a time past it (a count of milliseconds, say) is torn, because no clock and no date reader can take it
@@ -51,13 +55,16 @@ OK, WARN, BAD = "ok", "warn", "bad"
 
 # The named kinds of signal. All of them are stamped today.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit"
+VERDICT = "verdict"
 UPDATE, AUDIT = "update", "audit"
-STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, AUDIT, UPDATE)
+STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, VERDICT, AUDIT, UPDATE)
 KINDS = frozenset(STAMPED)
+PR_KINDS = frozenset({CI_RESULT, REVIEW, COMMENT, PR_MERGED, COMMIT, VERDICT})      # the signals that are an event on a tied pull request
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
-PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT}
-PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}"}
+PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT, "verdict": VERDICT}
+PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}",
+            "verdict": "verdict on PR {n}"}
 
 _PR_NUMBER = re.compile(r"#(\d+)\s*$")
 
@@ -102,6 +109,13 @@ def at(item: dict[str, Any] | None, now: float | None = None) -> float:
     """When the item last had visible activity, 0 when no record is stored (an item from before the record, or one with none yet; with `now`, one stamped further ahead than SKEW_S counts as none)."""
     r = read(item, now)
     return r["at"] if r else 0.0
+
+
+def pr_event(item: dict[str, Any] | None, now: float | None = None) -> dict[str, Any] | None:
+    """The newest event on a tied pull request the item holds, None when it holds none: `metadata.last_pr_event`, or the record itself when that is one (stamped before the field existed). With `now`, one
+    dated after it has not happened and is left out."""
+    found = [r for r in (clean(_meta(item).get(PR_FIELD)), read(item)) if r and r["kind"] in PR_KINDS and (now is None or r["at"] <= now)]
+    return max(found, key=lambda r: r["at"], default=None)
 
 
 def age_s(item: dict[str, Any] | None, now: float) -> float | None:
@@ -258,20 +272,28 @@ def record(item: dict[str, Any] | None, events: Iterable[Any] = (), now: float |
 
 
 def apply(item: dict[str, Any], events: Iterable[Any] = (), now: float | None = None) -> bool:
-    """Store the newest of the stored record and `events` in `metadata.last_activity`. → True when the item's field changed (a candidate that is not later changes nothing, so a repeat is no write)."""
+    """Store the newest of the stored record and `events` in `metadata.last_activity`, and the newest tied pull request event among them in `metadata.last_pr_event` when later than the one the item holds (it
+    may be older than the record: a push the hub reports after the mover's update). → True when either field changed (a candidate that is not later changes nothing, so a repeat is no write)."""
     meta = item.get("metadata")
     if not isinstance(meta, dict):
         return False
+    events = list(events or ())
+    held = pr_event(item, now)      # before the record is replaced
+    top = max((c for c in (clean(e, now) for e in events) if c and c["kind"] in PR_KINDS), key=lambda c: c["at"], default=None)
+    changed = False
+    if top is not None and (held is None or top["at"] > held["at"]):
+        meta[PR_FIELD] = top
+        changed = True
     new = record(item, events, now)
-    if new is None or meta.get(FIELD) == new:
-        return False
-    meta[FIELD] = new
-    return True
+    if new is not None and meta.get(FIELD) != new:
+        meta[FIELD] = new
+        changed = True
+    return changed
 
 
 def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real: bool = True, extra: Iterable[Any] = ()) -> bool:
-    """Apply one save: the signals it made (save_signals) become the record when later. `extra` are further signals of the same save the caller found (the mover's `update`, `update_signals`); they come first, so of signals at the same time a
-    progress signal wins over them (the last given wins). Only an open item has one. → True when the field changed."""
+    """Apply one save: the signals it made (save_signals) become the record when later (and a merge among them the pull request event, `apply`). `extra` are further signals of the same save the caller found (the mover's `update`, `update_signals`); they come first, so of signals at the same time a
+    progress signal wins over them (the last given wins). Only an open item has one. → True when a field changed."""
     if item.get("status") != "open":
         return False
     sigs = [*extra, *save_signals(before, item, now, real)]

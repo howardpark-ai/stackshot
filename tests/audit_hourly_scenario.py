@@ -183,6 +183,9 @@ class _Err:
     @property
     def text(self): return self.buf.getvalue()
 def pr_event(i, kind, what, ago_min): mt_ = rd(i); mt_["metadata"]["last_activity"] = {"at": now0 - ago_min * MIN, "kind": kind, "what": what}; (T / f"store/a/{i}.json").write_text(json.dumps(mt_))
+def then_update(i, kind, n, ago_min, update_ago):
+    """A pull request event stamped on the item the way the event pass does, then the mover's own later update, which takes the last-activity record over."""
+    it = rd(i); LA.apply(it, [LA.pr_candidate(kind, n, now0 - ago_min * MIN, now0)], now0); LA.apply(it, [LA.update_signal("", "wired the thing", now0 - update_ago * MIN)], now0); (T / f"store/a/{i}.json").write_text(json.dumps(it))
 def work(state, ago_min, agent="home-peer"): return [{"id": "build-it", "text": "build it", "agent": agent, "state": state, "ts": now0 - ago_min * MIN}]
 
 # ================================================================ 6a. the switch is on by default
@@ -202,6 +205,17 @@ ro = _ro.is_read_only
 _ro.is_read_only = lambda: True
 check("6 a read-only standby copy writes nothing", tick() == [] and lines(1) == [])
 _ro.is_read_only = ro
+
+# ================================================================ 1a. a push, a verdict or a merge in the hour counts though a later update holds the record
+clean_pane(); on()
+for i in (1, 2, 3, 4): put(i, act=90); panes["home-peer"] = "idle"
+then_update(1, "commit", 5, 55, 50); then_update(2, "verdict", 6, 55, 50); then_update(3, "merged", 7, 55, 50); then_update(4, "verdict", 8, 61, 50)
+tick()
+for i, words in ((1, "commit on PR 5"), (2, "verdict on PR 6"), (3, "PR 7 merged")):
+    check(f"1a {words}, 55 minutes ago and under a later update: verified, never idle", [(x["text"], x["kind"]) for x in lines(i)] == [(f"Audit {hm(now0)}: verified {words}", "audit")]
+          and mt(i)["last_activity"]["kind"] == "update" and not HR.idle_marked(mt(i), now0), (lines(i), mt(i).get("last_activity")))
+check("1a …one older than an hour verifies nothing", [x["kind"] for x in lines(4)] == ["audit_idle"], lines(4))
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 
 # ================================================================ 1. due and verified
 clean_pane(); put(1, mover="team-back", act=90); put(2, act=90); put(3, act=90); put(4, act=90); put(5, act=90); put(6, act=90, work=work("in progress", 30))
@@ -502,7 +516,7 @@ put(7, act=90, last_activity={"at": now0 - 59 * MIN, "kind": "commit", "what": "
 tick()
 check("9 a tied pull request's merge, comment, CI result, review and new head commit each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
 check("9 a recorded commit under an hour old verifies (recorded, so the line is no live-only one) and one older than an hour verifies nothing (idle)", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 4" and lines(7)[0]["kind"] == "audit"
-      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(6)[0]["kind"] == "audit_idle" and HR.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit"}), [lines(6), lines(7)])
+      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(6)[0]["kind"] == "audit_idle" and LA.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit", "verdict"}), [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "updated", "state_updated", "created", "confirmed", "written_at")]
 try: wt = HR.due({"a1": nots}, "a1", now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same)

@@ -199,7 +199,7 @@ check("1 apply: stores the record with its kind; the same again, an older one an
       LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
       and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
 check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today (the audit line since the hourly line stamps it; update since a mover's new status text does)",
-      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS and "audit" in LA.STAMPED and "update" in LA.STAMPED, sorted(LA.KINDS))
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "verdict", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS and "audit" in LA.STAMPED and "update" in LA.STAMPED, sorted(LA.KINDS))
 check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
@@ -329,7 +329,7 @@ check("4 the ones not tied are untouched, file for file", all(rd(i) == before_al
 check("4 the other clocks are as they were: activity, updated, written_by, the History and merged_seen of every item saved",
       all(all(rd(i).get(k) == before_all[i].get(k) for k in ("activity", "updated", "written_by", "written_at", "confirmed", "state_updated")) and mt(i).get("merged_seen") == before_all[i]["metadata"].get("merged_seen")
           and mt(i).get("stall") == before_all[i]["metadata"].get("stall") for i in (400, 401, 402, 403, 404, 410)) and not any("last_activity" in str(before_all[i]) for i in before_all), None)
-d1 = {k: v for k, v in rd(404)["metadata"].items() if k not in ("last_activity", "phase")}; check("4 …and nothing else of the metadata changed (the phase every save of the server stores aside)", d1 == before_all[404]["metadata"], d1)
+d1 = {k: v for k, v in rd(404)["metadata"].items() if k not in ("last_activity", "last_pr_event", "phase")}; check("4 …and nothing else of the metadata changed (the phase every save of the server stores aside)", d1 == before_all[404]["metadata"], d1)
 check("4 the offset is stored at the end of the log it read", EL.load_offset() == EL.path().stat().st_size, EL.load_offset())
 check("4 a second pass with nothing new reads nothing, saves nothing", ev_pass(now0 + 21 * MIN) == [] and rd(400) == rd(400), None)
 
@@ -1296,6 +1296,60 @@ sv17l = saved17(A17l, {"pr": None}); sv17l["github"]["state"][A17l]["pr"] = Fals
 with GH(g17l, [A17l], saved=sv17l) as G:
     G.one(); G.skew += 700.0; G.one()
     check("17 an issue whose saved state says it is one is not asked for as a pull request on the first pass either", pr_reads(G, N17l) == 0, G.calls)
+
+# ================================================================ 18. a verification verdict, and the pull request event kept beside the record
+V18 = f"verify: PASS patch-id={'1' * 40} head={'2' * 40}"
+check("18 is_verdict: PASS, PASS+NOTES and FAIL on the first line, whatever follows on later lines",
+      all(EL.is_verdict(b) for b in (V18, V18.replace("PASS", "PASS+NOTES"), V18.replace("PASS", "FAIL") + "\r\n\r\nwhy", V18 + "  \nnotes")), None)
+check("18 is_verdict: not a later or quoted line, a short hash, another word, words after the line, or no text",
+      not any(EL.is_verdict(b) for b in ("note\n" + V18, "> " + V18, V18[:-1], V18.replace("PASS", "MAYBE"), V18 + " ok", "verify: PASS", "", None, 7)), None)
+check("18 lines_for: a vouched verdict is a `verdict` line even from a bot's login; an unvouched one is none",
+      [r["kind"] for r in lines(A13, "", "pr_verdict", "helper[bot]", vouched="verdict", bot=True, now=100.0, ts=90.0)] == ["verdict"]
+      and lines(A13, "", "pr_verdict", "kim", vouched="comment", now=100.0, ts=90.0) == [], None)
+SIG18 = LA.pr_candidate("verdict", 9, 40, 100)
+check("18 pr_candidate: a verdict is its own stamped kind, worded `verdict on PR n`", SIG18 == {"at": 40.0, "kind": "verdict", "what": "verdict on PR 9"} and "verdict" in LA.PR_KINDS and "verdict" in LA.STAMPED, SIG18)
+it18 = {"metadata": {}}
+LA.apply(it18, [LA.update_signal("", "wired it", 60)], 100)
+check("18 a mover's update writes no pull request event", LA.PR_FIELD not in it18["metadata"] and LA.pr_event(it18, 100) is None, it18)
+check("18 an event older than the record is kept beside it (a change to save), and the record stays", LA.apply(it18, [SIG18], 100) and it18["metadata"]["last_activity"]["kind"] == "update" and LA.pr_event(it18, 100) == SIG18, it18)
+check("18 …the same event again, or an older one, changes nothing", not LA.apply(it18, [SIG18], 100) and not LA.apply(it18, [LA.pr_candidate("commit", 9, 30, 100)], 100), it18)
+it18b = {"metadata": {}}
+LA.apply(it18b, [LA.pr_candidate("commit", 9, 40, 100)], 100); LA.apply(it18b, [LA.update_signal("", "pushed", 60)], 100); LA.apply(it18b, [LA.audit_signal("subagent running", 70)], 100)
+check("18 …and a later update or audit line takes the record but not the event", it18b["metadata"]["last_activity"]["kind"] == "audit" and LA.pr_event(it18b, 100)["what"] == "commit on PR 9", it18b)
+old18 = {"metadata": {"last_activity": {"at": 40, "kind": "pr_merged", "what": "PR 9 merged"}}}
+check("18 pr_event: a record that is itself an event counts (stamped before the field existed); one dated after now does not", LA.pr_event(old18, 100)["kind"] == "pr_merged" and LA.pr_event(old18, 30) is None, old18)
+save18 = {"status": "open", "metadata": {}}
+LA.apply(save18, [{"at": 50, "kind": "pr_merged", "what": "PR 8 merged"}, LA.update_signal("", "merged it", 55)], 100)
+check("18 a merge a save records is kept beside a later update", save18["metadata"]["last_activity"]["kind"] == "update" and LA.pr_event(save18, 100)["what"] == "PR 8 merged", save18)
+
+def cm18(login, assoc, body, at, i): return {"user": {"login": login, "type": "User"}, "body": body, "html_url": f"{W_}/pull/170#issuecomment-{i}", "created_at": iso9(at), "author_association": assoc}
+A18 = "github:acme/widgets#170"
+g18 = {"/user": {"login": "hubaccount"}, **pr9(170)}
+with GH(g18, [A18]) as G:
+    G.one()
+    g18[f"{RP}/issues/170"] = g18[f"{RP}/issues/170"] | {"comments": 5, "updated_at": iso9(1000)}
+    g18[f"{RP}/issues/170/comments?since={iso9(0)}&per_page=20"] = [cm18("hubaccount", "CONTRIBUTOR", V18 + "\n\nall lanes", 100, 1), cm18("hubaccount", "CONTRIBUTOR", "pushed a fix", 200, 2),
+                                                                   cm18("mallory", "NONE", V18, 300, 3), cm18("kim", "COLLABORATOR", V18, 400, 4), cm18("hubaccount", "CONTRIBUTOR", "> " + V18, 500, 5)]
+    mark18 = len(G.calls)
+    got18 = G.one()
+    ver18 = [e for e in got18 if e.etype == "pr_verdict"]
+    check("18 receiver: a verdict by the hub's own login or the repository's side is one record_only event at the comment's time; a stranger's, plain talk and a quote are none",
+          [(e.who, e.ts, e.vouched, e.record_only) for e in ver18] == [("hubaccount", iso9(100), "verdict", True), ("kim", iso9(400), "verdict", True)], [(e.who, e.ts, e.etype) for e in got18])
+    check("18 …the hub's own comments still send no comment notice, and no request is added", not [e for e in got18 if e.etype == "comment" and e.who == "hubaccount"]
+          and len([p for p, _ in G.calls[mark18:] if "/comments" in p]) == 1, (G.calls[mark18:], [(e.who, e.etype) for e in got18]))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.emit(ver18[0])
+rows18, _ = EL.read(0)
+check("18 end to end: the event log holds a verdict line for the pull request, and the server reads it", [(r["kind"], r["n"]) for r in rows18] == [("verdict", 170)] and EL.normal(rows18[0])["kind"] == "verdict", rows18)
+n18 = {"/user": {"login": "hubaccount"}, NP9: [thread9(iso9(0))], f"{RP}/issues/5": {"state": "open", "comments": 1, "updated_at": iso9(0), "title": "t", "html_url": f"{W_}/pull/5", "body": "", "pull_request": {"merged_at": None}}}
+with GH(n18, [NA9]) as G:
+    G.one()
+    n18[NP9] = [thread9(iso9(1000), 18)]
+    n18[f"{RP}/issues/5/comments?since={iso9(0)}&per_page=50"] = [{**cm18("hubaccount", "CONTRIBUTOR", V18, 100, 6), "html_url": f"{W_}/pull/5#issuecomment-6"}]
+    n18[f"{RP}/pulls/5/reviews?per_page=100"] = []; n18[f"{RP}/pulls/5/comments?since={iso9(0)}&per_page=50"] = []
+    got18n = G.one()
+    check("18 a repository's notification thread: the verdict is recorded on the pull request, and nothing else is told", [(e.etype, e.anchor) for e in got18n] == [("pr_verdict", "github:acme/widgets#5")], [(e.anchor, e.etype) for e in got18n])
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
