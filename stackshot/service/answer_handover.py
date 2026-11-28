@@ -17,6 +17,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.anchors import anchors as _anc
 from stackshot.core import members as _members
 from stackshot.core.instance import NAME, OWNER
 from stackshot.model import holders as _holders
@@ -99,7 +100,13 @@ def _then_live(then: str, meta: dict[str, Any]) -> bool:
     """Is `then` a session that can take an item now: a background agent of the item's project, or a session that is live or in the cloud? The one test every hand-over to a stored `then`
     makes (a decision answer, the end of a wait), so a retired, unknown or free-text name never becomes a mover."""
     ctx = _mg.Ctx()
-    return bool(ctx.background_of(then, str(meta.get("project") or "")) or ctx.session_state(then) in ("live", "cloud"))
+    if ctx.background_of(then, str(meta.get("project") or "")) or ctx.session_state(then) in ("live", "cloud"):
+        return True
+    try:
+        front = _anc.sole_front()      # the configured front takes a then a lead handed it (gates._lead_hands_to_front), whether or not its row reads live right now; a retired one never does
+        return bool(front and _anc.same_session(front, then) and ctx.session_state(then) != "retired")
+    except Exception:  # noqa: BLE001  — an extra: a failed read leaves the test as it was
+        return False
 
 
 def _builder_for_front(who: str, meta: dict[str, Any]) -> str:
