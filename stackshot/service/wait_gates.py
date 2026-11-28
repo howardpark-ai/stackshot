@@ -414,13 +414,13 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     the session that takes it after the wait (`then`), alive; not yet / keep waiting → the wait is put back with the date he gave; drop → closed as not planned. → what happened, in words."""
     w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
     asked = str(w.get("asked") or "")
-    what = _watch.subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})
+    what = _watch.waited_for(_watch.event_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}}))      # after the sentence, in brackets: the event's text can be any shape
     do = eff["do"]
     if do == "arrived":
         was_post = _watch.was_picker(w.get("was"))
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _telling.auto_mover(_telling.fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
         front, post = post, _watching._front_to_background(post, meta) or post      # a front agent as `then` hands the item to the project's builder, as a wake does (its own step keeps it)
-        _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
+        _watch.turn_alive(meta, post, f"{OWNER} says it happened{what}", now)
         meta.pop("chases", None)
         return f"arrived → {_watching.watch_label(post)}" + _watching.passed_note(front if front != post else "")
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
@@ -440,7 +440,7 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
         return f"waits again until {eff['date']}"
     if do == "drop":
         item["metadata"] = meta
-        _watch_close(item, f"dropped on {OWNER}'s answer on the board: {what} is not waited for any more", now)
+        _watch_close(item, f"dropped on {OWNER}'s answer on the board: no longer waited for{what}", now)
         meta.clear(); meta.update(item["metadata"])
         return "dropped"
     return ""

@@ -185,7 +185,7 @@ try:
 
     # ================================================================ 5. the asks the server writes itself and the question route
     ev = {"wait_event": "countersigned NDA"}
-    for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.relay_options(dt.date(2026, 11, 16))), ("the drop question", wk.drop_ask(ev), wk.drop_options(dt.date(2026, 11, 16)))):
+    for what, ask, opts in (("the relay question", wk.relay_ask(ev), wk.options()), ("the drop question", wk.drop_ask(ev), wk.options())):
         m = {"needs": ["decision"], "ask": ask, "options": opts, "watch": {"asked": "relay" if "relay" in what else "dropit"}}
         passes(f"5 watcher: {what} passes the Recommend gate", lambda m=m: _dg._gate_recommend_stance(m))
         m2 = {**m, "options": None}

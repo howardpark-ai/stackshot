@@ -25,7 +25,7 @@ from stackshot.model import work as _work   # an item's work lines, what is in m
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
-from stackshot.waits import watchers as _watchers   # a relay or "drop it?" question may mark no option recommended (options_of)
+from stackshot.waits import watchers as _watchers   # a relay or "stop waiting?" question may mark no option recommended (options_of)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.web import itempage as _ip  # the item page's words on the item model: since, next lines
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
@@ -348,11 +348,11 @@ def parse_ask(text):
     return {k: v.strip() for k, v in m.groupdict().items()} if m else None
 # The options (the board shows them in a well-readable form for every item with choices):
 # metadata.options on an item that asks him to
-# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended (a relay or "drop it?" question the server writes itself marks none: only the owner knows whether the news came). The server validates
+# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended (a relay or "stop waiting?" question the server writes itself marks none: only the owner knows whether the news came). The server validates
 # (service/wait_gates.py `_gate_options`); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
 def _watcher_ask(r):
-    """Is this item's question one the waits' watchers wrote (a relay or "drop it?" ask)? Those alone may carry no recommended option."""
+    """Is this item's question one the waits' watchers wrote (a relay or "stop waiting?" ask)? Those alone may carry no recommended option."""
     m = r.get("metadata") or {}
     return _watchers.asked_of(m) != ""
 def options_of(r, raw=False):
@@ -1458,8 +1458,6 @@ class Board:
              "toolong": ("warn", "Nothing sent: the text is too long."),
              "stale": ("warn", "Nothing sent: the item no longer asks this (its question, options or needs changed). Read it again below.",
                        "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
-             "askedback": ("warn", "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
-                           "Sent: your note is on the item. I could not read a date from it; open the item to pick a day."),
              "stalenote": ("ok", "Sent as a comment: the item no longer asks this, so your note is on it as a comment. Read the item again below.",
                            "Sent as a comment: the ask changed before your answer arrived, so your note is on the item as a comment; open the item to read it again."),
              "closednote": ("ok", "Sent as a comment: the item is closed, and your note is on it."),

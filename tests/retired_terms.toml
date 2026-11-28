@@ -591,3 +591,19 @@ allow = []
 retired = "its old name `wake`"
 use = "`until` is the one date of a wait; `wake` is a retired parameter"
 allow = []
+
+# ---- the wait questions' earlier words: the question spliced the event into a sentence, and the buttons offered a typed date, three days and "keep waiting". A due wait now offers three choices.
+[[term]]
+retired = "not yet, ask again on"
+use = "the three choices of a due wait's question (`watchers.CHOICES`: it happened, wait 1 more week, stop waiting); any other wait is a note in the box"
+allow = []
+
+[[term]]
+retired = "keep waiting until <date>"
+use = "the three choices of a due wait's question (`watchers.CHOICES`)"
+allow = []
+
+[[term]]
+retired = '"drop it?"'
+use = "the \"stop waiting?\" question"
+allow = []

@@ -138,6 +138,25 @@ def ensure(meta: dict[str, Any], text: Any, keeper: str, by: str, at: float, wri
     return out
 
 
+def reword(meta: dict[str, Any], text: Any, keeper: str) -> bool:
+    """The server words its own question again, which asks nothing new: the open step it recorded says `text` now, where it stands (the same step, its place, writer and the member it opens with kept). `ensure`
+    would drop it and add one, as it does for a changed ask. → whether there was such a step."""
+    cl = _steps.view(meta, keeper=keeper)
+    rec = _steps.clean(meta.get(KEY))
+    mine = _same(cl, rec, alike=False) if rec else []
+    if not mine:
+        return False
+    old = cl[mine[0]]["text"]
+    nm = _steps.opener(old)
+    want = line_of(f"{nm}: {text}" if nm else text, meta)
+    if not _nl.reword(meta, old, want, keeper):
+        return False
+    cl[mine[0]] = {**cl[mine[0]], "text": want}
+    meta[KEY] = want
+    _put_steps(meta, cl)
+    return True
+
+
 def drop_open(meta: dict[str, Any], keeper: str, by: str, at: float, also: str = "") -> list[str]:
     """The item no longer waits on him (a session withdrew the ask or the step, or moved the item on): the server's step (metadata.owner_step) and any open line that says what the item's old ask did (`also`: the
     text of that ask, for an item that asked before the server made his steps) are dropped by `by`, and leave next. A `<owner>:` line a session wrote about something else stays. → the first lines dropped."""

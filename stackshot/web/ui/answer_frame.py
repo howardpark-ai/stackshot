@@ -19,6 +19,7 @@ from typing import Any
 from stackshot.core import config as _cfg, members as _members
 from stackshot.model import ask_leaves as _askl, member_gates as _mgates, option_labels as _ol
 from stackshot.web import home as _home
+from stackshot.web import wait_words as _ww
 from stackshot.web.i18n import t as _t
 from stackshot.web.ui import render as _r
 
@@ -70,13 +71,13 @@ def _answered_html(board: Any, r: dict[str, Any], a: dict[str, Any]) -> str:
     word = lambda k: str(a.get(k) or "").strip()
     out = []
     if word("ask"):
-        out.append(f'<div class="ir-det"><span class="hnext hq">{board.md_line(_r.decide_words(word("ask")), r["gid"])}</span></div>')
+        out.append(f'<div class="ir-det"><span class="hnext hq">{board.question_html(_r.decide_words(word("ask")), r["gid"])}</span></div>')
     ts = _when_ts(a)
     out.append(f'<p class="afwho">{esc(_t("frame.answered_by", who=_members.recorded_by(a), when=board.when(ts) if ts > 0 else ""))}</p>')
     if word("choice"):
-        line = word("choice_line")
+        line = _ww.line(word("ask"), word("choice_line"))
         out.append('<div class="acards"><div class="acard afpick"><span class="adot" aria-hidden="true"></span><span class="abody">'
-                   f'<span class="alab">{esc(_ol.pick_words(word("choice"), word("letter")))}</span>' + (f'<span class="adesc">{esc(line)}</span>' if line else "") + '</span></div></div>')
+                   f'<span class="alab">{esc(_ol.pick_words(_ww.label(word("ask"), word("choice")), word("letter")))}</span>' + (f'<span class="adesc">{esc(line)}</span>' if line else "") + '</span></div></div>')
     if word("text"):
         out.append(f'<p class="aftext">{esc(word("text"))}</p>')
     return "".join(out)
@@ -199,7 +200,7 @@ state=next;M.setAttribute('data-state',next);busy=false;
 if(next==='open'){if(!was){was=ref;since=n.getAttribute('data-drawn')}f=form();if(f&&drafts[ref])put(f,drafts[ref]);grow(box(f))}
 join();document.dispatchEvent(new Event('stackshot:swapped'));typing=isNote(document.activeElement);post();hello()}
 function refresh(){if(busy)return Promise.resolve();var s=++seq;return load().then(function(n){if(s===seq&&!busy){var before=state;show(n);return before!==state?state:''}},function(){})}
-function fall(code){var s=code==='decision'?'answered':code==='stale'||code==='stalenote'||code==='askedback'?'changed':'closed',b=M.querySelector('#afbody');b.textContent='';
+function fall(code){var s=code==='decision'?'answered':code==='stale'||code==='stalenote'?'changed':'closed',b=M.querySelector('#afbody');b.textContent='';
 var p=document.createElement('p');p.className='afline';p.textContent=lines[s]||'';b.appendChild(p);
 if(s!=='answered'){var q=document.createElement('p');q.className='aflink';var a=document.createElement('a');a.href=A('href');a.target='_blank';a.rel='noopener';a.textContent=lines.link||'';q.appendChild(a);b.appendChild(q)}
 to(s)}

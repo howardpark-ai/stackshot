@@ -541,21 +541,22 @@ def part_list():
     lst(184, [Tm(day(-2)), Re("the lease"), It("a185")], mode="all", until=day(-1), then="home-other"); item(185, subject="[home] open")
     woke = wakes_svc.wake_pass(); m = mt(184)
     check("backstop (open relay line): the owner is asked, as a relay's ask-by day asks: the fixed question about the relay line's event, three options, the post-wake mover as `then`", "a184" in woke and m.get("needs") == ["decision"]
-          and m.get("ask") == "Decide: has the lease arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop" and [o["label"] for o in m["options"]][0::5] == ["arrived", "drop"] and len(m["options"]) == 6 and m.get("then") == BACK and "mover" not in m, m)
+          and m.get("ask") == "Decide: Has what this item is waiting for happened? Waiting for: the lease · Options: It happened: continue the work / Wait 1 more week: next check in a week / Stop waiting: close the item" and [o["label"] for o in m["options"]] == ["It happened: continue the work", "Wait 1 more week: next check in a week", "Stop waiting: close the item"] and m.get("then") == BACK and "mover" not in m, m)
     check("backstop (open relay line): …the words of what arrived and what did not are on the item, nobody is messaged, and the wait is put by", m["woke"]["to"] == OWN and m["woke"]["what"].startswith(f"backstop day {day(-1)}: arrived ") and "still open" in m["woke"]["what"] and not sent("watch")
           and all(k not in m for k in GONE) and m["watch"]["was"]["wait_kind"] == "list" and len(m["watch"]["was"]["waits"]) == 3 and m["watch"]["was"]["waits"][0].get("arrived"), m)
     check("backstop (open relay line): …the model reads it as the owner's move", mod_of(184).owner_moves, mod_of(184))
-    out = answer_svc._answer("a184", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer"); m = mt(184)
-    check("backstop (open relay line): `not yet` with a date puts the list back: its lines (what had arrived stays), mode and post-wake mover, the backstop moved to that day, nothing of the question left",
-          out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == day(10) and arrived_of(184) == [True, False, False] and m.get("mover") == BACK and "post_wake_mover" not in m
+    wk_end = day(7)
+    out = answer_svc._answer("a184", "Wait 1 more week: next check in a week", "", "answer"); m = mt(184)
+    check("backstop (open relay line): one more week puts the list back: its lines (what had arrived stays), mode and post-wake mover, the backstop moved a week on, nothing of the question left",
+          out == "decision" and m.get("wait_kind") == "list" and m.get("wait_mode") == "all" and m.get("until") == wk_end and arrived_of(184) == [True, False, False] and m.get("mover") == BACK and "post_wake_mover" not in m
           and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and WL.valid(m) and mod_of(184).wait.kind == "list", (out, m))
-    check("backstop (open relay line): …and it is watched again (the next moment is that day)", wk.watches(rd(184)) and wk.next_moment(m) == wk.day_epoch(day(10)), None)
+    check("backstop (open relay line): …and it is watched again (the next moment is that day)", wk.watches(rd(184)) and wk.next_moment(m) == wk.day_epoch(day(7)), None)
     # the owner says arrived / drop
     lst(186, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass(); reset()
-    answer_svc._answer("a186", "arrived", "", "answer"); m = mt(186)
+    answer_svc._answer("a186", "It happened: continue the work", "", "answer"); m = mt(186)
     check("backstop (open relay line): `arrived` puts the item with the post-wake mover, alive; the wait's fields are gone", m.get("mover") == BACK and "ask" not in m and all(k not in m for k in GONE), m)
     lst(187, [Re("the quote"), Tm(day(6))], mode="all", until=day(-1)); wakes_svc.wake_pass()
-    answer_svc._answer("a187", "drop", "", "answer"); m = mt(187)
+    answer_svc._answer("a187", "Stop waiting: close the item", "", "answer"); m = mt(187)
     check("backstop (open relay line): `drop` closes it as not planned and the list goes with the rest of the wait", rd(187)["status"] == "completed" and m.get("outcome") == "dropped" and all(k not in m for k in GONE) and "ask" not in m, m)
     # an open relay line that has arrived does not ask
     reset()
@@ -621,7 +622,7 @@ def part_list():
     lst(220, [Re("the first quote"), Re("the second quote"), Tm(day(9))], mode="all", until=day(-1)); d = rd(220); d["metadata"]["waits"][0]["arrived"] = {"at": now0 - 100, "what": "the first quote was relayed"}; put(220, d)
     check("relay_event: the first OPEN relay line's event (an arrived one is not asked about)", WL.relay_event(mt(220)) == "the second quote" and WL.relay_event({**GOOD, "waits": [Re("a"), Re("b")]}) == "a", WL.relay_event(mt(220)))
     wakes_svc.wake_pass(); m = mt(220)
-    check("backstop (two relay lines, the first arrived): the owner is asked about the OPEN one", m.get("ask") == "Decide: has the second quote arrived? · Options: arrived / ask again in a week, two weeks or a month / not yet, ask again on <date> / drop" and m.get("needs") == ["decision"]
+    check("backstop (two relay lines, the first arrived): the owner is asked about the OPEN one", m.get("ask") == "Decide: Has what this item is waiting for happened? Waiting for: the second quote · Options: It happened: continue the work / Wait 1 more week: next check in a week / Stop waiting: close the item" and m.get("needs") == ["decision"]
           and "the first quote was relayed" in m["woke"]["what"] and "still open: news of the second quote" in m["woke"]["what"], m)
     # (b) an arrived line is still found by the close (open_only=False): the item is one the close is for, not a mention
     WO: list[set[str]] = []

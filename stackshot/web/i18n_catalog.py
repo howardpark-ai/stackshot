@@ -17,6 +17,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     canvas.*   the shell a canvas is read in: the way back, its name, the current page and its versions
     search.*   the search page: its filters, summary lines, notes and result rows
     runners.*  the CI runners page: its cards, table, machine lines, switch buttons and as-of lines (js.runners.* are the words its script says)
+    wait_ask.* the questions the server puts on a waiting item, and their three buttons (web/wait_words.py)
     page.*     small words several pages share (Archived, none)
     glossary.* the reply line of a save whose text holds a word that stands for several glossary terms (model/glossary_words.py)
     explain.*  the "?" control that holds a page's explainer text (ui/explain.py): its button's name
@@ -94,8 +95,6 @@ CATALOG: dict[str, str] = {
     "sent.toolong": "Nothing sent: the text is too long.",
     "sent.stale": "Nothing sent: the item no longer asks this (its question, options or needs changed). Read it again below.",
     "sent.stale_home": "Nothing sent: the ask changed before your answer arrived; open the item to read it again.",
-    "sent.askedback": "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
-    "sent.askedback_home": "Sent: your note is on the item. I could not read a date from it; open the item to pick a day.",
     "sent.stalenote": "Sent as a comment: the item no longer asks this, so your note is on it as a comment. Read the item again below.",
     "sent.stalenote_home": "Sent as a comment: the ask changed before your answer arrived, so your note is on the item as a comment; open the item to read it again.",
     "sent.closednote": "Sent as a comment: the item is closed, and your note is on it.",
@@ -240,6 +239,15 @@ CATALOG: dict[str, str] = {
     "audit.source.filing": "filing",
     "audit.source.dates": "dates",
     "audit.source.wait-loops": "wait loops",
+
+    # ------------------------------------------------------------------ the questions the server puts on a waiting item (web/wait_words.py): the English is what the item stores (waits/watchers.py)
+    "wait_ask.q.relay": "Has what this item is waiting for happened?",
+    "wait_ask.q.drop": "No news after {n} follow-ups. Stop waiting?",
+    "wait_ask.event": "Waiting for: {event}",
+    "wait_ask.opt.arrived": "It happened: continue the work",
+    "wait_ask.opt.week": "Wait 1 more week: next check in a week",
+    "wait_ask.opt.drop": "Stop waiting: close the item",
+    "wait_ask.picked": "picked {choice}",
 
     # ------------------------------------------------------------------ state words
     "state.you": "Your move",
@@ -773,7 +781,7 @@ CATALOG: dict[str, str] = {
     "wait.words_behind": "Words behind the date",
     "wait.chases": "Chases",
     "wait.none_yet": "none yet",
-    "wait.chase_help": "After {n} chases with no reply, this comes to {owner} as \"drop it?\".",
+    "wait.chase_help": "After {n} chases with no reply, this asks {owner} whether to stop waiting.",
     "wait.what.list": "several things ({mode})",
     "wait.list.all_of": "all of {n}",
     "wait.list.any_of": "any of {n}",

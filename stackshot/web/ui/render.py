@@ -27,7 +27,7 @@ from stackshot.model import said as _said   # the trailers: his words on an item
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import event_waits as _ew   # a fleet event line of a wait on a list, in words
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
-from stackshot.waits import watchers as _watchers   # a relay or "drop it?" question may mark no option recommended (options_of)
+from stackshot.waits import watchers as _watchers   # a relay or "stop waiting?" question may mark no option recommended (options_of)
 from stackshot.anchors import receiver_health as _rh   # when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.model import draft as _draft   # an item's draft: the verbatim text the owner pastes elsewhere, drawn in a block with a Copy button (draft.py)
@@ -48,6 +48,7 @@ from stackshot.waits import quiet as _quiet   # what a front agent was or was no
 from stackshot.waits import handoff as _hand   # a hand-off not yet taken
 from stackshot.web import whatschanged as _wc  # what changed in the tools in the last 7 days: a line in the brief
 from stackshot.web import uiprefs as _up   # the signed-in person's panel order (uiprefs.py): the default order, normalize
+from stackshot.web import wait_words as _ww   # the server's own wait question and its buttons, drawn in the reader's language
 from stackshot.web import i18n as _i18n   # the string table: a page's words in the person's language, the English ones when it has none (i18n.py)
 from stackshot.web.i18n import t as _t
 from stackshot.service import foryou as _fy  # the For you list's file: rows for what the owner should see, newest first (service/foryou.py)
@@ -423,11 +424,11 @@ def parse_ask(text):
     return {k: v.strip() for k, v in m.groupdict().items()} if m else None
 # The options (the board shows them in a well-readable form for every item with choices):
 # metadata.options on an item that asks him to
-# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended (a relay or "drop it?" question the server writes itself marks none: only the owner knows whether the news came). The server validates
+# pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended (a relay or "stop waiting?" question the server writes itself marks none: only the owner knows whether the news came). The server validates
 # (service/wait_gates.py `_gate_options`); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
 def _watcher_ask(r):
-    """Is this item's question one the waits' watchers wrote (a relay or "drop it?" ask)? Those alone may carry no recommended option."""
+    """Is this item's question one the waits' watchers wrote (a relay or "stop waiting?" ask)? Those alone may carry no recommended option."""
     m = r.get("metadata") or {}
     return _watchers.asked_of(m) != ""
 def options_of(r, raw=False):
@@ -1425,7 +1426,7 @@ if(f._was===i.value){i.checked=false;f._was=''}else f._was=i.value;sync(f)},true
 document.addEventListener('input',function(e){var t=e.target;if(t&&t.matches&&t.matches('form[data-cards] textarea,form[data-step] textarea'))sync(t.form)});
 document.addEventListener('stackshot:swapped',all);window.addEventListener('pageshow',all);window.ssCards={sync:sync,all:all};all()})();</script>"""
 def decide_words(ask):
-    """The question an ask line puts: its Decide part; an ask with no Recommend, Stakes or By (a watcher's relay or drop-it ask) its whole question."""
+    """The question an ask line puts: its Decide part; an ask with no Recommend, Stakes or By (a watcher's relay or stop-waiting ask) its whole question."""
     pa = parse_ask(ask)
     return pa["decide"] if pa else re.sub(r"^Decide:\s*", "", ask).split(" · Options:")[0].strip()
 def _card_order(opts, mockup=False):
@@ -1451,11 +1452,12 @@ def _cards_html(opts, named_only=False) -> str:
     lettered = len(opts) >= 3        # the value carries the place (A, B, C) from three options; a mockup's options are drawn by name, never with the letter (_named_only), but still post it
     cards = []
     for i, o in enumerate(opts):
+        shown, line = o.get("shown", o["label"]), o.get("shown_line", o["line"])      # the server's wait buttons in the reader's language (wait_words.options); the value posts the stored label
         key = f'<span class="akey">{chr(65 + i)}</span>' if lettered and not named_only else ""
         val = (f"{chr(65 + i)} · {o['label']}" if o["label"] else chr(65 + i)) if lettered else o["label"]      # a label that was only its letter (option_labels) posts the letter alone
         cards.append(f'<label class="acard"><input type="radio" name="choice" value="{esc(val)}">'
-                     f'<span class="adot" aria-hidden="true"></span><span class="abody"><span class="alab">{key}{esc(o["label"])}</span>'
-                     + (f' <span class="badge rec">{esc(_t("home.recommended"))}</span>' if o["recommended"] else "") + f'<span class="adesc">{esc(o["line"])}</span></span></label>')
+                     f'<span class="adot" aria-hidden="true"></span><span class="abody"><span class="alab">{key}{esc(shown)}</span>'
+                     + (f' <span class="badge rec">{esc(_t("home.recommended"))}</span>' if o["recommended"] else "") + (f'<span class="adesc">{esc(line)}</span>' if line else "") + '</span></label>')
     return f'<div class="acards" role="radiogroup" aria-label="{esc(_t("home.options"))}">' + "".join(cards) + '</div>'
 _ABOX_JS = r"""(function(){var H={},seen=[],D=null,MQ=window.matchMedia?matchMedia('(pointer: coarse)'):null,RO=window.ResizeObserver?new ResizeObserver(function(l){l.forEach(function(e){var t=e.target,h=hd(t);if(h)sync(h);if(coarse())requestAnimationFrame(function(){grow(t)})})}):null;
 function coarse(){return !!(MQ&&MQ.matches)}
@@ -2532,10 +2534,11 @@ class Board:
                     if a != b:
                         po = options_of(prev) if a == "call" else []    # the options leave the page with the decision and stay here
                         pk = ask_of(prev) if a == "call" else ""        # and so does the ask, its Decide part (the raw line if misshaped)
-                        pk = ((parse_ask(pk) or {}).get("decide") or pk) if pk else ""
+                        was_ask = pk
+                        pk = ((parse_ask(pk) or {}).get("decide") or _ww.one_line(pk)) if pk else ""
                         mv = ("needs", _t("item.log.moved_to", lane=f"<b>{e(list_word(m.get('state'), b))}</b>"))
                         ev.append(mv)
-                        if pk: ev.append(("needs", _t("item.log.ask_was", ask=e(_ip.clip(pk, 160))), None, f'<details class="ehold"><summary class="more">{_t("item.log.whole_ask")}</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
+                        if pk: ev.append(("needs", _t("item.log.ask_was", ask=e(_ip.clip(pk, 160))), None, f'<details class="ehold"><summary class="more">{_t("item.log.whole_ask")}</summary><div class="body md">{md_block(_ww.one_line(was_ask))}</div></details>'))
                         dec = self.decision_made(prev, v)                # his answer written with this change, when it is one
                         kept = {"metadata": {"options": (dec or {}).get("options")}}
                         po, rpo = (options_of(kept), options_of(kept, raw=True)) if options_of(kept) else (po, options_of(prev, raw=True) if a == "call" else [])      # the options he was shown, kept on his answer (a record from before that has them from the version before); rpo = their labels as stored
@@ -2546,7 +2549,7 @@ class Board:
                             hit = (ord(lt) - 65 if len(lt) == 1 and lt.isascii() and lt.isalpha() and ord(lt) - 65 in hits else hits[0] if hits else -1)      # one option is marked: the letter's place when the answer carries one, else the first match (as the pick resolves)
                             for i, (o, ro) in enumerate(zip(po, rpo)):
                                 taken = i == hit
-                                ev.append(("needs", _t("item.log.opt_rec" if o["recommended"] else "item.log.opt", label=f'<b>{e(_ol.listed(o["label"], i))}</b>', line=e(o["line"])) + (_t("item.log.opt_picked", picked=f'<b>{_t("item.log.picked")}</b>') if taken else ""), None, "", "osub"))
+                                ev.append(("needs", _t("item.log.opt_rec" if o["recommended"] else "item.log.opt", label=f'<b>{e(_ol.listed(_ww.label(was_ask, o["label"]), i))}</b>', line=e(_ww.line(was_ask, o["line"]))) + (_t("item.log.opt_picked", picked=f'<b>{_t("item.log.picked")}</b>') if taken else ""), None, "", "osub"))
                             if dec and not dec.get("choice"): ev.append(("needs", _t("item.log.no_pick")))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")))
@@ -2599,16 +2602,17 @@ class Board:
                         just_closed.add(g["step"])
                 for word, line in _steps.changes(pm, m, s_ == "completed"):     # a step checked or dropped, one line each (a step with status updates has the folded line instead)
                     if line in just_closed: continue
-                    ev.append(("step", _t("item.log.step_mark", mark=step_word(word), line=self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"]))))
-                if (pm.get("next") or "") != (m.get("next") or ""): ev.append(fev("next", m.get("next")))
+                    ev.append(("step", _t("item.log.step_mark", mark=step_word(word), line=self.md_line(_ip.clip_md(_ww.step(line), self.HIST_NEXT_CLIP), r["gid"]))))
+                if (pm.get("next") or "") != (m.get("next") or ""): ev.append(fev("next", m.get("next") and _ww.steps(m["next"])))
                 pa, a_ = str(pm.get("ask") or "").strip(), str(m.get("ask") or "").strip()
-                if pa != a_: ev.append(fev("ask", a_))
-                if (pm.get("options") or []) != (m.get("options") or []): ev.append(fev("options", _gh._options_text(m.get("options"))))
+                if pa != a_: ev.append(fev("ask", _ww.one_line(a_)))
+                if (pm.get("options") or []) != (m.get("options") or []): ev.append(fev("options", _gh._options_text(_ww.worded(a_, m.get("options")))))
                 if (prev.get("description") or "") != (v.get("description") or ""): ev.append(fev("description", v.get("description")))
                 pa_, na_ = answers_of(prev), answers_of(v)
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or a.get("server_note") or "")      # a step the server ticked on a mail he sent carries its own sentence, not his words
+                        if ch: ch = _ww.label(str(a.get("ask") or ""), ch)
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
                         ev.append(("answer", _t("item.log.answer_via", owner=e(_members.recorded_by(a)), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (f' <span class="dim">{_t("item.log.tag_comment")}</span>' if a.get("kind") == "comment" else f' <span class="dim">{_t("item.log.tag_step_note")}</span>' if a.get("kind") == "step-reply" else "")))
@@ -2660,7 +2664,6 @@ class Board:
                   "emptynote": ("warn", "sent.emptynote"),      # Send note on a blank box (a decision form's blank Send is "empty": it asks for a note or an option)
                   "toolong": ("warn", "sent.toolong"),
                   "stale": ("warn", "sent.stale", "sent.stale_home"),
-                  "askedback": ("warn", "sent.askedback", "sent.askedback_home"),
                   "stalenote": ("ok", "sent.stalenote", "sent.stalenote_home"),
                   "closednote": ("ok", "sent.closednote"),
                   "closed": ("warn", "sent.closed"),
@@ -2708,7 +2711,7 @@ class Board:
                     f'<div class="abtns"><button type="submit" class="b main" name="act" value="comment">{_t("home.send")}</button></div>'
                     '<p class="isent warn aerr" role="alert" hidden></p></form>')
         call = "decision" in [x.lower() for x in needs_of(r)]          # the server takes a choice only then (`_answer` of service/answer.py)
-        opts = _card_order(options_of(r) or yesno_options(r), _named_only(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
+        opts = _card_order(_ww.options(open_ask(r), options_of(r) or yesno_options(r)), _named_only(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
         if opts:                  # the cards (_cards_html), an optional note and one Send, greyed by the page script (_CARDS_JS) until a card is picked or the note has text
             return (f'<form class="ianswer" data-cards method="post" action="{e(answer["action"])}"><b>{_t("answer.your_answer")}</b>'
                     f'<input type="hidden" name="token" value="{e(answer["token"])}">{_ref_field(r)}{_cards_html(opts, _named_only(r))}'
@@ -2860,7 +2863,7 @@ class Board:
             if x["status"] == "decided":
                 return (f'<li class="cl-decided"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">{_t("item.sr", word=_t("item.step.decided"))}</span><span class="cl-t">{self.md_line(x["text"], r["gid"])}</span>'
                         f'<span class="cl-by"><b>{_t("item.stamp.decided")}</b>{" · " + e(self.when(float(x["at"]))) if x.get("at") else ""}</span></div></li>')
-            nl = (_ip.next_lines(x["text"], "" if _steps.is_bare(x["text"]) else nmover) or [_ip.NextLine("", True)])[0]      # a bare bullet is a step of its own (nextlines) and reads as a sub-step: no mover put in front of it
+            nl = (_ip.next_lines(_ww.step(x["text"]), "" if _steps.is_bare(x["text"]) else nmover) or [_ip.NextLine("", True)])[0]      # a bare bullet is a step of its own (nextlines) and reads as a sub-step: no mover put in front of it
             st = x["status"]; fmt = self.cmd_step if st == _steps.OPEN else (lambda t_, g_, f_: f_(t_, g_))      # a command block (with Copy) only on a step still to do
             subs = "".join(f"<li class=\"icode\"><div class=\"md\">{self.md_html(s_, r['gid'])}</div></li>" if _ip.is_fence(s_) else f"<li>{fmt(s_, r['gid'], self.md_line)}</li>" for s_ in nl.subs)
             body = fmt(nl.text, r['gid'], self.md_line) if nl.text else ''
@@ -2893,15 +2896,17 @@ class Board:
             return f'<details class="fold{" " + cls if cls else ""}" data-fold="item.{sid}"{" open" if open_ else ""} id="{sid}"><summary><h2>{h2}</h2></summary>{body}</details>'
         ask = open_ask(r); pa = parse_ask(ask) if ask else None   # a completed item shows no ask; nor one whose decision left its needs
         # ---- the ask, the options, the answer box: while the owner moves it
-        if pa: ask_html = (f'<div class="iask"><b>{_t("item.ask")}</b><dl>' + "".join(f'<dt>{lb}</dt><dd>{L(pa[k_])}{mockup_link(r, ask) if k_ == "decide" else ""}</dd>' for lb, k_ in
+        waitq = _ww.question(ask) if ask else None      # the server's own wait question: the question and what it waits for, each on its line; its options are the cards, never part of the line
+        if waitq: ask_html = f'<div class="iask"><b>{_t("item.ask")}</b>' + "".join(f'<p>{L(x)}</p>' for x in waitq if x) + '</div>'
+        elif pa: ask_html = (f'<div class="iask"><b>{_t("item.ask")}</b><dl>' + "".join(f'<dt>{lb}</dt><dd>{L(pa[k_])}{mockup_link(r, ask) if k_ == "decide" else ""}</dd>' for lb, k_ in
                            ((_t("item.ask.decide"), "decide"), (_t("item.ask.recommend"), "recommend"), (_t("item.ask.stakes"), "stakes"), (_t("item.ask.by"), "by"))) + '</dl></div>')
         elif ask: ask_html = f'<div class="iask"><b>{_t("item.ask")}</b><p>{L(ask)}{mockup_link(r, ask)}</p></div>'   # present but misshaped (a hand edit): the raw line
         else: ask_html = ""
-        opts = open_options(r)                        # the options, one line each, the recommended one marked; only while his decision is open
+        opts = _ww.options(ask, open_options(r))      # the options, one line each, the recommended one marked; only while his decision is open
         ol = ""
         if opts:                                      # in the root UI the answer box's cards show each option with its whole text, so the Ask block lists them only when no box is drawn (below)
-            ol = ('<ol class="iopts">' + "".join(f'<li{" class=rec" if o["recommended"] else ""}><b>{e(_ol.listed(o["label"], i))}</b>'
-                                                  + (f' <span class="badge rec">{_t("home.recommended")}</span>' if o["recommended"] else "") + f'<span class="oline">{L(o["line"])}</span></li>'
+            ol = ('<ol class="iopts">' + "".join(f'<li{" class=rec" if o["recommended"] else ""}><b>{e(_ol.listed(o["shown"], i))}</b>'
+                                                  + (f' <span class="badge rec">{_t("home.recommended")}</span>' if o["recommended"] else "") + f'<span class="oline">{L(o["shown_line"])}</span></li>'
                                                   for i, o in enumerate(opts)) + '</ol>')
         asked = bool(ask_html) or bool(ol)            # the item asks something (an ask line or options), whether or not the options are listed in the Ask block
         # his answer is asked while the item is open and his: the model says he moves it, or its needs still hold his decision (old data, until the step 4 migration)
@@ -3628,8 +3633,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             except (TypeError, ValueError): ts = 0.0
             if a.get("step") and any(s["status"] == _steps.DONE and ts and abs(float(s.get("at") or 0) - ts) < 1 for s in steps): continue
             ch, ln, tx = (" ".join(str(a.get(k) or "").split()) for k in ("choice", "choice_line", "text"))
+            ask = str(a.get("ask") or "")
+            waited = bool(ch) and _ww.question(ask) is not None      # a pick on the server's own wait question reads in the reader's language
+            if waited: ch, ln = _ww.label(ask, ch), _ww.line(ask, ln)
             if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])
-            if ch: body = f"picked {ch}" + (f" ({ln})" if ln else "")
+            if ch: body = (_t("wait_ask.picked", choice=ch) if waited else f"picked {ch}") + (f" ({ln})" if ln else "")
             elif tx: body = tx if len(tx) <= 160 else tx[:159].rstrip() + "…"
             else: continue
             who = _members.recorded_by(a)      # the person who answered: the answer's `by`, else the first person
@@ -3850,16 +3858,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return self.your_step_html(r, home=True, member=member), form
     def home_ask(self, r, token=""):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none; `token` fills the form's token for a page drawn per signed-in viewer (the answer frame, ui/answer_frame.py), and is empty on the pages the script fills. The question is the ask's Decide part (a watcher's
-        relay or drop-it ask, which has no Recommend, Stakes or By, its whole question); the form is the item page's: a card per stored option (_cards_html; Approve and Decline
+        relay or stop-waiting ask, which has no Recommend, Stakes or By, its whole question); the form is the item page's: a card per stored option (_cards_html; Approve and Decline
         appear only as listed options; with none listed, Yes and No), the recommended one first, an optional note, one "Send" (greyed until a card is picked or the note has text). It is drawn hidden: the page script (_HOME_JS) asks GET /answer-tokens for the signed-in viewer's tokens and shows the form
         only when it gets one, so the static page carries no token; until then (and for a viewer who is not signed in) the row links the item page."""
         q = self.ask_question(r)
         if q is None: return None
-        return self.md_line(q, r["gid"]) + mockup_link(r, q), self.cards_form(r, token)       # the mockup a design decision is about, beside the question
+        return self.question_html(q, r["gid"]) + mockup_link(r, q), self.cards_form(r, token)       # the mockup a design decision is about, beside the question
     def cards_form(self, r, token=""):
         """The answer form of a row for an open decision (home_ask), and for a member's own question that stores options and no ask (home_row)."""
         stored = open_options(r)
-        opts = _card_order(stored or yesno_options(r), _named_only(r))      # with no stored options, Yes and No
+        opts = _card_order(_ww.options(open_ask(r), stored or yesno_options(r)), _named_only(r))      # with no stored options, Yes and No
         cards = _cards_html(opts, _named_only(r)) if opts else ""
         hint = esc(_t("home.note_optional" if cards else "home.write_answer"))
         send = (f'<button type="submit" class="b main" name="act" value="answer" disabled>{esc(_t("home.send"))}</button>' + (f'<span class="ahint" hidden>{esc(_t("home.pick_hint"))}</span>' if cards else ""))
@@ -3871,6 +3879,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The question of an open decision as a row words it (home_ask), None when the item carries none."""
         ask = open_ask(r)      # "" unless the item is open and needs a decision
         return decide_words(ask) if ask else None
+    def question_html(self, q, gid):
+        """A row's question (ask_question) as HTML; the server's own wait question in the reader's language, with what it waits for on a line of its own (wait_words)."""
+        return "<br>".join(self.md_line(x, gid) for x in (_ww.question(q) or (q,)) if x)
     def home_wait(self, r, mod):
         """A waiting row's detail line, as HTML: what it waits on and until when, in the words the row leads with: "Until Sun Mar 1st 07:00: <why>" for a time (his words or the basis, or
         the proof of a verifying item), "After #5, #6" for another item's close (with its backstop day), "On <anchor>: <event>" for an anchor, "On <event> · backstop <day>" for an outside event, "On <party's news>, ask by <day>" for news only the owner
@@ -4044,7 +4055,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         actions = ""
         if theirs:
             q = self.ask_question(r)
-            detail = f'<span class="hnext hq">{self.md_line(q, gid)}{mockup_link(r, q)}</span>' if q is not None else f'<span class="hnext">{nxt}</span>'
+            detail = f'<span class="hnext hq">{self.question_html(q, gid)}{mockup_link(r, q)}</span>' if q is not None else f'<span class="hnext">{nxt}</span>'
         elif which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
         elif pick:
