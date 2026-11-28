@@ -4,7 +4,8 @@ the agent-state snapshot, tests/agent_state_scenario.py); the sender of that sna
 
   1  the public interface the sender imports: `running(session, roots, now)`, a numeric `RUNNING_S`, and the helpers `running` uses (`pending_tasks`, `read_parent`, `resumes`, `interrupted`, `Unreadable`)
   2  the reader of a session's transcript: running within 90 minutes, quiet to 6 hours, dropped past the cap, clock skew, what each unreadable thing reads as (unknown), a first line nested too deep, the pure tie
-  3  a subagent flagged finished that is only parked or resumed still runs: parked on a background Bash or a Monitor of its own, an end notice that only the session's transcript holds, a start that is only quoted, a Monitor's
+  3  a subagent flagged finished that is only parked or resumed still runs: parked on a background Bash or a Monitor of its own, an end notice that only the session's transcript holds, a start that is only quoted, a start named by
+     the record beside a command's result (its output first, the sentence after it), a Monitor's
      lifetime, one with no flag whose last row is an interruption (dead unless resumed), a resume that is only quoted, the tail limits, the values of the windows pinned
 
     tests/run-suite subagent_tie       -> exit 0 / 1"""
@@ -273,6 +274,40 @@ saved_tt = TIE.TASK_TAIL_BYTES; fin("tb1", [BGR("tb0001"), {"type": "assistant",
 try: tb_cut = "tb1" in run3()
 finally: TIE.TASK_TAIL_BYTES = saved_tt
 check("25 …only the last TASK_TAIL_BYTES of the subagent's transcript are read: a start further back is not seen", tb_all and not tb_cut, (tb_all, tb_cut))
+
+# 2b. the record beside a command's result: what a command printed comes before the sentence, and the row carries the task's id (`toolUseResult.backgroundTaskId`)
+def CMD(text, tid=None, **extra): return {**_res(text), "toolUseResult": {"stdout": "step 1", "stderr": "", "interrupted": False, **({} if tid is None else {"backgroundTaskId": tid}), **extra}}
+CAP = lambda tid: f"Command was moved to the background (ID: {tid}) after running for 180s. Output is being written to: /x/{tid}.output."
+LATE = lambda tid: f"Command did not complete within its 120s timeout and was moved to the background (ID: {tid}). Output is being written to: /x/{tid}.output."
+MSG = lambda tid: f"Command was moved to the background (ID: {tid}) so that a message that arrived while it was running can reach you; it was not interrupted. Output is being written to: /x/{tid}.output."
+HAND = lambda tid: f"Command was manually backgrounded by user with ID: {tid}. Output is being written to: /x/{tid}.output."
+wipe3(); parent(ASSIST)
+fin("r1", [CMD("step 1\n" + CAP("rc0001"), "rc0001", subagentCapApplied=True)])
+fin("r2", [CMD("step 1\nstep 2\n" + LATE("rc0002"), "rc0002", timedOutAfterMs=120000)])
+fin("r3", [CMD("step 1\n" + MSG("rc0003"), "rc0003", backgroundedToDeliverMessage=True)])
+fin("r4", [CMD("step 1\n" + HAND("rc0004"), "rc0004", backgroundedByUser=True)])
+fin("r5", [CMD("a notice in words this module does not know", "rc0005")])
+fin("h1", [_res(HAND("rc0006"))])                                                                           # no record beside it: the sentence says it
+fin("h2", [{**MON("rc0007"), "toolUseResult": {"taskId": "rc0007", "timeoutMs": 1800000, "persistent": False}}])      # a Monitor's record is no command's: its text is read
+got = run3()
+check("25 a command's record that names a background task starts it, wherever the sentence stands in the result (after what the command printed, in any wording)",
+      {"r1", "r2", "r3", "r4", "r5"} <= set(got) and [TIE.pending_tasks(sub3 / f"agent-r{i}.jsonl") for i in range(1, 6)] == [{f"rc000{i}"} for i in range(1, 6)], sorted(got))
+check("25 …a command moved to the background by hand is read from its sentence too, and a Monitor whose row carries its own record still starts", {"h1", "h2"} <= set(got), sorted(got))
+wipe3(); parent(ASSIST)
+fin("w1", [CMD(CAP("wq0001"))])                                                                             # a `cat` of a log: the result opens with the sentence, the command's record names no task
+fin("w2", [CMD(HAND("wq0002") + "\n3 lines")])
+fin("w3", [CMD("step 1\n" + CAP("wq0003"))])
+fin("w4", [CMD(CAP("wq0004"), None, backgroundTaskId="")]); fin("w5", [CMD(CAP("wq0005"), None, backgroundTaskId=None)]); fin("w6", [CMD(CAP("wq0006"), None, backgroundTaskId=["wq0006"])])
+fin("w7", [{"type": "assistant", "message": {"role": "assistant", "content": "x"}, "toolUseResult": {"stdout": "", "backgroundTaskId": "wq0007"}}])
+fin("w8", [{"type": "api-request-blob", **{k: v for k, v in CMD("x", "wq0008").items() if k != "type"}}])
+got = run3()
+check("25 …a command that only quotes such a sentence (its record names no task, wherever the sentence stands), a task id that is no text, and a record on a row that is no tool result start nothing", not got, sorted(got))
+wipe3()
+fin("e1", [CMD("step 1\n" + CAP("rc0101"), "rc0101"), NOTE("rc0101")]); fin("e2", [CMD("step 1\n" + CAP("rc0102"), "rc0102"), STOP("rc0102")]); fin("e3", [CMD("step 1\n" + CAP("rc0103"), "rc0103")])
+fin("e4", [CMD("step 1\n" + CAP("rc0104"), "rc0104"), CMD("step 1\n" + CAP("rc0104"))])                     # a later command that prints the sentence again does not start it twice or end it
+parent(ASSIST, PQ("rc0103"))                                                   # e3: the notice only the session was handed
+got = run3()
+check("25 …a task found by the record ends as any other: its notice in the subagent's or the session's transcript, or a TaskStop", set(got) == {"e4"}, sorted(got))
 
 # 3. a Monitor's lifetime
 wipe3(); parent(ASSIST)
