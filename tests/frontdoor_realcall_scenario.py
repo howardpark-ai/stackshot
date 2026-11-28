@@ -247,6 +247,10 @@ try:
     splitters.append(StandIn(lport, bport, dport, sport)); splitters.append(StandIn(loff_port, bport, dport, soff_port))
     if fails: raise SystemExit
 
+    # a start says where its time went: one line before the app serves
+    m = re.search(r"(?m)^start timing: (\d+\.\d) s before serving: (.+)$", board.err.read_text(errors="replace"))
+    check("the board's start prints one timing line with its total and its laps", m is not None and float(m.group(1)) > 0, board.tail())
+
     # ------------------------------------------------------------ each part by address
     rc, out = run("--door", D)
     check("--door: a tool call on the board passes", rc == 0 and "ok: front door: tool call sessions answered on board main" in out and last(out) == "front door check: passed (front door)", (rc, out))

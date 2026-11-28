@@ -28,10 +28,31 @@ import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 _EARLY_HUP: list[int] = []
+
+# Where a start spends its time. A restart answers nothing from the moment the old server stops listening until the app serves, and the journal
+# shows only the lines the passes print. `_lap(name)` notes the seconds since the last lap; `_start_report()` prints them as ONE line once the
+# passes are done (the laps over 0.2 s by name, the rest summed), so the next restart's gap can be read from the journal.
+_T0 = time.monotonic()                  # this module's first line: what ran before it (the interpreter, `uv run`) is not in the report
+_LAPS: list[tuple[str, float]] = []
+_LAST = [_T0]
+
+
+def _lap(name: str) -> None:
+    now = time.monotonic()
+    _LAPS.append((name, now - _LAST[0]))
+    _LAST[0] = now
+
+
+def _start_report() -> str:
+    """The one line: total seconds from this module's start, the laps of 0.2 s or more by name, the shorter ones as one sum."""
+    big = [f"{n} {d:.1f}" for n, d in _LAPS if d >= 0.2]
+    small = sum(d for _, d in _LAPS if d < 0.2)
+    return f"start timing: {time.monotonic() - _T0:.1f} s before serving: " + ", ".join(big + ([f"others {small:.1f}"] if small else []))
 if __name__ == "__main__":      # a reload signal before the loop's handler is up (the imports below take seconds) is kept, never fatal
     signal.signal(signal.SIGHUP, lambda *_: _EARLY_HUP.append(1))
 
@@ -123,9 +144,11 @@ _wiring.install_early(sys.modules[__name__])   # the hook tables of the write pa
 
 # ----------------------------------------------------------------------------- MCP surface
 # The FastMCP instance, its middleware, the tools and the routes are web/app.py's `build`, called from web/wiring.py, which hands it the callables they take (late-bound, so a suite that replaces one on its owner still reaches it).
+_lap("imports")
 mcp = _wiring.build()   # the FastMCP instance, its middleware, the tools and the routes (web/app.py, built in web/wiring.py)
 
 
+_lap("app build")
 _wiring.install_late()   # the hand-off clock's name and the hook tables of the service areas (web/wiring.py), after the build, as they were installed before
 
 
@@ -204,17 +227,21 @@ def _start_background() -> list[str]:
         print(_wc.record(_paths.ROOT / "tests" / "tool_text.snapshot.json"), file=sys.stderr, flush=True)     # a start is a release; a change in the tools' text since the last one becomes the brief's what-changed line
     except Exception as e:
         print(f"what changed: not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    _lap("tools text record")
     try:
         _prj.stamp_registry()               # phase A: the one-time backfill, every page of the registry carries its project id from the first second (minted once, never changed)
     except Exception as e:
         print(f"project ids: {e}", file=sys.stderr, flush=True)
+    _lap("project ids")
     _roles_sync_safe()                      # roles.json is current from the first second, before any publish (and projects.json beside it)
+    _lap("roles.json and projects.json")
     _stallsvc.stall_pause_reload()
     _stallsvc.stall_pause_check()                    # a pause of the stall pass read at the start begins its clock now (or keeps the one in <state>/stall_pause.json) and logs its end time
     for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
         print(f"config: {_n}", file=sys.stderr, flush=True)
     _wait_fixes._wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     _gates.post_wake_alias_check()                      # one warning when [model] post_wake_alias_until is missing: the code's default end of the alias window stands
+    _lap("config notes")
     try:
         if _migrations.migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
             _pubmod._publish()
@@ -245,6 +272,7 @@ def _start_background() -> list[str]:
             _pubmod._publish()
     except Exception as e:
         print(f"mover backfill pass failed: {e}", file=sys.stderr, flush=True)
+    _lap("migrations")
     try:
         if _handoff.handoff_repair_pass():          # an open hand-off record that names someone but the item's mover is ended into its history; idempotent, and before the wake pass and any thread
             _pubmod._publish()
@@ -260,6 +288,7 @@ def _start_background() -> list[str]:
             _pubmod._publish()
     except Exception as e:
         print(f"nested steps pass failed: {e}", file=sys.stderr, flush=True)
+    _lap("hand-off repair, close marks, nested steps")
     try:
         if _wakes.wake_pass():                    # items whose wake passed while the server was down are open before the first publish
             _pubmod._publish()
@@ -269,6 +298,7 @@ def _start_background() -> list[str]:
         _stamp_svc._phase_tick()            # a stored phase the down time left behind (a wait that ended, a deploy that changed the reading) is true before the first publish; the runner's first sweep is a minute away
     except Exception as e:
         print(f"phase sweep failed: {e}", file=sys.stderr, flush=True)
+    _lap("wake and phase passes")
     _runner.record_server_start()           # this run's start in the state dir, for a runner that restarts alone (service/fleet_events.py flag_start)
     started = _runner.start()               # the minute set's runner, the timer publish and the runner's watchdog (service/runner.py)
     threading.Thread(target=_router_live.loop, daemon=True).start()   # the router's ticks (a call takes minutes), in a thread of their own
@@ -279,11 +309,13 @@ def _start_background() -> list[str]:
     threading.Thread(target=_search.loop, daemon=True).start()      # step 3: the search index's first build and its passes after a save, in a thread of its own
     threading.Thread(target=_gh.worker_loop, daemon=True).start()   # the GitHub mirror's worker; it idles while [github] sync is off (the default), so a reload can turn the mirror on
     threading.Thread(target=_gh.comments_loop, daemon=True).start() # phase 3: the reader of the owner's comments on the issues, beside the worker; idles the same way
+    _lap("threads")
     return [*started, "router", "search", "ghsync-worker", "ghsync-comments"]
 
 
 if __name__ == "__main__":
     _pubmod.serving()                   # this process is the server: its publishes ask nothing about the host (web/publish.py)
     _start_background()
+    print(_start_report(), file=sys.stderr, flush=True)
     import anyio
     anyio.run(_serve)                   # = mcp.run(transport="http", …), plus the SIGHUP handler on its loop
