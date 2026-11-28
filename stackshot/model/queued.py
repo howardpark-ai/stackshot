@@ -97,9 +97,10 @@ def reason(behind: str, shown: Callable[[str], str] = str) -> str:
     return f"queued behind {shown(behind)}"
 
 
-def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]], "_model.Model"], now: float, is_front: Callable[[str, str], bool] | None = None) -> dict[str, str]:
+def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]], "_model.Model"], now: float, is_front: Callable[[str, str], bool] | None = None, *, name_of: Callable[[str], str]) -> dict[str, str]:
     """The queue over the board's open rows (each a dict with `gid`, `metadata`, `last_activity` in its metadata) as the page reads them: `base(row)` is the reading before this rule. {} when the rule is off.
-    The candidates are the rows `base` reads alive with a session as the mover, the very rows the home page puts under On agent. `is_front(mover, project)` says who is a front agent (the caller's: the model reads no role map)."""
+    The candidates are the rows `base` reads alive with a session as the mover, the very rows the home page puts under On agent. `is_front(mover, project)` says who is a front agent (the caller's: the model reads no role map).
+    `name_of(mover)` is the session's name for a stored reference (the caller's too: the model reads no registry). An item stores its mover as a name or as the permanent session id, so the rows are grouped, and the front test asked, by that name."""
     if not enabled():
         return {}
     cands = []
@@ -111,5 +112,5 @@ def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]],
         except Exception:  # noqa: BLE001  (an item that cannot be read is no candidate)
             continue
         if mod.state == _model.ALIVE and mod.mover and not _model.is_owner(mod.mover):
-            cands.append(candidate(str(r.get("gid") or ""), r, mod.mover, now))
+            cands.append(candidate(str(r.get("gid") or ""), r, name_of(mod.mover), now))
     return queue(cands, now, is_front)
