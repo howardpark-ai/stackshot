@@ -945,6 +945,7 @@ def update_unlocked(
     finishing = bool(sender.strip()) and set(given) <= {"work", "said"} and h.finishes_own_line(work, meta, _session_label(h.session_id(sender.strip())), str(item.get("status") or "") == "open")
     plain = not (needs_set or clear_needs or agent.strip() or hold or clear_hold or wake or clear_wake or recycle or clear_recycle or filing_only or finishing)
     pre_named = _needs_of(meta)
+    needs_unnamed = ("needs" in meta, json.loads(json.dumps(meta.get("needs"))), before.get("needs"))      # needs as stored, and the notice baseline: what a naming taken back below restores, in its stored order
     name_commit = h.name_on_write(gid, item, meta, sender, str(item.get("status") or ""), was_needs, status == "completed", plain)      # carried into meta now, stored just before the write's own save
     naming_added = [s for s in _needs_of(meta) if s not in pre_named]       # the sessions the server itself named (the writer, a background agent): not a change the writer made
     before["needs"] = _needs_list(before.get("needs")) + naming_added   # the server's own naming of the writer is no change of the writer's to tell the mover of
@@ -1634,7 +1635,24 @@ def update_unlocked(
         _hs.route_replaced(meta, str(meta.get("owner") or ""), state_given.get("step") or "", str((item_was.get("metadata") or {}).get("step") or ""))      # before the save drops lines: a step a session replaced or withdrew is not one a wait dropped
     desc_note = ""
     mover_named = "mover" in model_set or "mover" in model_drop or filing_only or _writes.reformat()      # a write that names the mover, or only files (rename, priority, re-bullet): the server flips nothing for it
+    unnamed: list[str] = []      # the server's naming of the writer, taken back below: the step hand-over of this write still judges with it
     if item.get("status") == "open":      # the state checks, on the item as this write leaves it (they refuse, or mark, before anything is saved)
+        as_set = lambda xs: {x.lower() if x.lower() in _NEEDS_KINDS else x for x in xs}      # noqa: E731  — needs compared as stored names and kinds, whatever the order
+        if naming_added and not needs_replaced and as_set(x for x in _needs_of(meta) if x not in naming_added) == as_set(pre_named) and _sc.owner_facing(item_was):
+            # On the owner's move a background agent's plain edit names nobody: in needs beside his decision or his move the agent would read as the one to take
+            # the item at his answer (the default `then` is the first session in needs), a pair a writer is refused for sending. The naming stays in meta up
+            # to here, so the writer gate accepts the agent's work=; it is taken back when the item stays his after the mover step (tried on a copy, before
+            # the steps below read needs), with no save, notice or reply line. A write that takes the item off his move keeps the naming, as on any item.
+            mover_trial = json.loads(json.dumps(meta))
+            h.owner_state_mover({**item, "metadata": mover_trial}, mover_trial, mover_named, item_was)
+            if _sc.owner_facing({**item, "metadata": mover_trial}):
+                had_needs, needs_stored, told_base = needs_unnamed
+                if had_needs:
+                    meta["needs"] = needs_stored
+                else:
+                    meta.pop("needs", None)
+                before["needs"] = told_base
+                unnamed, naming_added, name_commit = naming_added, [], lambda: ""
         item_now = {**item, "metadata": meta}
         if done_ix and steps_on and _model.stood_his(item_now, lambda i_: h.after_open(i_.get("metadata") or {})):      # N4: while the item, as this write leaves it, waits on him, only his answer ticks his step (a call that also ends what asks him is no refusal: it withdraws the ask and the step goes with it)
             _why = _hs.refuse_done(steps_old, done_ix, _hs.recorded(item_was.get("metadata") or {}), h.owner_want(meta), item_was.get("metadata") or {})
@@ -1837,7 +1855,7 @@ def update_unlocked(
     told += chg
     told += _telling.handoff_notify(gid, item)     # step 2: the new mover of a hand-off this write recorded is told, unless a notice above did
     if done_ix and steps_new is not None and item.get("status") == "open" and not (closing or reopening or needs_set or agent.strip() or "mover" in model_set or "mover" in model_drop):
-        told += _handover_by_hand(gid, [_steps.first_line(steps_new[i]["text"]) for i in done_ix])      # a step marked done by hand: the session the next step names is handed the item, as a ticked step does
+        told += _handover_by_hand(gid, [_steps.first_line(steps_new[i]["text"]) for i in done_ix], unnamed)      # a step marked done by hand: the session the next step names is handed the item, as a ticked step does
         item = {**_load(gid), "gid": gid}
     try:
         stale_wait = _stale_wait_notes(item_was, item, keeper_was)      # a wait cleared while an open next line still defers on it: named, so the writer rewords the line now
@@ -1878,11 +1896,12 @@ def update_unlocked(
 _UPDATE_PARAMS = frozenset(inspect.signature(update_unlocked).parameters)      # the arguments of the write (close_extra_args reads these, never another local)
 
 
-def _handover_by_hand(gid: str, done: list[str]) -> str:
-    """The reply line of an update that marked steps done: proofs.handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this."""
+def _handover_by_hand(gid: str, done: list[str], unnamed: list[str] | None = None) -> str:
+    """The reply line of an update that marked steps done: proofs.handover for the item, a failure a stderr line and no line. A write that names the mover or needs itself makes its own hand-off and never reaches this.
+    `unnamed`: the writer's naming this write took back (the item stays on the owner's move): the hand-over's holder and skip rule read needs with it, so the item ends where it would with the agent named."""
     h = _hooks()
     try:
-        ho = _proofs.handover(gid, time.time(), done)
+        ho = _proofs.handover(gid, time.time(), done, unnamed=unnamed or ())
     except Exception as e:  # noqa: BLE001  — the write is saved: a hand-over that fails is a stderr line, and the audit finds the next session unreached
         print(f"handover: {gid} not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""

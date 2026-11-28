@@ -347,6 +347,47 @@ check("peer: with the project read failing a background agent is still a session
       kinds == (HO.SESSION, HO.FRONT) and r76["action"] == "moved" and mover_of(76) == "home-two", (kinds, r76))
 check("peer: a peer that is down is a fallback like any session: the item stays, the record says so", r["action"] == "fallback" and mover_of(75) == "home-bfront" and rd(75)["metadata"].get("handover", {}).get("kind") == HO.FALLBACK, r)
 
+# ---- 9c. the owner's move: a background agent's plain edit (home-two, not the builder) names nobody, and no later step tick, answer or hand-over gives it the item because of the edit
+from stackshot.service import answer as _answer_svc
+from stackshot.model import step_commands as _sc
+fixtures()
+YESNO = "Decide: whether to go ahead · Recommend: go · Stakes: a day either way · By: no date"
+LATER = time.strftime("%Y-%m-%d", time.localtime(now + 10 * 86400))
+RELAY = dict(needs=["external"], wait_kind="relay", wait_event="the signed form from the bank", until=LATER)
+REWORD = "- A thing. It lives here, said again. Done when done."
+def where(i): m = rd(i)["metadata"]; return (m.get("mover"), m.get("then"), m.get("needs"), mover_of(i), (m.get("handover") or {}).get("to"))
+def told_yours(i, who="home-two"): return [p for p in pushes_for(f"a{i}", who) if "is yours" in p[1]]
+for i in (80, 81):      # waiting on his decision; 81 is the twin no agent writes to
+    item(i, "home-two: build it\nhome-one: ship it", mover=OWNER, needs=["decision"], ask=YESNO)
+for i in (82, 83, 84, 85):      # a relay wait he moves: home-two's two steps, then the builder's
+    item(i, "home-two: build it\nhome-two: test it\nhome-one: ship it", mover=OWNER, **RELAY)
+item(88, "home-two: build it\nhome-one: ship it", mover=OWNER, then="home-two")      # his move with home-two as its then: home-two holds it
+check("owner's move: the fixtures are his to move (stored mover the owner), the relay ones waiting", all(_sc.owner_facing(rd(i)) for i in (80, 81, 82, 83, 84, 85, 88)) and rd(82)["metadata"]["wait_kind"] == "relay", [i for i in (80, 81, 82, 83, 84, 85, 88) if not _sc.owner_facing(rd(i))])
+out80 = _update_svc._update("a80", sender="home-two", description=REWORD)
+check("owner's move: home-two's reword of an item waiting on his decision is stored and names nobody: needs stay the decision, no then, no naming line",
+      rd(80)["description"] == REWORD and rd(80)["metadata"].get("needs") == ["decision"] and not rd(80)["metadata"].get("then") and "(named" not in out80, (rd(80)["metadata"].get("needs"), rd(80)["metadata"].get("then"), out80))
+for i in (80, 81):
+    _answer_svc._answer(f"a{i}", "Yes", "", "")
+check("…and after his Yes the item stands where it stands on the twin no agent wrote to, not with home-two", where(80)[:4] == where(81)[:4] and where(80)[3] != "home-two" and not told_yours(80), (where(80), where(81)))
+p82 = len(told_yours(82))
+out82 = _update_svc._update("a82", sender="home-two", done=[1])
+check("owner's move: home-two's tick of its own step on a relay wait he moves is stored, keeps him the stored mover, names nobody, hands nothing over",
+      [s["status"] for s in rd(82)["metadata"]["steps"]] == ["done", "open", "open"] and rd(82)["metadata"].get("mover") == OWNER and rd(82)["metadata"].get("needs") == ["external"]
+      and "handover" not in rd(82)["metadata"] and len(told_yours(82)) == p82 and "(named" not in out82 and "is handed to" not in out82, (where(82), out82))
+_update_svc._update("a83", sender="home-two", description=REWORD)
+out83 = _update_svc._update("a83", sender="home-two", done=[1])
+check("owner's move: a reword, then the tick, by home-two: the same as the tick alone (him the stored mover, needs as they were, nothing handed over)",
+      rd(83)["metadata"].get("mover") == OWNER and rd(83)["metadata"].get("needs") == ["external"] and "handover" not in rd(83)["metadata"] and not told_yours(83) and "is handed to" not in out83, (where(83), out83))
+_update_svc._update("a84", sender="home-two", description=REWORD)
+for i in (84, 85):      # step 1 ticked by the server (as a proof ticks it), after home-two's reword on 84 alone
+    it = rd(i); it["metadata"]["steps"] = [{"text": t, "status": "done" if k == 0 else "open", "by": _core_instance.NAME if k == 0 else "", "at": now - 60 if k == 0 else 0} for k, t in enumerate(it["metadata"]["next"].split("\n"))]
+    (T / f"store/a/{i}.json").write_text(json.dumps(it))
+    proofs_svc.handover(f"a{i}", time.time(), ["home-two: build it"])
+check("owner's move: a reword by home-two, then a step tick by the server: the item ends as its twin does (the next step's session takes it)", where(84) == where(85) and where(85)[3] == "home-two", (where(84), where(85)))
+out88 = _update_svc._update("a88", sender="home-two", done=[1])
+check("owner's move: home-two holding the item as its then: its tick still hands the item to the builder named on the next step, as before",
+      rd(88)["metadata"].get("mover") == "home-one" and mover_of(88) == "home-one" and "home-two" not in (rd(88)["metadata"].get("needs") or []) and "is handed to home-one" in out88, (where(88), out88))
+
 # ---- 10. the audit: a missing proof; the page key for a front mover; a repeat only after an item write
 fixtures()
 item(30, "home-one: merge PR #24 and restart the unit\nhome-two: verify the pages")
