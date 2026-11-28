@@ -636,6 +636,7 @@ CATALOG: dict[str, str] = {
     "item.ask.stakes": "Stakes",
     "item.ask.by": "By",
     "item.your_step": "Your step",
+    "item.step_howto": "How to ({n})",
     "item.page_missing": "page missing",
     "item.no_project": "no project",
     "item.gbrain_page": "gbrain page ↗",

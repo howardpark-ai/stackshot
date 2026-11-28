@@ -671,7 +671,7 @@ def _ipx_pat(v):
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
 IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.queued", "wait.what.news_from", "wait.what.outside_news",
-              "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
+              "item.step_howto", "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
               "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more", "wait.what.list", "wait.list.arrived", "wait.list.row_head"}
 check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
@@ -799,7 +799,9 @@ with i18n.use("ko"):
     del bdx.scoped_urls
     d_sent = {k_: bdx.sent_msg(k_) for k_ in bdx._SENT}; d_home = json.loads(html.unescape(re.search(r'data-notes="([^"]*)"', bdx.sent_notes_html()).group(1)))
     d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"), bdx.sent_msg("donenote", "alpha-main"))
+    d_howto = bdx.step_howto_html({"gid": "a1", "description": "- Open the portal\n- Click Export", "metadata": {"step": "Do the export"}})
 _d0, _d3, _d5 = bdx.now.date(), bdx.now.date() - DT(days=3), bdx.now.date() + DT(days=5)
+check("step_howto_html in the test locale: the fold's summary reads from the table with the count, closed", d_howto.startswith('<details class="istephowto"><summary>' + _m("item.step_howto", n=2) + "</summary>") and "open" not in d_howto.split(">", 1)[0], d_howto)
 check("due_badge in the test locale: today, overdue and ahead each read from their own template, the weekday from the table; no date, no badge",
       d_due == [r2.badge(_m("item.due_today", n=0, md=_wd(_d0)), "due"), r2.badge(_m("item.due_overdue", n=3, md=_wd(_d3)), "due"), r2.badge(_m("item.due_in", n=5, md=_wd(_d5)), "due"), ""], d_due)
 check("mover_row in the test locale: a cloud session names 'cloud' and an item under no session says 'no agent', each from the table",
