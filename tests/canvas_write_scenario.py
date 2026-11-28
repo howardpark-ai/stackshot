@@ -212,6 +212,11 @@ r_u["versions"] = [{k: v for k, v in x.items() if k not in ("title", "item")} fo
 (STORE / str(n_u) / "canvas.json").write_text(json.dumps(r_u))
 call(action="undo", number=n_u)
 check("undo: a version with no item saved takes the item its page's link names and keeps the title", rec(n_u)["item"] == "g11" and rec(n_u)["title"] == "New title", rec(n_u))
+r_u = rec(n_u)
+r_u["versions"] = [{**x, "item": None} for x in r_u["versions"]]
+(STORE / str(n_u) / "canvas.json").write_text(json.dumps(r_u))
+call(action="undo", number=n_u)
+check("undo: a version saved with no item (null) gives the record no item", rec(n_u)["item"] is None, rec(n_u))
 (STORE / "2" / "canvas.json").write_text("{nope")
 refused("undo: an unreadable record is refused and left alone", ("not a canvas record",), action="update", number=2, page=page())
 (STORE / "2" / "canvas.json").unlink()

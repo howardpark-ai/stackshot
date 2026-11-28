@@ -223,7 +223,7 @@ def undo(number: Any, session: str = "") -> tuple[int, str, list[str]]:
             rec["versions"].append({"id": vid, **old, "title": rec["title"], "item": rec["item"]})
         # the record's title and item go back with the page: the ones saved with the version, else the item the page's own link names
         rec["title"] = back["title"] if isinstance(back.get("title"), str) else rec["title"]
-        rec["item"] = back["item"] if isinstance(back.get("item"), str) else _item_of(data, rec["item"])
+        rec["item"] = back["item"] if "item" in back and (back["item"] is None or isinstance(back["item"], str)) else _item_of(data, rec["item"])
         rec["current"] = _entry(data, when, who or str(back.get("session") or ""))
         _save(rec, data)
     print(f"canvas {number}: restored {back['id']} by {who or 'a session'}", flush=True)

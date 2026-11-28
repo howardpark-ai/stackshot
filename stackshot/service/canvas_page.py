@@ -36,10 +36,12 @@ def _item_of(href: str, board: str) -> int | None:
 
 _NOT_SHOWN = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.I)
 _INERT = frozenset(("title", "textarea", "noscript", "template", "select", "option"))
+_HEAD_TAGS = frozenset(("html", "head", "title", "meta", "link", "base", "style", "script", "noscript", "template"))     # what may stand in a head: any other tag starts the body
+_VOID = frozenset(("area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"))
 
 
 class _Anchors(HTMLParser):
-    """The item numbers of the board's links a reader can click: an `a` element with an href, in the body, not hidden, not inside a title, textarea, noscript or template."""
+    """The item numbers of the board's links a reader can click: an `a` element with an href, in the body, not hidden (nor inside a hidden element), not inside a title, textarea, noscript or template."""
 
     def __init__(self, board: str) -> None:
         super().__init__(convert_charrefs=True)
@@ -47,24 +49,23 @@ class _Anchors(HTMLParser):
         self.found: list[int] = []
         self.inert = 0
         self.head = False
-        self.hidden = 0
-        self._open: list[bool] = []          # per open `a`: whether it is hidden
+        self._shut: list[list] = []          # the hidden elements still open, innermost last, as [tag, depth of that tag inside it]
 
     def handle_starttag(self, tag, attrs):
         d = {k: (v or "") for k, v in attrs}
         if tag == "head":
             self.head = True
-        elif tag == "body":
+        elif tag == "body" or (self.head and not self.inert and tag not in _HEAD_TAGS):      # a head never closed ends at the first tag that cannot be in it
             self.head = False
         if tag in _INERT:
             self.inert += 1
+        if self._shut and self._shut[-1][0] == tag:
+            self._shut[-1][1] += 1
+        elif tag not in _VOID and ("hidden" in d or _NOT_SHOWN.search(d.get("style", ""))):
+            self._shut.append([tag, 1])
         if tag == "a":
-            hid = "hidden" in d or bool(_NOT_SHOWN.search(d.get("style", "")))
-            self._open.append(hid)
-            if hid:
-                self.hidden += 1
             n = _item_of(d["href"], self.board) if "href" in d else None
-            if n is not None and not self.head and not self.inert and not self.hidden:
+            if n is not None and not self.head and not self.inert and not self._shut:
                 self.found.append(n)
 
     def handle_endtag(self, tag):
@@ -72,8 +73,10 @@ class _Anchors(HTMLParser):
             self.head = False
         if tag in _INERT and self.inert:
             self.inert -= 1
-        if tag == "a" and self._open and self._open.pop():
-            self.hidden -= 1
+        if self._shut and self._shut[-1][0] == tag:
+            self._shut[-1][1] -= 1
+            if not self._shut[-1][1]:
+                self._shut.pop()
 
 
 def item_link(page: str, board: str) -> int | None:
@@ -325,7 +328,7 @@ class _Facts(HTMLParser):
         if "data-tip" in names:
             self.tip = True
         if tag in ("html", "body"):
-            self.body_style += ";" + dict(attrs).get("style", "")
+            self.body_style += ";" + (dict(attrs).get("style") or "")
         if tag in ("head", "html") and tag not in self.after:
             line, col = self._at()
             self.after[tag] = (line, col + len(self.get_starttag_text() or ""))

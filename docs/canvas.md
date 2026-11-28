@@ -50,7 +50,7 @@ One MCP tool, `canvas`, with `action` = `add | update | history | undo | list`. 
 |---|---|---|
 | `add` (`page`, `title`) | saves the page under the next number (after the counter and after the highest folder) | the address on the first line, `result: added`, a `notice:` line for each thing worth fixing |
 | `update` (`number`, `page`, `title`) | a revision: the page replaces the current one, and the page it replaces is kept as a version whose id is the time of the replacement (always newer than the newest id); the same page again changes nothing; an unknown number is refused | the address, `result: replaced` or `result: unchanged`, the notices |
-| `undo` (`number`) | the newest version is the page again, with the title and item it had, and the page it replaces is kept as a version with its own, so a second undo goes back | the address, `result: restored <id>` |
+| `undo` (`number`) | the newest version is the page again, with the title and item it had (a record saved before titles were kept keeps the current title), and the page it replaces is kept as a version with its own, so a second undo goes back | the address, `result: restored <id>` |
 | `history` (`number`) | the versions, newest first: id, size, who wrote it | one line each, or `canvas N has no earlier version` |
 | `list` | the canvases that have a page: number, size, age, address, title | one line each, or `no canvases` |
 
