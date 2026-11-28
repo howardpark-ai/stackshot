@@ -19,6 +19,8 @@ from starlette.responses import PlainTextResponse
 
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
+from stackshot.core import frontdoor_identity as _ident
+from stackshot.core import invites as _invites
 from stackshot.core import members as _members
 from stackshot.web import render as _rmod
 from stackshot.core.instance import NAME
@@ -96,7 +98,8 @@ def _ui_session(request: Request) -> dict[str, Any]:
     if not isinstance(d, dict):
         return {}
     email = str(d.get("email") or "")
-    return d if _members.person_of_email(email) and float(d.get("exp") or 0) > _ui_now() else {}
+    good = _members.person_of_email(email) and float(d.get("exp") or 0) > _ui_now() and _invites.session_holds(email, str(d.get("sub") or ""))
+    return d if good else {}
 
 
 def _ui_email(request: Request) -> str:
@@ -104,10 +107,10 @@ def _ui_email(request: Request) -> str:
     return str(_ui_session(request).get("email") or "")
 
 
-def _ui_set_session(resp, email: str) -> None:
-    """Put the board's session cookie on a response: signed, for [auth] ui_session_days from now."""
+def _ui_set_session(resp, email: str, sub: str = "") -> None:
+    """Put the board's session cookie on a response: signed, for [auth] ui_session_days from now. `sub`: the Google account's id, kept for an invited address."""
     secs = 86400 * _ui_days()
-    resp.set_cookie(_UI_COOKIE, _ui_sign(json.dumps({"email": email, "exp": _ui_now() + secs})), max_age=secs,
+    resp.set_cookie(_UI_COOKIE, _ui_sign(json.dumps({"email": email, "exp": _ui_now() + secs, **({"sub": sub} if sub else {})})), max_age=secs,
                     httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/")
 
 
@@ -133,7 +136,7 @@ def _ui_renewed(request: Request, resp):
             return resp
         d = _ui_session(request)
         if d and float(d["exp"]) - _ui_now() <= 86400 * _ui_days() - _UI_RENEW_AFTER:
-            _ui_set_session(resp, str(d["email"]))
+            _ui_set_session(resp, str(d["email"]), str(d.get("sub") or ""))
     except Exception as e:  # noqa: BLE001
         print(f"sign-in not renewed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return resp
@@ -193,16 +196,19 @@ def _ui_is_board_client(client_id: str, redirect_uri: str) -> bool:
 _SERVER: dict[str, Any] = {}                                                # the server's `mcp`, set once by register(): _ui_exchange verifies the token with its `auth`
 
 
-def _ui_exchange(code: str, verifier: str) -> str:
-    """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
+def _ui_exchange(code: str, verifier: str) -> tuple[str, str, str]:
+    """An authorization code → (the address that signed in, '' when the exchange or the token does not hold; the Google account's id; why a registration refuses that
+    sign-in, '' when none does)."""
     import asyncio
+    from stackshot.web.auth import oauth as _oauth      # at the call: that module imports this one
     status, d = _ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
                                              "client_id": _ui_client_id(), "code_verifier": verifier}, form=True)
     tok = str(d.get("access_token") or "") if status == 200 else ""
     if not tok:
-        return ""
-    at = asyncio.run(_SERVER["mcp"].auth.verify_token(tok))
-    return str((getattr(at, "claims", None) or {}).get("email") or "")
+        return "", "", ""
+    claims = getattr(asyncio.run(_SERVER["mcp"].auth.verify_token(tok)), "claims", None) or {}
+    email = str(claims.get("email") or "")
+    return email, str(claims.get("sub") or ""), _oauth._barred(claims) if _members.person_of_email(email) else ""
 
 
 async def ui_login(request: Request):
@@ -243,11 +249,13 @@ async def ui_callback(request: Request):
     code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
     if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
         return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
-    email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
+    email, sub, why = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
     if not _members.person_of_email(email):
         return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
+    if why:
+        return PlainTextResponse(f"{email} is not let in. {_ident.REFUSALS[why]}", status_code=403)
     r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
-    _ui_set_session(r, email)
+    _ui_set_session(r, email, _invites.session_account(email, sub))
     r.delete_cookie(_UI_FLOW, path="/ui")
     return r
 

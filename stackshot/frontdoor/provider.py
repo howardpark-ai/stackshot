@@ -27,6 +27,7 @@ from fastmcp.server.providers import Provider
 from fastmcp.server.providers.proxy import ProxyTool
 from mcp.shared.exceptions import MCPError
 
+from stackshot.core import frontdoor_identity as _ident
 from stackshot.core.frontdoor_config import Settings
 from stackshot.core.frontdoor_identity import NOT_MEMBER_CODE
 from stackshot.frontdoor import config as _config
@@ -49,6 +50,14 @@ def not_your_board(board: str, mine: list[str]) -> str:
 
 
 NOT_A_MEMBER = "you are not a member of any board."
+
+
+def not_a_member(user: str | None) -> str:
+    """The refusal of a caller who is on no backend: it names the address that signed in, and the reason where a registration refused the sign-in."""
+    barred = _ident.barred_of(user)
+    if barred:
+        return f"{NOT_A_MEMBER} {barred[1]} signed in and is not let in. {_ident.REFUSALS[barred[0]]}"
+    return f"{NOT_A_MEMBER} The address that signed in: {user}." if user and "@" in user else NOT_A_MEMBER
 
 
 def none_answered(names: list[str]) -> str:
@@ -107,7 +116,7 @@ class Door:
 
     def backends_of(self, user: str | None) -> list[str]:
         """The backends `user` is a member of, in the order the config lists them; a name in the members file that no backend has is left out."""
-        mine = self.members().get(user or "", []) if user else []
+        mine = self.members().get(user, []) if user and not _ident.barred_of(user) else []
         return [b.name for b in self.settings.backends if b.name in mine]
 
     def boards_of(self, user: str | None) -> list[str]:
@@ -120,7 +129,7 @@ class Door:
         """The board a call goes to, or a ToolError whose text the client shows as it is."""
         mine = self.boards_of(user)
         if not mine:
-            raise ToolError(NOT_A_MEMBER)
+            raise ToolError(not_a_member(user))
         if board is None or board == "":
             if len(mine) == 1:
                 return mine[0]
@@ -152,7 +161,7 @@ class DoorTool(ProxyTool):
         else:
             name = self._brain
             if name not in door.backends_of(user):
-                raise ToolError(NOT_A_MEMBER if not door.backends_of(user) else not_offered(self.name))
+                raise ToolError(not_a_member(user) if not door.backends_of(user) else not_offered(self.name))
         t_b, t_c = door.backend.set(name), door.caller_var.set(user or "")
         try:
             return await super().run(args, context)
@@ -186,7 +195,7 @@ class DoorProvider(Provider):
             return {}
         mine = d.backends_of(user)
         if not mine:
-            raise ToolError(NOT_A_MEMBER)
+            raise ToolError(not_a_member(user))
 
         limit = d.settings.backend_timeout_seconds
 

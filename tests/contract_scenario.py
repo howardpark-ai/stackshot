@@ -827,13 +827,13 @@ with TestClient(app) as c:
     fc2 = next((v.split(";")[0].split("=", 1)[1] for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui_flow=")), "")
     check("an off-site `next` is not followed", json.loads(_signin._ui_unsign(fc2))["next"] == "/")
     state = q["state"][0]
-    _signin._ui_exchange = lambda code, verifier: "stranger@example.com"
+    _signin._ui_exchange = lambda code, verifier: ("stranger@example.com", "", "")
     r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
     check("sign-in end: an address that is not allowed gets no session", r.status_code == 403 and "set-cookie" not in {k for k, _ in r.headers.multi_items() if _.startswith("stackshot_ui=")}, (r.status_code, r.text))
     r = c.get("/ui/callback?code=abc&state=wrong", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False); r2 = c.get(f"/ui/callback?code=abc&state={state}", follow_redirects=False)
     check("sign-in end: a callback that does not belong to a sign-in started here is refused", r.status_code == 400 and r2.status_code == 400)
     seen_args = []
-    _signin._ui_exchange = lambda code, verifier: (seen_args.append((code, verifier)), "you@example.com")[1]
+    _signin._ui_exchange = lambda code, verifier: (seen_args.append((code, verifier)), ("you@example.com", "", ""))[1]
     r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
     sess = next((v.split(";")[0].split("=", 1)[1] for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")
     attrs = next((v.lower() for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")

@@ -58,7 +58,7 @@ LABELLED = ("get", "brief", "create", "update", "message", "complete")     # the
 SERVER_REL = "stackshot/web/server.py"
 # The tools are registered in these modules (each `register` adds its own with `mcp.tool(...)(function)`); until the server was split a revision has them in server.py,
 # which stays watched for that reason.
-TOOL_FILES = tuple(f"stackshot/web/tools/{m}.py" for m in ("brief", "get", "create", "update", "complete", "sessions", "message", "route", "anchors", "rules"))
+TOOL_FILES = tuple(f"stackshot/web/tools/{m}.py" for m in ("brief", "get", "create", "update", "complete", "sessions", "message", "route", "anchors", "rules", "invite"))
 # The words of the tools are in text files, one per tool module and a shared one (stackshot/web/tools/text/<module>.md, read by web/tools/textfile.py): a change
 # to one is a change to what a session reads, so `touched` watches each file whole and reports it as `<file>:text`.
 TEXT_DIR = "stackshot/web/tools/text"
@@ -253,6 +253,7 @@ def _fixture_config(tmp: Path) -> None:
                      ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("timezone", "UTC")):
         toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml)
         assert n == 1, key
+    toml += '\n[invites]\nadmins = ["you"]\n'      # so that the tool a board has only with [invites], and what it adds to the instructions, are in the snapshot
     (tmp / "stackshot.toml").write_text(toml, encoding="utf-8")
     for d in ("store/a", "fleet/a", "state/anchor-hub", "secrets", "touch", "brain/projects"):
         (tmp / d).mkdir(parents=True)

@@ -973,8 +973,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
     movers = counted_movers(nds, project, ctx)      # a background agent of the project is named into needs by the server itself: never a second mover
     if one_mover and second_mover_in(nds, project, ctx):
         who = ", ".join(ctx.label(x) for x in movers)
+        again = f" Here that is the same call with needs=[\"decision\"] and then=\"{who}\"." if "decision" in kinds and len(movers) == 1 else ""
         add("second_mover", f"needs names more than one mover ({'decision plus ' if 'decision' in kinds else ''}{who}): an item has one mover, and a second one in needs is a second mover. "
-                            f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
+                            f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.{again}")
     if "decision" in kinds and held:
         add("decision_hold", f"needs holds decision together with a park: an item on {H}'s call is on his move, and a park is not. To park the call for a date, hand the item to the session that waits "
                              f"(needs=[<session>]; the ask and options stay on the item as written) and park it with until=YYYY-MM-DD, wait_kind=\"time\", wait_basis=<what it waits for, with its date> and mover={H}: it shows as waiting until the date, "
@@ -1050,7 +1051,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                 tail_ = ("a date with no park is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot).")
                 if near_:
                     add("snooze", head_ + f"A park of {_wt.cap_days():g} days or less needs {H}'s recorded words: a wait_basis sent with a date this near is dropped, so adding one does not help. Ask him to answer on the item, "
-                                  "or pass said=[...] with his words. To only check back on work you keep moving, set a bare until with wait_reason, or set no date: " + tail_)
+                                  "or pass said=[...] with his words. To only check back on work you keep moving, set a bare until with wait_reason "
+                                  "(this call without wait_kind and wait_basis, with wait_reason=\"<what you check then>\"; where that moves a stored date later, also mark a step done or dropped or write the next step in it), or set no date: " + tail_)
                 else:
                     add("snooze", head_ + "With neither, a park has no reason: when the work itself needs this window (a soak, a log or data collection, a trial week, a timer you started), "
                                   "add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's date takes it too, with no park); to only check back on work you keep moving, set no date: " + tail_ + " "

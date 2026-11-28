@@ -19,6 +19,8 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     page.*     small words several pages share (Archived, none)
     explain.*  the "?" control that holds a page's explainer text (ui/explain.py): its button's name
     sessions.* the sessions list: its group headings, the session flags and their hovers
+    join.*     the setup page an invite's link names (routes/join.py), open to anyone
+    invite.*   the invite mail the invite tool's reply hands the admin's agent
     foryou.*   the For you list on the home page
     sent.*     the notices a session sent, in the home page's rows
     said.*     the said tags (who said it, checked or not)
@@ -36,6 +38,30 @@ part of the text. A new page string goes in here, with its English text, in the 
 from __future__ import annotations
 
 CATALOG: dict[str, str] = {
+    # ------------------------------------------------------------------ the setup page an invite's link names, and the invite mail
+    "join.title": "Join this board",
+    "join.who": "This page is for you and your AI agent. If you are a person, give your agent the address of this page and ask it to set the board up. "
+                "If you are the agent, add the connection below to the app you run in, or tell the person the steps for their app.",
+    "join.address": "The board is a remote MCP server (streamable HTTP, sign-in by OAuth) at this address:",
+    "join.step.add": "Add that address as an MCP server in the AI app. No token or key is needed, and this page holds none.",
+    "join.step.sign_in": "The person signs in with Google, using the address that was invited, and presses Allow. The agent never asks for the password.",
+    "join.step.start": "Once connected, the agent reads the connection's instructions, calls the brief tool and walks the person through their first use.",
+    "join.claude_ai": "Open Customize, then Connectors, press the plus, choose Add custom connector, paste the address, add it and connect.",
+    "join.claude_ai.plans": "On a Team or Enterprise plan someone who manages the organization first adds it under Organization settings, Connectors. A free plan allows one custom connector.",
+    "join.claude_code.add": "Run this command in a terminal:",
+    "join.claude_code.sign_in": "Then sign in, with /mcp inside a session or with this command:",
+    "join.chatgpt": "Open chatgpt.com/plugins, press the plus, choose Add custom MCP server, give it a name, paste the address, configure the sign-in, "
+                    "confirm that you want to continue and create it as a plugin.",
+    "join.chatgpt.plans": "Your account's and workspace's policies decide whether you may add it.",
+    "join.cursor": "Add this to the file ~/.cursor/mcp.json (keep the servers already in it), then connect and sign in under Cursor's MCP settings:",
+    "join.refused.title": "If the sign-in is refused",
+    "join.refused": "The refusal names the address that signed in. Sign in with the invited address, or ask the person who invited you.",
+    "join.busy": "Too many requests: try again in a minute.",
+    "invite.mail.subject": "You are invited to a shared board",
+    "invite.mail.body": "You are invited to a shared board. Paste the next two lines to your own AI agent (claude.ai, Claude Code, ChatGPT or Cursor):\n\n"
+                        "Open {link} and add that board's MCP connection to the app you run in, or tell me how.\n"
+                        "Then read the board and walk me through my first use; I sign in with Google as {address}.",
+
     # ------------------------------------------------------------------ the pages after the item page: sessions, for you, sent notices, said tags (stage 3b)
     "page.archived": "Archived",
     "page.none": "none",

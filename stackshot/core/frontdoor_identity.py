@@ -29,6 +29,29 @@ MAX_AGE = 300.0                      # seconds a signed identity is accepted aft
 MAX_FUTURE = 30.0                    # seconds a signed time may be ahead of the verifier's clock (clocks of two processes on one box differ by far less)
 NOT_MEMBER_CODE = -32003             # the JSON-RPC error code a board refuses a list or a read with when the caller is no member; the front door tells it from a board that is down
 
+# A Google sign-in a registration refuses (core/invites.py) travels from the board to the sign-in service as one of these words, and from there to the front door
+# inside the identity the proxy sets, so the person is told in words which address signed in and why. Such an identity is a member of nothing.
+REFUSALS = {
+    "unverified": "Google does not report this address as verified.",
+    "other_account": "This address first joined with another Google account. An admin can remove the registration, on every board it is on, and make it again.",
+    "unrecorded": "The first sign-in could not be recorded, so nothing is let in yet. Try again, or ask the person who invited you.",
+    "unreadable": "The board cannot check this address's registration now. Try again, or ask the person who invited you.",
+}
+_BARRED = "!refused:"
+
+
+def barred(why: str, address: str) -> str:
+    """The identity that says the sign-in of `address` is refused for the reason `why` (a key of REFUSALS)."""
+    return f"{_BARRED}{why}:{address}"
+
+
+def barred_of(identity: str | None) -> tuple[str, str] | None:
+    """(why, address) of an identity `barred` made; None for every other. A reason this version does not know reads as "unreadable": still refused."""
+    if not identity or not identity.startswith(_BARRED):
+        return None
+    why, _, address = identity[len(_BARRED):].partition(":")
+    return (why if why in REFUSALS else "unreadable"), address
+
 
 def _b64(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("ascii").rstrip("=")

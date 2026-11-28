@@ -445,6 +445,13 @@ def _description_fault(desc: str) -> tuple[str, str, int] | None:
     return _bt.judge(desc, max_lines, line_max) if _bullets_on() else (("lines", "", n) if (n := len([ln for ln in desc.splitlines() if ln.strip()])) > max_lines else None)
 
 
+def _lines_once_split(desc: str, max_lines: int, line_max: int) -> int:
+    """The non-blank lines a description with a long bullet would have once the server split it, when that count alone is why it was not split (more than max_lines); else 0. Looked for up to three times the cap, which also bounds the work."""
+    res = _bt.split_long_wrap(desc, 3 * max_lines, line_max)
+    made = len([ln for ln in res[0].splitlines() if ln.strip()]) if res else 0
+    return made if made > max_lines else 0
+
+
 def description_faults(desc: str, field: str = "description") -> list[str]:
     """Every fault of a description's form, each as the refusal `_gate_description` raises for it alone: the form of its lines (the first bullet or line that breaks it) and, for a description, a forbidden word.
     A description is short `- ` bullets, one fact each, refused at write time and not only noted. Checks the text
@@ -467,6 +474,9 @@ def description_faults(desc: str, field: str = "description") -> list[str]:
                        f"accepted form: `- Goal: <the result you want>` then short `- ` bullets, one fact each, at most {line_max} characters, {max_lines} lines in all, nested ones counted")
         elif kind == "marker":
             out.append(f"Refused: {field} line is not a `- ` bullet: \"{_clip_line(ln, 60)}\"; {fix}")
+        elif made := _lines_once_split(desc, max_lines, line_max):
+            out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; the server splits a long bullet by itself while the result stays within "
+                       f"{max_lines} lines, and here it would make {made}: cut {made - max_lines} line{'' if made - max_lines == 1 else 's'} (merge or drop facts, shorten the long bullets, or move detail to the project page) and send the call again; {fix}")
         else:
             out.append(f"Refused: {field} bullet is {n} characters, the limit is {line_max} (a link's URL does not count): \"{_clip_line(ln, 60)}\"; the server splits a long bullet at a sentence end or a space by itself, "
                        f"and could not split this one (no ordinary space to cut at within a line: a word or link longer than a line, or text spaced only with non-breaking or wide spaces; a bullet with lines indented under it, or more than {max_lines} lines once split); {fix}")
