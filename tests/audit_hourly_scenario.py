@@ -215,6 +215,27 @@ for i, words in ((1, "commit on PR 5"), (2, "verdict on PR 6"), (3, "PR 7 merged
     check(f"1a {words}, 55 minutes ago and under a later update: verified, never idle", [(x["text"], x["kind"]) for x in lines(i)] == [(f"Audit {hm(now0)}: verified {words}", "audit")]
           and mt(i)["last_activity"]["kind"] == "update" and not HR.idle_marked(mt(i), now0), (lines(i), mt(i).get("last_activity")))
 check("1a …one older than an hour verifies nothing", [x["kind"] for x in lines(4)] == ["audit_idle"], lines(4))
+
+# ================================================================ 1b. a FAIL verdict is an event but verifies nothing: its own idle line, and the item stays open to a hand-off
+from stackshot.audit import hand_idle as HI1b
+def stamp1b(i, *evs):
+    it = rd(i)
+    for kind, n, ago in evs: LA.apply(it, [LA.pr_candidate(kind, n, now0 - ago * MIN, now0)], now0)
+    LA.apply(it, [LA.update_signal("", "wired the thing", now0 - 50 * MIN)], now0); (T / f"store/a/{i}.json").write_text(json.dumps(it))
+clean_pane(); on()
+for i in range(5, 10): put(i, act=90); panes["home-peer"] = "idle"
+stamp1b(5, ("verdict", 6, 55)); stamp1b(6, ("verdict_fail", 6, 55)); stamp1b(7, ("verdict_fail", 6, 55), ("commit", 6, 40)); stamp1b(8, ("commit", 6, 56), ("verdict_fail", 6, 52)); stamp1b(9, ("verdict_fail", 6, 70))
+tick()
+check("1b a PASS verdict under a later update verifies; a FAIL verdict in the same place does not: idle, and the line names it",
+      lines(5)[0]["kind"] == "audit" and lines(5)[0]["text"] == f"Audit {hm(now0)}: verified verdict on PR 6" and lines(6)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(6))
+      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified (verdict FAIL on PR 6, not verified; ") and "verified verdict" not in lines(6)[0]["text"], (lines(5), lines(6)))
+check("1b a FAIL followed by a newer push verifies that push", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 6" and not HR.idle_marked(mt(7)), lines(7))
+check("1b a push followed by a newer FAIL is idle (the newest event wins)", lines(8)[0]["kind"] == "audit_idle" and "verdict FAIL on PR 6" in lines(8)[0]["text"], lines(8))
+check("1b a FAIL older than an hour is no news: the plain idle line", lines(9)[0]["kind"] == "audit_idle" and "FAIL" not in lines(9)[0]["text"], lines(9))
+same1b = lambda a, b: str(a or "").casefold() == str(b or "").casefold()
+fl = rd(6); LA.apply(fl, [LA.pr_candidate("verdict_fail", 6, now0 - 5 * MIN, now0)], now0); pl = rd(6); LA.apply(pl, [LA.pr_candidate("verdict", 6, now0 - 5 * MIN, now0)], now0)
+check("1b the hand-off decision: a FAIL as the last activity is no started work (the item may be handed on), a PASS verdict is",
+      HI1b.started_reason(fl, "home-peer", now0, same1b) == "" and HI1b.started_reason(pl, "home-peer", now0, same1b) == "a pull request event is its last activity", (fl["metadata"].get("last_activity"), pl["metadata"].get("last_activity")))
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 
 # ================================================================ 1. due and verified
@@ -516,7 +537,7 @@ put(7, act=90, last_activity={"at": now0 - 59 * MIN, "kind": "commit", "what": "
 tick()
 check("9 a tied pull request's merge, comment, CI result, review and new head commit each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
 check("9 a recorded commit under an hour old verifies (recorded, so the line is no live-only one) and one older than an hour verifies nothing (idle)", lines(7)[0]["text"] == f"Audit {hm(now0)}: verified commit on PR 4" and lines(7)[0]["kind"] == "audit"
-      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(6)[0]["kind"] == "audit_idle" and LA.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit", "verdict"}), [lines(6), lines(7)])
+      and lines(6)[0]["text"].startswith(f"Audit {hm(now0)}: idle, nothing verified") and lines(6)[0]["kind"] == "audit_idle" and LA.PR_KINDS == frozenset({"ci_result", "review", "comment", "pr_merged", "commit", "verdict", "verdict_fail"}) and LA.PR_VERIFIED == LA.PR_KINDS - {"verdict_fail"}, [lines(6), lines(7)])
 # an item with no timestamp at all
 nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "updated", "state_updated", "created", "confirmed", "written_at")]
 try: wt = HR.due({"a1": nots}, "a1", now0, audit_ticks_svc._silence_env(), lambda w: "busy", handoff_svc.ho_same)

@@ -1,6 +1,6 @@
 """last_activity.py: the item's one "last activity" record, `metadata.last_activity = {"at": epoch seconds, "kind": what sort of activity (KINDS), "what": "short words"}`.
 
-Beside it, `metadata.last_pr_event` (the same shape) keeps the newest event on a tied pull request (PR_KINDS: a push, a verification verdict, a merge, a CI result, a review, a comment), so a later update, step or
+Beside it, `metadata.last_pr_event` (the same shape) keeps the newest event on a tied pull request (PR_KINDS: a push, a verification verdict (a FAIL included, which verifies nothing), a merge, a CI result, a review, a comment), so a later update, step or
 state change, which takes the record over, does not hide it from the readers that judge an item by those events (`pr_event`; the hourly audit line, audit/hourly.py). `apply` stores both.
 
 The pure half: no server import, no clock read, no file. Part A of the rule that no item an agent moves goes more than an hour without visible activity: this records the
@@ -17,7 +17,7 @@ What is not activity: a status line that repeats the previous text, or one writt
 writes about the item, which are not in progress either: a History line (the ladder's, an audit pass's, a merge pass's reason), the ask itself, the step a session or the server
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
-Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit`, `verdict` (stamped today: the
+Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit`, `verdict`, `verdict_fail` (stamped today: the
 progress signals of a save and the events of a tied pull request), `audit` (stamped by the hourly audit line, audit/hourly.py `stamp_signal`, when the line verified something: a pane in a turn, a subagent running; its `what` is "audit verified …"; a line that verified nothing stamps nothing),
 and `update` (a mover's own status write whose text differs from the previous status text: `update_signal` is the test, `update_signals` finds the writes of a save, and service/writes.py stamps it when the writer is the item's mover; its `what` is the short text itself).
 A reply that says nothing changed is no `update` (same text as before), a status written by anyone but the mover is none, and the ladder's and the server's own lines are none of these kinds.
@@ -55,16 +55,17 @@ OK, WARN, BAD = "ok", "warn", "bad"
 
 # The named kinds of signal. All of them are stamped today.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit"
-VERDICT = "verdict"
+VERDICT, VERDICT_FAIL = "verdict", "verdict_fail"
 UPDATE, AUDIT = "update", "audit"
-STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, VERDICT, AUDIT, UPDATE)
+STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, VERDICT, VERDICT_FAIL, AUDIT, UPDATE)
 KINDS = frozenset(STAMPED)
-PR_KINDS = frozenset({CI_RESULT, REVIEW, COMMENT, PR_MERGED, COMMIT, VERDICT})      # the signals that are an event on a tied pull request
+PR_KINDS = frozenset({CI_RESULT, REVIEW, COMMENT, PR_MERGED, COMMIT, VERDICT, VERDICT_FAIL})      # the signals that are an event on a tied pull request
+PR_VERIFIED = PR_KINDS - {VERDICT_FAIL}      # …those that are work seen going on: a FAIL verdict is an event, but it verifies nothing and no build is in flight for it
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
-PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT, "verdict": VERDICT}
+PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT, "verdict": VERDICT, "verdict_fail": VERDICT_FAIL}
 PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}",
-            "verdict": "verdict on PR {n}"}
+            "verdict": "verdict on PR {n}", "verdict_fail": "verdict FAIL on PR {n}, not verified"}
 
 _PR_NUMBER = re.compile(r"#(\d+)\s*$")
 

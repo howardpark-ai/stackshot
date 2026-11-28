@@ -35,7 +35,7 @@ What the pass verifies, from data the server already holds, and says in the line
     mover's state or subagents could not be read at all (an error, or no fresh snapshot naming the mover: a snapshot that is missing, older than `agent_state.MAX_AGE_S`, that does not list the mover or did not read it). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
     verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
   - a pull request tied to the item had a new head commit, a verification verdict (a comment whose first line is a `verify:` line, anchors/event_log.py `is_verdict`), a merge, a CI result, a review or a comment
-    by a person in the last hour, as `metadata.last_pr_event` keeps it (model/last_activity.py `pr_event`): the mover's later update, step or state change takes `last_activity` over and does not hide it.
+    by a person in the last hour (a verdict whose outcome is FAIL is no verified work: the line is idle and names it, `verdict FAIL on PR n, not verified`; a newer event of any kind takes its place), as `metadata.last_pr_event` keeps it (model/last_activity.py `pr_event`): the mover's later update, step or state change takes `last_activity` over and does not hide it.
 
 The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
 (`… (live state only, nothing recorded on the item)`). A line that verified something is the hourly update the item promises, so it is stamped as the item's `last_activity` (kind `audit`, the words
@@ -120,7 +120,7 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
     except Exception:  # noqa: BLE001  (a subagent that cannot be read verifies nothing)
         pass
     rec = _la.pr_event(item, now)
-    if rec and now - rec["at"] <= HOUR:
+    if rec and rec["kind"] in _la.PR_VERIFIED and now - rec["at"] <= HOUR:      # the newest event is a FAIL verdict: nothing verified, and `failed_why` says so
         out.append(rec["what"])
         recorded.append(rec["what"])
     return out, recorded
@@ -172,6 +172,12 @@ def idle_why(state: str, others: int, running: int) -> list[str]:
     else:
         pane = PANE_STATE.get(state, f"the mover's pane is {state}")
     return [pane, SUBAGENT_ELSEWHERE if running else NO_SUBAGENT, NO_EVENT]
+
+
+def failed_why(item: dict[str, Any], now: float) -> str:
+    """The words of a FAIL verdict that is the newest event on the item's tied pull request within the hour, "" otherwise: an idle line names it first, so it does not read as no news."""
+    rec = _la.pr_event(item, now)
+    return rec["what"] if rec and rec["kind"] == _la.VERDICT_FAIL and now - rec["at"] <= HOUR else ""
 
 
 def _clause(why: list[str]) -> str:
@@ -268,7 +274,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     except Exception:  # noqa: BLE001
         pass
     running = sum(1 for t in ties if t)      # the running subagents, each tied to some other item of the mover's (an untied one made the line unknown above)
-    return {"text": text(now, [], [], idle_why(state, elsewhere, running)), "verified": [], "recorded": [], "kind": KIND_IDLE}
+    return {"text": text(now, [], [], ([failed] if (failed := failed_why(it, now)) else []) + idle_why(state, elsewhere, running)), "verified": [], "recorded": [], "kind": KIND_IDLE}
 
 
 def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,

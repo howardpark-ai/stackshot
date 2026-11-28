@@ -477,10 +477,11 @@ def run(hub: Hub):
     def verdict_seen(a_id, repo, title, c):
         """A pull request comment just read: when its first line is a verification verdict (event_log.is_verdict) and its author is the hub's own login or the repository's own side, record it for the item's last
         activity. record_only: written to the event log and told to no one (Hub.emit); the comment's own notice, when there is one, goes as before. No request of its own."""
-        if not _events.is_verdict(c.get("body")): return
+        kind = {"": "", "FAIL": "verdict_fail"}.get(_events.verdict_outcome(c.get("body")), "verdict")      # a FAIL is its own kind: it is no verified work
+        if not kind: return
         who = (c.get("user") or {}).get("login") or ""
         if not ((me and who == me) or _events.trusted_association(c.get("author_association"))): return
-        hub.event(a_id, {"title": title, "who": who, "text": "verification verdict", "url": c.get("html_url") or "", "ts": c.get("created_at"), "etype": "pr_verdict", "repo_id": rid(repo), "vouched": "verdict", "record_only": True}, kind="github-state")
+        hub.event(a_id, {"title": title, "who": who, "text": "verification verdict", "url": c.get("html_url") or "", "ts": c.get("created_at"), "etype": f"pr_{kind}", "repo_id": rid(repo), "vouched": kind, "record_only": True}, kind="github-state")
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later

@@ -199,7 +199,7 @@ check("1 apply: stores the record with its kind; the same again, an older one an
       LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
       and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
 check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today (the audit line since the hourly line stamps it; update since a mover's new status text does)",
-      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "verdict", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS and "audit" in LA.STAMPED and "update" in LA.STAMPED, sorted(LA.KINDS))
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "verdict", "verdict_fail", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS and "audit" in LA.STAMPED and "update" in LA.STAMPED, sorted(LA.KINDS))
 check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
@@ -1301,11 +1301,19 @@ with GH(g17l, [A17l], saved=sv17l) as G:
 V18 = f"verify: PASS patch-id={'1' * 40} head={'2' * 40}"
 check("18 is_verdict: PASS, PASS+NOTES and FAIL on the first line, whatever follows on later lines",
       all(EL.is_verdict(b) for b in (V18, V18.replace("PASS", "PASS+NOTES"), V18.replace("PASS", "FAIL") + "\r\n\r\nwhy", V18 + "  \nnotes")), None)
+check("18 verdict_outcome: the outcome of the first line, PASS and FAIL told apart", [EL.verdict_outcome(b) for b in (V18, V18.replace("PASS", "PASS+NOTES"), V18.replace("PASS", "FAIL"), "x")] == ["PASS", "PASS+NOTES", "FAIL", ""], None)
 check("18 is_verdict: not a later or quoted line, a short hash, another word, words after the line, or no text",
       not any(EL.is_verdict(b) for b in ("note\n" + V18, "> " + V18, V18[:-1], V18.replace("PASS", "MAYBE"), V18 + " ok", "verify: PASS", "", None, 7)), None)
 check("18 lines_for: a vouched verdict is a `verdict` line even from a bot's login; an unvouched one is none",
       [r["kind"] for r in lines(A13, "", "pr_verdict", "helper[bot]", vouched="verdict", bot=True, now=100.0, ts=90.0)] == ["verdict"]
       and lines(A13, "", "pr_verdict", "kim", vouched="comment", now=100.0, ts=90.0) == [], None)
+check("18 lines_for: a vouched FAIL verdict is a `verdict_fail` line, not a `verdict` one", [r["kind"] for r in lines(A13, "", "pr_verdict_fail", "kim", vouched="verdict_fail", now=100.0, ts=90.0)] == ["verdict_fail"]
+      and lines(A13, "", "pr_verdict_fail", "kim", vouched="verdict", now=100.0, ts=90.0) == [], None)
+FAIL18 = LA.pr_candidate("verdict_fail", 9, 45, 100)
+check("18 pr_candidate: a FAIL is its own stamped kind, worded as not verified, an event but no verified work", FAIL18 == {"at": 45.0, "kind": "verdict_fail", "what": "verdict FAIL on PR 9, not verified"}
+      and "verdict_fail" in LA.PR_KINDS and "verdict_fail" not in LA.PR_VERIFIED and "verdict_fail" in LA.STAMPED, FAIL18)
+itf = {"metadata": {}}; LA.apply(itf, [SIG_P := LA.pr_candidate("verdict", 9, 40, 100)], 100); LA.apply(itf, [FAIL18], 100); LA.apply(itf, [LA.update_signal("", "wired it", 60)], 100)
+check("18 the newest pull request event is the FAIL, a later update does not hide it, a later push replaces it", LA.pr_event(itf, 100) == FAIL18 and (LA.apply(itf, [LA.pr_candidate("commit", 9, 50, 100)], 100), LA.pr_event(itf, 100)["kind"])[1] == "commit", itf)
 SIG18 = LA.pr_candidate("verdict", 9, 40, 100)
 check("18 pr_candidate: a verdict is its own stamped kind, worded `verdict on PR n`", SIG18 == {"at": 40.0, "kind": "verdict", "what": "verdict on PR 9"} and "verdict" in LA.PR_KINDS and "verdict" in LA.STAMPED, SIG18)
 it18 = {"metadata": {}}
@@ -1329,12 +1337,14 @@ with GH(g18, [A18]) as G:
     G.one()
     g18[f"{RP}/issues/170"] = g18[f"{RP}/issues/170"] | {"comments": 5, "updated_at": iso9(1000)}
     g18[f"{RP}/issues/170/comments?since={iso9(0)}&per_page=20"] = [cm18("hubaccount", "CONTRIBUTOR", V18 + "\n\nall lanes", 100, 1), cm18("hubaccount", "CONTRIBUTOR", "pushed a fix", 200, 2),
-                                                                   cm18("mallory", "NONE", V18, 300, 3), cm18("kim", "COLLABORATOR", V18, 400, 4), cm18("hubaccount", "CONTRIBUTOR", "> " + V18, 500, 5)]
+                                                                   cm18("mallory", "NONE", V18, 300, 3), cm18("kim", "COLLABORATOR", V18, 400, 4), cm18("hubaccount", "CONTRIBUTOR", "> " + V18, 500, 5), cm18("hubaccount", "CONTRIBUTOR", V18.replace("PASS", "FAIL"), 600, 7)]
     mark18 = len(G.calls)
     got18 = G.one()
     ver18 = [e for e in got18 if e.etype == "pr_verdict"]
     check("18 receiver: a verdict by the hub's own login or the repository's side is one record_only event at the comment's time; a stranger's, plain talk and a quote are none",
           [(e.who, e.ts, e.vouched, e.record_only) for e in ver18] == [("hubaccount", iso9(100), "verdict", True), ("kim", iso9(400), "verdict", True)], [(e.who, e.ts, e.etype) for e in got18])
+    fail18 = [e for e in got18 if e.etype == "pr_verdict_fail"]
+    check("18 receiver: a FAIL verdict is its own event type and vouched kind, never a `pr_verdict`", [(e.who, e.ts, e.vouched, e.record_only) for e in fail18] == [("hubaccount", iso9(600), "verdict_fail", True)], [(e.who, e.ts, e.etype) for e in got18])
     check("18 …the hub's own comments still send no comment notice, and no request is added", not [e for e in got18 if e.etype == "comment" and e.who == "hubaccount"]
           and len([p for p, _ in G.calls[mark18:] if "/comments" in p]) == 1, (G.calls[mark18:], [(e.who, e.etype) for e in got18]))
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
