@@ -390,10 +390,11 @@ Parameter contact (a filing field: it moves no state clock, changes no mover and
 falls to the project's -main agent.
 
 ## text GLOSSARY_FORM trail
-subject and description: a retired role word in either is rewritten to its glossary term when the item is saved, and the
-reply has a `(glossary: …)` line saying which words were rewritten; a word that stands for two or more roles is never
-guessed or refused: it is saved as written and the reply has one line naming the word and its terms, so use the
-exact term next time (words in quotes or backticks are left alone).
+subject and description: when the instance has a glossary configured, a retired role word in either is rewritten to its
+glossary term when the item is saved, and the reply has a `(glossary: …)` line saying which words were rewritten; a word
+that stands for two or more roles is never guessed or refused: it is saved as written and the reply has one line naming
+the word and its terms, so use the exact term next time. A word inside a longer word, words in quotes or backticks, and
+a term that would push the subject or a description line over its limit are left as written (the line still names the term).
 
 ## text ASK_RULE trail
 The server takes an ask off {{OWNER}}'s move in one case only: its author's own plain sentence. A write by the ask's

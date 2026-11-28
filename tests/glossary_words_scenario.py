@@ -167,6 +167,35 @@ check("update: an unclear word in the subject is stored as written and the reply
 err, text = upd(5, subject="[home] new keeper subject")
 check("update: a text with a term goes through", not err and rd(5)["subject"] == "[home] new keeper subject", text)
 
+# ================================================================ 4b limits and longer words
+HA = chr(0xAC00)                                     # a Hangul syllable used as padding and as a particle
+one_word = "[home] " + BUILDER_KO + HA * 69           # one word, 78 characters: the term would make it 83
+assert len(one_word) == 78
+err, text = mk(one_word)
+check("limit: create saves a 78-character one-word subject as written, with the reply note naming the word and its term", not err and len(made(one_word)) == 1 and "kept a retired word as written" in text
+      and f"{BUILDER_KO} -> builder" in text, (err, text))
+item(6, "[home] old subject")
+err, text = upd(6, subject=one_word)
+check("limit: update saves it as written too, with the note", not err and rd(6)["subject"] == one_word and "kept a retired word as written" in text and f"{BUILDER_KO} -> builder" in text, (err, text))
+multi = "[home] " + BUILDER_KO + " " + "ab " * 22; multi = multi[:78].rstrip(); multi += "x" * (78 - len(multi))
+assert len(multi) == 78 and " " in multi[7:]
+err, text = mk(multi)
+check("limit: a 78-character subject of several words is not cut", not err and len(made(multi)) == 1 and "…" not in text, (err, text))
+err, text = mk("[home] short " + BUILDER_KO + " subject")
+check("limit: a subject that still fits is rewritten", not err and len(made("[home] short builder subject")) == 1, (err, text))
+longline = "- " + BUILDER_KO + HA * 112      # 2 + 2 + 112 = 116 characters; the term makes it 121, over [description] line_max (120)
+assert len(longline) == 116
+check("limit: a description line the term would push over line_max is kept as written", G.apply("[home] s", longline, path=str(TP))[1] == longline, None)
+for name, text in (("a Hangul syllable before it", "- " + chr(0xC6F9) + BUILDER_KO), ("a longer word before it, with a particle after", "- " + chr(0xD398) + chr(0xC774) + chr(0xC9C0) + BUILDER_KO + chr(0xC640) + " x"),
+                   ("a second such word", "- " + chr(0xC571) + BUILDER_KO), ("the word doubled", "- " + BUILDER_KO + BUILDER_KO), ("a Latin letter before it", "- web" + BUILDER_KO), ("a digit before it", "- 2" + BUILDER_KO)):
+    out, did, unc = rw(text)
+    check(f"longer word: {name} is untouched", out == text and not did, (out, did))
+for particle in (chr(0xAC00), chr(0xC640), chr(0xB97C), chr(0xC774)):
+    out, did, unc = rw(f"- {BUILDER_KO}{particle} x")
+    check(f"particle: {BUILDER_KO}+particle is rewritten", out == f"- builder{particle} x" and did == [(BUILDER_KO, "builder")], out)
+ents0 = [{"word": "x*", "rx": re.compile("x*"), "use": ["t"]}]
+check("zero-length: a regex that matches nothing inserts nothing", G.rewrite("- abc", ents0, True) == ("- abc", [], []), G.rewrite("- abc", ents0, True))
+
 # ================================================================ 5 text
 tools = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
 for name in ("create", "update"):

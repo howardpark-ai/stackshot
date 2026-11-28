@@ -31,6 +31,8 @@ _QUOTED = re.compile(r'"[^"\n]{0,%d}"|“[^”\n]{0,%d}”|‘[^’\n]{0,%d}’|
                      r"|(?<!\w)'[^'\n]{0,%d}'(?!\w)" % ((MAX_QUOTE,) * 5))
 _NOISE = (_FENCE, _INLINE, _URL, _LINK_TARGET, _QUOTE_LINE, _QUOTED)
 
+_WORD_BEFORE = re.compile(r"[\uac00-\ud7a3A-Za-z0-9]")      # what, directly before a match, makes it part of a longer word
+
 _HANGUL = re.compile(r"[\uac00-\ud7a3]")      # the text is in the second language when it holds a Hangul letter (an escape: this file holds no Hangul)
 
 
@@ -58,12 +60,19 @@ def entries(path: str | None = None) -> tuple[list[dict[str, Any]], bool]:
         return [], False
 
 
+def _inside_word(text: str, start: int) -> bool:
+    """A match that follows a Hangul syllable, a Latin letter or a digit sits inside a longer word and is left alone (a particle after the word does not matter)."""
+    return start > 0 and bool(_WORD_BEFORE.match(text[start - 1]))
+
+
 def rewrite(text: str, ents: list[dict[str, Any]], ask: bool) -> tuple[str, list[tuple[str, str]], list[tuple[str, list[str]]]]:
     """(the text with each single-term word rewritten, [(word, term)] rewritten, [(word, terms)] that need the writer's choice). A match inside a skipped span stays as written."""
     spans = _noise_spans(text)
     todo: list[tuple[int, int, str]] = []; rewritten: list[tuple[str, str]] = []; unclear: list[tuple[str, list[str]]] = []
     for e in ents:
-        hits = [m for m in e["rx"].finditer(text) if not any(a <= m.start() and m.end() <= b for a, b in spans)]
+        raw = [m for m in e["rx"].finditer(text) if m.end() > m.start()]
+        hits = [m for m in raw if not any(o is not m and (o.start() == m.end() or o.end() == m.start()) for o in raw)      # a word run into another match (the word doubled) is one longer word
+                and not _inside_word(text, m.start()) and not any(a <= m.start() and m.end() <= b for a, b in spans)]
         if not hits:
             continue
         if len(e["use"]) >= 2:
@@ -88,9 +97,14 @@ def apply(subject: str, description: str, path: str | None = None) -> tuple[str,
         ents, ask = entries(path)
         if not ents or not (subject or description):
             return subject, description, "", [], "en"
-        done: list[tuple[str, str]] = []; unclear: dict[str, tuple[list[str], set[str]]] = {}; res = []
+        from stackshot.model import field_gates as _fg      # the limits the rewritten text must still meet
+        done: list[tuple[str, str]] = []; unclear: dict[str, tuple[list[str], set[str]]] = {}; res = []; kept: list[tuple[str, str]] = []
+        limits = {"subject": lambda t: (_fg._subject_max() or 0) and len(t) > _fg._subject_max(),
+                  "description": lambda t: any(len(l) > _fg._description_limits()[1] for l in t.splitlines())}
         for where, text in (("subject", subject), ("description", description)):
             new, did, unc = rewrite(text, ents, ask) if text else (text, [], [])
+            if did and limits[where](new) and not limits[where](text):      # the term would push the text over a limit it kept: saved as written, the words still named
+                new = text; kept += did; did = []
             res.append(new); done += did
             for w, terms in unc:
                 unclear.setdefault(w, (terms, set()))[1].add(where)
@@ -98,6 +112,9 @@ def apply(subject: str, description: str, path: str | None = None) -> tuple[str,
         if done:
             words = "; ".join(f"{w} -> {t}" for w, t in dict.fromkeys(done))
             line = f"\n(glossary: rewrote a retired word in the subject or description: {words})"
+        if kept:
+            words = "; ".join(f"{w} -> {t}" for w, t in dict.fromkeys(kept))
+            line += f"\n(glossary: kept a retired word as written because its term would make the subject or description too long: {words}; use the exact term next time)"
         lang = "ko" if _HANGUL.search(res[0] + res[1]) else "en"
         return res[0], res[1], line, [(w, terms, "both" if len(wh) == 2 else next(iter(wh))) for w, (terms, wh) in unclear.items()], lang
     except Exception:  # noqa: BLE001 - the feature fails open: a fault here never stops a save
