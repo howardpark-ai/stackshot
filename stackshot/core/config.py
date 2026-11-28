@@ -1653,9 +1653,6 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     elif isinstance(ft, list) and any(not isinstance(x, str) or not x.strip() for x in ft):
         bad_ = [x for x in ft if not isinstance(x, str) or not x.strip()]
         out.append(f"[front] to_background_senders has {len(bad_)} entr{'y' if len(bad_) == 1 else 'ies'} that {'is' if len(bad_) == 1 else 'are'} no front agent name ({', '.join(repr(x)[:40] for x in bad_[:5])}), ignored: the names that are valid stay listed")
-    fi = get("front", "idle_peers_to_background", cfg=cfg)
-    if fi is not None and not isinstance(fi, bool):
-        out.append(f"[front] idle_peers_to_background = {repr(fi)[:60]} is not true or false, so it stays off and nothing changes: write idle_peers_to_background = true to turn it on")
     fc = get("front", "result_turn_cap_per_hour", cfg=cfg)
     if fc is not None and (not isinstance(fc, int) or isinstance(fc, bool) or fc < 0):
         out.append(f"[front] result_turn_cap_per_hour = {repr(fc)[:60]} is not a whole number from 0, so 6 is used: set a whole number (0 turns the case off)")

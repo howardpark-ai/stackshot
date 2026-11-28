@@ -13,7 +13,7 @@ The words are a line of the message in the form of an Acked-by trailer:
 The quote is looked up the way a plain `said` is (service/gates.gate_said): his own message found in the transcript of that session (the sender's
 own when the line names none), and read through `gates.sibling_quote`, which is the wake cap's own reader (waiting.owner_words): a checked Acked-by
 no older than [waiting] cap_days. The time in the line is for the reader; the age is that of the message in the transcript. No second checker.
-Pure of the message tool and the router: both call `held_words` at one place each. `verified` is the same check of the quote with no test of who sends it to whom (`[front] idle_peers_to_background`)."""
+Pure of the message tool and the router: both call `held_words` at one place each."""
 from __future__ import annotations
 
 import re
@@ -38,22 +38,6 @@ def quoted(text: str) -> tuple[str, str]:
 def _found(quote: str, session: str) -> str:
     """His sentence, when `quote` is found in the transcript of `session` and passes the wake cap's reader; "" otherwise."""
     return _gates.sibling_quote(_gates.lazy_said(quote, session)())
-
-
-def verified(sender: str, text: str) -> str:
-    """The owner's words (one sentence of them) of the first Acked-by line of `text` whose quote checks out (`_found`: in the session the line names, else in the sender's own), or "": no sender, no such line, words that fail the check, any failure."""
-    try:
-        who = str(sender or "").strip()
-        if not who:
-            return ""
-        for m in _LINE.finditer(str(text or "")):
-            s = _SESSION.search(m.group("rest") or "")
-            got = _found(m.group(1).strip(), s.group(1) if s else who)
-            if got:
-                return got
-        return ""
-    except Exception:  # noqa: BLE001  — an extra rule: a failure verifies nothing
-        return ""
 
 
 def held_words(sender: str, to: str, text: str) -> str:

@@ -217,13 +217,13 @@ def agent_gone(name: str, surface: set[str]) -> bool:
 
 def unreachable(name: str, surface: set[str]) -> bool:
     """Can the agent `name` read no line any more: gone (agent_gone: retired, or a surface agent), or shown to be no live session by retired_recipient.gone_why (every pane of it gone for [client] dead_after_minutes
-    on a machine that is online, or an old name of a renamed session)? A doubt is never "unreachable". Only the two reroute switches ask it."""
+    on a machine that is online, or an old name of a renamed session)? A doubt is never "unreachable". Only the reroute switch asks it."""
     from stackshot.fleet import retired_recipient as _rr      # at call time
     return agent_gone(name, surface) or bool(_rr.gone_why(name))
 
 
 def switch_background(project: str, reg: dict[str, dict[str, Any]], surface: set[str]) -> str:
-    """The background agent a reroute switch ([front] to_background_senders, idle_peers_to_background) may send to: the first of anchors.background_ranked that is not `unreachable`; "" when none is left."""
+    """The background agent a reroute switch ([front] to_background_senders) may send to: the first of anchors.background_ranked that is not `unreachable`; "" when none is left."""
     return next((n for _c, _o, n in _anc.background_ranked(project, reg) if not unreachable(n, surface)), "")
 
 

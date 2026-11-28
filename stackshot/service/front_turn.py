@@ -8,7 +8,7 @@ A message that carries the person's mark but names no open item of his (`his_ite
 The digest of lines queued for a pane (`messaging.digest_fyi`, from `inbox.take`) is asked the same: a turn only under these two cases, else its lines are filed as fyi lines and start none.
 One more case, off until an instance names the agent: `[front] result_turn_agents` lists front agents to which a session that was handed work by them (a message of theirs that reached it within `[front] result_turn_hours`, or an open item the session moves that the agent itself handed it: the item's hand-off record names the agent as the sender and the session as the new mover) may write the result and start a turn, whether or not he is there
 (`messaging.handed_to`, `messaging.router_result`; the reader of the three keys is here: `result_turn_agents`, `result_turn_hours`, `result_turn_cap_per_hour`). Such a line is stored with the kind `exempt`, so the digest never files it. It is no case of `warranted`: the message tool and the router decide it before they ask this module.
-The readers of two more keys are here, both off by default and decided by the message tool and the router: `[front] to_background_senders` (`to_background_senders`: front agents whose messages to a front agent go to the project's background agent) and `[front] idle_peers_to_background` (`idle_peers_to_background`: a front agent's unmarked message to an idle peer goes there too, but not one that names an item `stays_with_front` keeps).
+The reader of one more key is here, off by default and decided by the message tool and the router: `[front] to_background_senders` (`to_background_senders`: front agents whose messages to a front agent go to the project's background agent).
 
 The record of case 2 is the item's own `tell_him` list (the update tool's `tell_him`): a front agent he asked to tell him about an item lists itself there. It is written only by a write that carries his own words (`said`,
 checked against the transcript; gates.gate_tell_him), never by a session on its own say, and it is not `observers` (those hear a close or a reopen, and no entry of them is a request to be told). A notice matches the record by its
@@ -37,11 +37,6 @@ def to_background_senders() -> list[str]:
     """`[front] to_background_senders`: the front agents (case-folded names) that send nothing to a front agent: their messages go to the target project's background agent (service/messaging.py). None by default; a value that is no list of names lists nobody (config.notes() says so)."""
     raw = _cfg.get("front", "to_background_senders", default=[])
     return [str(x).strip().casefold() for x in raw if isinstance(x, str) and str(x).strip()] if isinstance(raw, list) else []
-
-
-def idle_peers_to_background() -> bool:
-    """`[front] idle_peers_to_background`: does a front agent's unmarked message to a peer front agent the person is not with go to that project's background agent instead of being held? Off by default; only a TOML `true` turns it on."""
-    return _cfg.get("front", "idle_peers_to_background", default=False) is True
 
 
 def result_turn_agents() -> list[str]:
@@ -125,20 +120,6 @@ def his_items(subject: Iterable[str] | str) -> list[str]:
         except Exception:  # noqa: BLE001  — a model that cannot be derived: no step of his is found, the decision test above stood alone
             continue
     return out
-
-
-def stays_with_front(subject: Iterable[str] | str) -> bool:
-    """Does the subject name an item whose news stays with a front agent, so `[front] idle_peers_to_background` leaves the message as it is: an open item whose needs hold `decision`, or an item he asked an agent to tell
-    him about (its `tell_him`, whichever agent, a closed item's too)? An item that cannot be read counts: the doubt keeps the message where it goes without the key."""
-    for gid in _gids(subject):
-        try:
-            it = _load(gid)
-            meta = it.get("metadata") or {}
-            if _tell_him_of(meta) or (it.get("status") == "open" and _waits_decision(meta)):
-                return True
-        except Exception:  # noqa: BLE001
-            return True
-    return False
 
 
 def names_his(agent: str, subject: Iterable[str] | str) -> bool:
