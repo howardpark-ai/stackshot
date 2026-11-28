@@ -201,7 +201,7 @@ def close_extra_args(args: dict[str, Any]) -> list[str]:
 
 def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, dropped: Any, outcome: str, reason: str, outcome_text: str, superseded_by: str,
                    extra: list[str], tool: bool = False) -> tuple[str, str, str, str, str, list[str]]:
-    """A close that leaves out its outcome, reason or outcome_text, on an item whose every step is done or dropped (counting the steps this call marks), is accepted: the server
+    """A close that leaves out its outcome, reason or outcome_text, on an item with no open step and at least one done (counting the steps this call marks), is accepted: the server
     writes outcome done, the reason CLOSE_REASON_DEFAULT and the bullet CLOSE_TEXT_DEFAULT for the parts the caller left out (the parts it gave stay as given). → (outcome, reason, outcome_text,
     the line that tells what the server wrote ("" when nothing was defaulted), why nothing could be ("" when the close is complete, or is not one this default reads),
     the fields the server wrote (the item's mark, OUTCOME_SERVER_KEY)).
@@ -237,6 +237,9 @@ def _close_default(gid: str, item_was: dict[str, Any], keeper: str, done: Any, d
     if not steps:
         return outcome, reason, outcome_text, "", ("Nothing is written and the item stays open: " + ("it has no steps and no outcome, so the server cannot fill in " if len(wrote) == 3 else "it has no steps, so the server cannot fill in ")
                                                    + f"{', '.join(wrote)}. Pass {them} yourself" + ("" if tool else ", or add the steps and mark them")), []
+    done_now = set(_steps.resolve(steps, done, "done")) - dropped_now
+    if not done_now and not any(st["status"] == _steps.DONE for st in steps):
+        return outcome, reason, outcome_text, "", "", []      # every step dropped and none done: nothing was done to record as done, so the close is judged as before (gate_close's refusal)
     any_dropped = any(st["status"] == _steps.DROPPED for st in steps) or bool(dropped_now)
     reason_d, text_d = (CLOSE_REASON_DROPPED, CLOSE_TEXT_DROPPED) if any_dropped else (CLOSE_REASON_DEFAULT, CLOSE_TEXT_DEFAULT)      # a step dropped is no step done: the words say "done or dropped"
     told = (f"{_gh.shown(gid)} closed as done with every step done or dropped; the call left out {', '.join(wrote)}, so the server wrote "
@@ -803,9 +806,14 @@ def update_unlocked(
         clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     # The server's default end day for a wait goes only where this write would be refused for a wait with no end, and never while the item waits on the owner (gates.owner_waiting: as it
-    # stood, read here, and as the write leaves it, read again before the save) or when the call gives a date of its own: `end_ok`. Each default made below the model guards keeps the refusal
-    # it stands in for (`end_refusals`), which is raised after all if the item as the write leaves it waits on the owner.
-    end_ok = not (wake or ask_by_given) and not _gates.owner_waiting(item_was.get("metadata") or {})
+    # stood, read here, and as the write leaves it, read again before the save), when the item held an end before it (gates.holds_end: any value in until, wake or ask_by, the old ask_by
+    # with no kind included: the server never replaces or pushes out an end), or when the call gives an end of its own or "none" for one, or clears or drops a wait or its end: `end_ok`.
+    # Those writes are judged as before the default existed. Each default made below the model guards keeps the refusal it stands in for (`end_refusals`), which is raised after all if
+    # the item as the write leaves it waits on the owner.
+    was_m = item_was.get("metadata") or {}
+    drops_end = bool(wake or ask_by.strip() or clear_wake or clear_wait or clear_hold or clear_after or clear_recycle or wait_kind.strip().lower() in h.ask_none or _wlw.clearing(waits)
+                     or (after is not None and (after == [] or (isinstance(after, str) and after.strip().lower() in h.ask_none))))
+    end_ok = not drops_end and not _gates.holds_end(was_m) and not _gates.owner_waiting(was_m)
     end_refusals: list[str] = []
     end_day = ""                  # the day a wait_basis with no date ends on, which the server chose (below): marked as the server's once the wait is stored
     meta = dict(item.get("metadata") or {})

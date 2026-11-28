@@ -14,13 +14,15 @@ one is refused, and the date goes in until. A wait_kind with no date is never re
 item's words, else a suggested one, else tomorrow, and says which; a park with a wait_kind and no date takes the same
 date, marked as set by the server. A wait this write would leave with no end day (an after link, a wait stored earlier,
 needs=external, a park, or a wait on a time with no date) is not refused either: the server stores its default backstop
-day, 14 days from today (or the date ahead an old ask_by of the item still holds), marks it as set by the server and
+day, 14 days from today, marks it as set by the server and
 says so in the reply; a park sent with no date and a wait_basis that names a date ahead ends on that date instead (a
 basis that names none is refused as before). Its mover
 replaces that day with the real one (until). None of this while
 the item waits on {{OWNER}} in any form, as it stands or as the write leaves it (needs=decision or his name, an ask,
-options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open), nor beside a
-date of your own: the wait is judged as before, so one with no end is refused. A list of waits still needs its until.
+options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open), nor when the
+item already holds an end in any field (an old ask_by included, past or ahead), nor beside a date of your own or "none"
+for one, nor in a write that clears or drops a wait or its end: the wait is judged as before, so one with no end is
+refused, and an end the item holds is never replaced. A list of waits still needs its until.
 The dates you give yourself keep the cap rules. Every open item has a mover (the one party whose
 move it is now: a session, {{OWNER}}, an outside party, or the item it waits `after`). An open item waits on its real
 dates only (until, due): no expected time is derived for any item, and a parked item waits until its date or its

@@ -9,7 +9,7 @@ merged\n- live on the box") (outcome_text: short `- ` bullets, every line `- ` i
 planned: complete(item_id="board#N", sender="my-x", outcome="dropped", reason="No longer needed", outcome_text="- The
 export moved to another team"); replaced: complete(item_id="board#N", sender="my-x", outcome="superseded",
 superseded_by="board#M", reason="Merged into board#M", outcome_text="- Scope moved to board#M"); outcome, reason and
-outcome_text go together (except for an item whose every step is done or dropped, below: there a missing reason or outcome_text is filled in, also when you sent outcome="done" alone). {{CLOSE_FORM}}A close settles no mover and ends no hand-off line: it drops the mover,
+outcome_text go together (except for an item with no open step and at least one step done, below: there a missing reason or outcome_text is filled in, also when you sent outcome="done" alone). {{CLOSE_FORM}}A close settles no mover and ends no hand-off line: it drops the mover,
 then and any wait, and a closed item shows no hand-off. Never delete items. The reply shows the closed item and lists
 the project anchors that were scoped to this item and now have no open item left, for the project's builder, else its
 -main agent, to keep (project-wide) or drop — nothing is removed by a completion. sender = your own session (name or

@@ -490,7 +490,8 @@ check("6 ...and neither pass wakes it", "woke" not in mt(610) and mt(610).get("w
 item(611, needs=[], ask_by=PAST6); item(618, needs=[])
 out6, plain6 = tried6(611, after=["a601"]), tried6(618, after=["a601"])
 watching_svc.watch_pass(); wakes_svc.wake_pass()
-check("6 an after link alone on such an item is judged as on an item with no date (the past ask_by is no end for it): the server takes its default day and marks it, nothing wakes it early", not out6.startswith("REFUSED") and not plain6.startswith("REFUSED") and mt(611).get("until_server") and W.stored_until(mt(611)) == mt(611).get("until_server") and not mt(611).get("ask_by") and mt(618).get("until_server") and "woke" not in mt(611), (out6[-300:], plain6[-300:], mt(611)))
+check("6 an after link alone on such an item is refused for its missing end as before: the item holds an end field (the past ask_by), so the server makes no default end and nothing wakes it", out6.startswith("REFUSED") and "has no end" in out6 and "woke" not in mt(611) and not mt(611).get("until_server"), (out6[-300:], mt(611)))
+check("6 ...on an item that holds no date the same write takes the server's default end, marked", not plain6.startswith("REFUSED") and mt(618).get("until_server") and W.stored_until(mt(618)) == mt(618).get("until_server"), (plain6[-300:], mt(618)))
 item(612, needs=["external"], ask_by=w(3))
 out6 = tried6(612, wait_kind="relay", wait_event="the vendor's reply")
 check("6 an ask_by still ahead stays the wait's date", (W.stored_until(mt(612)) or mt(612).get("ask_by")) == w(3), (out6[-500:], mt(612)))
@@ -596,13 +597,9 @@ for shape6, stored6 in LIVE6.items():
         check(f"6 ...a confirm and a message that names it are not refused by the guard ({n6})", not c6 and "has no end" not in c6m and mt(n6).get("ask_by") == day6, (c6, c6m[-400:], mt(n6)))
         for label6, kw6 in (("needs", dict(needs=["external"])), ("the event", dict(wait_event="another reply"))):
             out6 = tried6(n6, **kw6)
-            if when6 == "past":
-                check(f"6 ...a write of {label6} alone restates the wait and is no longer refused for its missing end ({n6}): the server stores its default day, marks it, and the old ask_by is not left beside it", not out6.startswith("REFUSED") and bool(W.stored_until(mt(n6))) and bool(mt(n6).get("until_server")) and not mt(n6).get("ask_by"), (out6[-500:], mt(n6)))
-            else:
-                check(f"6 ...a write of {label6} alone restates the wait and takes the day the ask_by already carried as its end, not the 14 days, marked as the server's ({n6})", not out6.startswith("REFUSED") and W.stored_until(mt(n6)) == day6 and mt(n6).get("until_server") == day6 and not mt(n6).get("ask_by"), (out6[-500:], mt(n6)))
-        repair6 = w(1) if when6 == "ahead" else w(4)      # a repair must be a real change: for the "ahead" day (w(3)) a later date is no repair at all, just the clock pushed out with nothing else new, which the stale-wait guard itself refuses
-        out6 = tried6(n6, until=repair6, wait_event="another reply")
-        check(f"6 ...the same write with an until repairs it ({n6}): a wait something can end, no ask_by left over", not out6.startswith("REFUSED") and not stuck6(n6) and W.stored_until(mt(n6)) == repair6 and no_old(mt(n6)), (out6[-500:], mt(n6)))
+            check(f"6 ...a write of {label6} alone restates the wait and is refused for its missing end ({n6}), naming until", out6.startswith("REFUSED") and "has no end" in out6 and "until=" in out6, (out6[-500:], mt(n6)))
+        out6 = tried6(n6, until=w(4), wait_event="another reply")
+        check(f"6 ...the same write with an until repairs it ({n6}): a wait something can end, no ask_by left over", not out6.startswith("REFUSED") and not stuck6(n6) and W.stored_until(mt(n6)) == w(4) and no_old(mt(n6)), (out6[-500:], mt(n6)))
 item(720, needs=["external"], ask_by=w(3), wait_event="the vendor's reply")
 out6 = tried6(720, wait_kind="relay")
 check("6 a kind given to an item with an ask_by ahead takes that date as its end", not out6.startswith("REFUSED") and WK.watches(rd(720)) and (W.stored_until(mt(720)) or mt(720).get("ask_by")) == w(3), (out6[-500:], mt(720)))

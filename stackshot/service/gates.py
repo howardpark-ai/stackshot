@@ -831,15 +831,21 @@ def owner_waiting(meta: Any) -> bool:
         return True
 
 
-def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, before: dict[str, Any] | None = None, no_end: bool = False) -> str:
+def holds_end(meta: Any) -> bool:
+    """Does the item hold an end in any field (until, the working fields wake and ask_by, the old ask_by with no wait_kind included, and the date fields older writes left, states.DATE_FIELDS):
+    any value there, a date past or ahead or one that is no date. While it does, the server makes no default end: it never replaces or pushes out an end the item holds (update.py reads
+    it on the item as it stood, _wait_end_fill on the item as the write leaves it)."""
+    m = meta if isinstance(meta, dict) else {}
+    return any(_model.clean(m.get(k)) for k in ("until", "wake", "ask_by", *_states.DATE_FIELDS))
+
+
+def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, before: dict[str, Any] | None = None) -> str:
     """Called only where the write would be refused for a wait with no end (the model guards' no_end, or a time wait with no date; update.py's park with nothing to end it): a wait on
     another item's close, an anchor, a relay or an event with no end, or a time wait with no date. Store the default backstop day (model/migration.DEFAULT_END_DAYS from today) as its
     end, mark it as the server's (model.SERVER_END_KEY), and tell the caller (fix kind wait-end-defaulted). The day is stored as `until` (the one date a wait stores) for a time wait and for a
-    create; an update's other kinds carry it in their working field (until_write.slot_of) until update.py folds it. A date ahead that the item already holds in an old field the guards do
-    not count as its end (an ask_by stored with no wait_kind, read as no end by a write that restates the wait) is taken as that day instead of the 14 days, marked and told the same way;
-    a date in the past is no end and goes; `no_end` = the guards refused the wait for its missing end (their no_end), so a date the item holds is one they do not count. Without it
-    (a time wait with no date, a park with none) a date in any field, or a field that holds no date at all, leaves the write judged as before. The
-    caller's own date never reaches here (gate_model's end_default, update.py's end_ok). Never while the item waits on the owner
+    create; an update's other kinds carry it in their working field (until_write.slot_of) until update.py folds it. An end the item holds in any field (holds_end: a date past or
+    ahead, the old ask_by with no wait_kind included, or a value that is no date) is never replaced: the write is judged as before. The caller's own date, a call that clears or drops
+    a wait or its end, and an item that held an end before the write never reach here (gate_model's end_default, update.py's end_ok). Never while the item waits on the owner
     (owner_waiting), as the write leaves it or as it stood before (`before`: an update's metadata before the write). A failure here leaves the item as the write made it, and the guards
     judge it so. → the line told ("" when no day was stored)."""
     meta = item.get("metadata")
@@ -847,14 +853,14 @@ def _default_wait_end(item: dict[str, Any], gid: str, creating: bool, before: di
         return ""
     kept = dict(meta)
     try:
-        return _wait_end_fill(item, meta, gid, creating, no_end)
+        return _wait_end_fill(item, meta, gid, creating)
     except Exception as e:  # noqa: BLE001  — the default is an extra: on a failure the item is left as the write made it, and the guards refuse a wait with no end as they did before it
         meta.clear(); meta.update(kept)
         print(f"wait end: {gid or 'a new item'} not defaulted: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return ""
 
 
-def _wait_end_fill(item: dict[str, Any], meta: dict[str, Any], gid: str, creating: bool, no_end: bool) -> str:
+def _wait_end_fill(item: dict[str, Any], meta: dict[str, Any], gid: str, creating: bool) -> str:
     """_default_wait_end's work on the item's metadata, once its checks have passed."""
     h = _hooks()
     project = str(meta.get("project") or "")
@@ -869,19 +875,11 @@ def _wait_end_fill(item: dict[str, Any], meta: dict[str, Any], gid: str, creatin
         return ""
     if w.kind == "time" and meta.get("recycle"):
         return ""
-    held = [(k, _model.clean(meta.get(k))) for k in ("until", "wake", "ask_by")]
-    if not no_end and (w.until or (w.backstop if w.kind != "time" else "") or any(v for _, v in held)):
-        return ""                                        # the guards did not find the end missing: a date stands (what is missing is another input), and the write is judged as before
-    if any(v and not _uw._dated(v) for _, v in held):
-        return ""                                        # a field holds a value that is no date: the write is judged as before, and that refusal names it
-    now = time.time()
-    ahead = sorted((ep, v, k) for k, v in held if v and (ep := _wt.wake_epoch(v)) is not None and ep > now)      # a date the item holds that the guards read as no end (an old ask_by with no kind)
+    if w.until or (w.backstop if w.kind != "time" else "") or holds_end(meta):
+        return ""                                        # the item holds an end in some field (a date, past or ahead, or a value that is none): the server never replaces it, and the write is judged as before
     anchor_hold = w.kind == "time" and bool(meta.get("hold")) and not creating and bool(gid and h.scoped_anchors(project, gid))      # a hold with no date on an item an anchor is scoped to waits on that anchor's notice (wakes.anchor_release reads the hold flag): it stays a hold, the day beside it its backstop, never a plain time wait the notice could no longer wake
     slot = "until" if (creating or w.kind == "time") else _uw.slot_of(w.kind)
-    day = ahead[0][1] if ahead else (_pages.zone_now().date() + dt.timedelta(days=_mig.DEFAULT_END_DAYS)).isoformat()      # one rule for every kind: the expected time an awaited item once carried is retired (states.RETIRED_FIELDS), so it is not read
-    for k_, _v in held:
-        if k_ != slot:
-            meta.pop(k_, None)                           # a past date, or the one taken as the end: no other date stays beside it
+    day = (_pages.zone_now().date() + dt.timedelta(days=_mig.DEFAULT_END_DAYS)).isoformat()      # one rule for every kind: the expected time an awaited item once carried is retired (states.RETIRED_FIELDS), so it is not read
     meta[slot] = day      # the field this kind reads (slot_of): an update judges the old working fields (update.py folds this one into `until` before it saves); a time wait's until stands on its own
     if not _uw.kind_of(meta) and not synthetic and not anchor_hold and not (w.kind == "anchor" and not meta.get("wait_anchor") and not meta.get("hold")):
         meta["wait_kind"] = w.kind                       # a date with no kind would read as a wait on a time: the wait keeps the kind the item's fields gave it. Not a bare hold (synthetic: it stays a park on the day), nor an anchor wait read from a scoped anchor alone on an item that holds no flag: stamped, it would wait for a notice on a wait_anchor it does not have, and the anchor's notice (which releases a hold or a date with no kind) would pass it by; a held one keeps the stamp, as its release reads the flag
@@ -889,7 +887,7 @@ def _wait_end_fill(item: dict[str, Any], meta: dict[str, Any], gid: str, creatin
     if w.kind == "time" and not anchor_hold:
         for k_ in ("hold", "hold_set", "wake"):
             meta.pop(k_, None)                           # the day is the wait's one date, stored as until: no hold flag or working wake beside it
-    why = f"the date its old {ahead[0][2]} field held, which no longer counts as an end by itself" if ahead else f"{_mig.DEFAULT_END_DAYS} days from today"
+    why = f"{_mig.DEFAULT_END_DAYS} days from today"
     if anchor_hold:
         why += "; the hold stays, so the notice of the anchor scoped to the item still releases it first"
     line = (f"the wait had no {'date' if w.kind == 'time' else 'end'}, so the server stored {day} as its end ({why}); it is a backstop day set by the server, not a promise: the day it comes back to someone when nothing has arrived. "
@@ -914,7 +912,8 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
     `defers_text`: the same for the next_defers guard (a line that defers on another open item in words while `after` does not name it): the lines the write sets, "" when it leaves next alone, None on a create.
     `old_end_ok`, `date_ends`: what an ask_by stored with no wait_kind counts for (model_guards.check).
     `before`: an update's metadata as the item stood before the write, for the default end's test of a wait on the owner (_default_wait_end). `end_default` = False: the call gave a date of its
-    own (or the item waits on the owner), so a wait it leaves with no end is refused as before and no default end is made."""
+    own or "none" for one, cleared or dropped a wait or its end, or the item held an end or waited on the owner before it, so a wait it leaves with no end is refused as before and no
+    default end is made."""
     h = _hooks()
     if not h.model_guards_on() or item.get("status") != "open":
         return ""
@@ -928,7 +927,7 @@ def gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None"
                          defers_text=defers_text, named_open=h.open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given, basis_kept=basis_kept, old_end_ok=old_end_ok, date_ends=date_ends)[0]
     try:
         probs = _run()
-        if not strict and end_default and any(p.key in ("no_end", "wait_input") for p in probs) and _default_wait_end(item, gid, creating, before, any(p.key == "no_end" for p in probs)):      # where the check would refuse a wait with no end (a time wait: no date), the default backstop day is stored (the line goes to the reply through call_log.fixed) and the item is judged again with it; a wait whose input is missing for another reason stays refused for that
+        if not strict and end_default and any(p.key in ("no_end", "wait_input") for p in probs) and _default_wait_end(item, gid, creating, before):      # where the check would refuse a wait with no end (a time wait: no date), the default backstop day is stored (the line goes to the reply through call_log.fixed) and the item is judged again with it; a wait whose input is missing for another reason stays refused for that
             probs = _run()
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)

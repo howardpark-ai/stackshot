@@ -260,10 +260,10 @@ waits on {{OWNER}}). The wait ends when they close.
 How a close ended: done | dropped (won't do, no longer needed, or can't) | superseded (replaced by another item:
 reworded, merged or split; send superseded_by=<its id>). With reason and outcome_text, all three are given:
 outcome="done", reason="Export shipped in PR 12", outcome_text="- PR 12 merged". Leave all three out only when the item
-has steps and every step is done or dropped: the server then closes it as done and writes the parts you left out
+has no open step and at least one step done: the server then closes it as done and writes the parts you left out
 ("closed with every step done (set by the server)" as the reason, "- every step is done (set by the server)" as the
 outcome bullet; "done or dropped" in both when a step was dropped), and the reply says so. The same fill-in applies when
-you send outcome="done" alone, with the reason or the bullet left out. With an open step, or no step at all, a close with no outcome is refused and
+you send outcome="done" alone, with the reason or the bullet left out. With an open step, no step done, or no step at all, a close with no outcome is refused and
 nothing is written. So is one that passes anything besides outcome, reason, outcome_text (or description), superseded_by,
 said, done and dropped, one that marks a step of his, one on an item that waits on {{OWNER}} in any form (needs=decision or his name, an ask, options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open),
 or a done check not passed: there every part of the close is yours to give.
@@ -420,10 +420,10 @@ it stands). The server never writes an ask, closes an item or answers for {{OWNE
 ## text CLOSE_REFUSAL
 A close (complete, or update with status=completed) carries outcome: done | dropped (won't do, no longer needed, or
 can't) | superseded (replaced by another item: reworded, merged or split), with superseded_by = the replacing item's
-id (open or completed). A close that leaves out outcome, reason and outcome_text is accepted when the item has at least
-one step and every step is done or dropped: the server closes it as done, writes "closed with every step done (set by the
+id (open or completed). A close that leaves out outcome, reason and outcome_text is accepted when the item has no open
+step and at least one step done: the server closes it as done, writes "closed with every step done (set by the
 server)" and "- every step is done (set by the server)" for the parts left out (also when you send outcome="done" with the reason or the bullet left out; "done or dropped" when a step was dropped), and the reply says so; with an open step
-(named by number) or no step, with any argument besides outcome, reason, outcome_text (or description), superseded_by, said,
+(named by number), no step done or no step, with any argument besides outcome, reason, outcome_text (or description), superseded_by, said,
 done and dropped, marking a step of his, on an item that waits on {{OWNER}} in any form (needs=decision or his name, an ask, options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open),
 or with a done check not passed, it is refused and nothing is written. reason: one line, the end state reached and why, at most {{CLOSE_REASON_MAX}} characters
 (longer is refused); and outcome_text: how it ended, as short `- ` bullets (at most {{DESC_MAX_LINES}} lines of
@@ -451,11 +451,11 @@ opens with another session's name stays open, so the close is refused, naming th
 it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no
 marks). It tells the mover of every other open item that names the closed item (board#N), one message per mover (the
 first 8, then a count); the items that wait on it through after are woken; the closer is not told. A close that leaves out
-outcome, reason and outcome_text is accepted when the item has at least one step and every step is done or dropped (steps
+outcome, reason and outcome_text is accepted when the item has no open step and at least one step done (steps
 marked in the same call count): the server closes it as done, writes "closed with every step done (set by the server)" as
 the reason and "- every step is done (set by the server)" as the outcome bullet for the parts left out ("done or dropped"
 when a step was dropped; also for outcome="done" sent with the reason or the bullet left out), keeps the parts
-given, and says so in the reply; with an open step (named by number) or no step at all, with any argument besides
+given, and says so in the reply; with an open step (named by number), no step done or no step at all, with any argument besides
 outcome, reason, outcome_text (or description), superseded_by, said, done and dropped, marking a step of his, on an
 item that waits on {{OWNER}} in any form (needs=decision or his name, an ask, options he has not answered, a your-call or your-step, mover={{OWNER}}, a step line of his still open), or with a done check
 not passed, nothing is written and the item stays open.
