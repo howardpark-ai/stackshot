@@ -44,6 +44,7 @@ from pathlib import Path
 
 from stackshot.core import agentbox as _agentbox  # noqa: E402
 from stackshot.core import config as _cfg  # noqa: E402
+from stackshot.core import behind_door as _door  # noqa: E402
 from stackshot.projects import pages as _pages  # noqa: E402
 from stackshot.projects import project_registry as _preg  # noqa: E402  — roles.json and projects.json follow a publish
 from stackshot.web.board_home import _board_home_drop  # noqa: E402  — a publish drops the board's kept home
@@ -236,6 +237,7 @@ def serving() -> None:
     address or an ssh alias of the server's own box reads as another box). Only those two programs call it, when they start; importing the server's modules does not, so a command or a pass run by hand still asks."""
     global _SERVING
     _SERVING = True
+    _door.serving()         # a members file that is not there is a fault here, and said so (core/behind_door.py)
 
 
 def _check_host(argv: list[str]) -> None:

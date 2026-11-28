@@ -382,6 +382,35 @@ finally:
     for d in locked:
         os.chmod(d, 0o700)
 
+# ---- what a missing members file says: a tool that only reads the config is quiet, the board server is not; a file that is there and fails says so in both
+def said_for(path, server):
+    saved = cfgmod.CFG, door._SERVING
+    cfgmod.CFG, door._SERVING = running(path), server
+    door._told.clear(); door._cache.clear()
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            door.people()
+    finally:
+        cfgmod.CFG, door._SERVING = saved
+        door._told.clear()
+    return err.getvalue()
+
+
+gone_file = os.path.join(T, "never-held.json")
+got = said_for(gone_file, False)
+check("quiet: a missing members file says nothing to a process that only reads the config", got == "", got)
+got = said_for(gone_file, True)
+check("quiet: a missing members file is said by the board server", got.startswith("board behind a front door: members_file ") and "cannot be read" in got, got)
+for label, path in (("a folder", os.path.join(T, "a-folder.json")), ("a file that is not JSON", write("{broken")), ("a link to nothing", os.path.join(T, "dangling.json"))):
+    for server in (False, True):
+        got = said_for(path, server)
+        check(f"quiet: {label} is said{' by the board server' if server else ' by a process that only reads the config'}", got.startswith("board behind a front door: members_file ") and got.count(chr(10)) == 1, got)
+door.serving()
+check("quiet: serving() marks the process as the server", door._SERVING is True)
+door._SERVING = False
+
+
 if fails:
     print(f"\n{len(fails)} failures in {len(ran)} checks"); sys.exit(1)
 print(f"ok: front door members scenario, {len(ran)} checks")
